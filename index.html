@@ -82,15 +82,13 @@
             margin-bottom: 20px;
             border: 2px solid rgba(255, 255, 255, 0.3);
             backdrop-filter: blur(10px);
-            /* === 恢復顯示 === */
             display: block;
         }
         .volume-level {
             height: 100%;
             width: 0%;
             background: linear-gradient(90deg, #4CAF50, #8BC34A);
-             /* === 使用真實音量條的 transition === */
-            transition: width 0.1s ease-out;
+            transition: width 0.1s ease-out; /* Keep fast transition for real meter */
             box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
         }
         .settings {
@@ -343,7 +341,7 @@
              zh: { pageTitle: "多國語言即時逐字稿工具", mainTitle: "多國語言即時逐字稿工具", langLabel: "辨識語言:", startBtn: "開始辨識", stopBtn: "停止辨識", exportBtn: "輸出逐字稿", toggleUiLangBtn: "Switch to English", placeholder: "點擊「開始辨識」後,你的逐字稿將會顯示在這裡...", micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。", apiNotSupportedError: "您的瀏覽器不支援 Web Speech API,請使用最新版本的 Chrome 瀏覽器。", controlBtnTooltipStart: "點擊以開始語音辨識", controlBtnTooltipStop: "點擊以停止語音辨識", exportBtnTooltip: "將逐字稿匯出為 .txt 檔案", exportBtnTooltipDisabled: "停止辨識後才能匯出", languageSelectorTooltip: "選擇要進行辨識的語言", uiLangToggleTooltip: "切換使用者介面語言", warningText: "本工具將把收到音檔上傳 Google 請謹慎使用", privacySummary: "使用須知 & 隱私聲明", howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google の伺服器進行處理。請務必了解以下事項：", suitableScenariosTitle: "適合的使用場景：", suitableScenarios: [ "輔助聆聽公開的線上演講、課程。", "轉錄影片、Podcast 等公開內容。", "個人學習、語言練習。" ], riskScenariosTitle: "高風險場景 (絕對不要使用)：", riskScenarios: [ "任何涉及<strong>商業機密</strong>或公司內部資訊的會議。", "任何涉及<strong>個人隱私</strong>的對話 (例如與醫生、律師的對話)。", "任何包含<strong>敏感個資</strong>的內容 (如身分證號、密碼等)。" ], privacyConclusion: "針對敏感內容,強烈建議使用像 Whisper 這樣完全在您本機離線運作的工具,以確保資料安全。" }
         };
 
-        // --- (Global Vars) ---
+        // --- (Global Vars - unchanged) ---
         let currentUiLang = 'zh';
         let startTime, endTime;
         let transcriptSegments = [];
@@ -352,8 +350,7 @@
         let currentInterimTranscript = '';
         let isManualStop = false;
         let restartTimer = null;
-        // === 恢復音量條變數 ===
-        let audioContext, microphoneStream, analyser, animationFrameId;
+        let audioContext, microphoneStream, analyser, animationFrameId; // Restore meter vars
 
         // --- (UI Functions - unchanged) ---
         function setUiLanguage(lang) { /* ... */
@@ -395,7 +392,7 @@
             setUiLanguage(newLang);
         });
 
-        // --- (Web Speech API Core Logic - Robust Continuous Mode) ---
+        // --- (Web Speech API Core Logic - Robust Continuous Mode + Real Meter) ---
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -414,12 +411,9 @@
                 updateButtonStates();
                 currentFinalTranscript = '';
                 currentInterimTranscript = '';
-                // === 啟動真實音量條 ===
-                // Only start meter if not on mobile (original condition)
+                 // Start meter *after* recognition starts
                 if (!isMobile) {
-                     startAudioMeter().catch(err => {
-                        console.warn("Could not start audio meter:", err);
-                     });
+                     startAudioMeter().catch(err => console.warn("Could not start audio meter:", err));
                 }
             };
 
@@ -431,13 +425,13 @@
                     isRecognizing = false;
                     isManualStop = true;
                     updateButtonStates();
-                    stopAudioMeter(); // Ensure meter stops on fatal error
+                    stopAudioMeter(); // Stop meter on error
                 } else {
                     console.warn(`⚠️ REC: Non-fatal error (${event.error}). Letting onend handle restart.`);
+                     // Don't stop meter on non-fatal errors like 'no-speech'
                 }
             };
 
-            // === onend: Stops meter, Saves utterance, Restarts ===
             recognition.onend = () => {
                 console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
@@ -457,10 +451,10 @@
                     }
                     updateTranscriptDisplay();
                 }
-                currentFinalTranscript = ''; // Reset display vars
+                currentFinalTranscript = '';
                 currentInterimTranscript = '';
+                // Volume bar is already reset by stopAudioMeter()
 
-                // Restart logic (unchanged)
                 if (isManualStop || !isRecognizing) {
                     console.log('...Stop condition met. Cleaning up.');
                     isRecognizing = false;
@@ -474,7 +468,7 @@
                         if (isRecognizing && !recognitionActive) {
                             try {
                                 console.log('🔄 REC: Auto-restarting...');
-                                recognition.start(); // onstart will restart the meter
+                                recognition.start(); // onstart will restart meter
                             } catch (e) {
                                 console.error('Failed to auto-restart:', e);
                                 isRecognizing = false;
@@ -487,28 +481,31 @@
                 }
             };
 
-            // === onresult: Updates display only, Reconstructs full view ===
+            // === onresult: Updates display only, using refined logic ===
             recognition.onresult = (event) => {
-                let interim = '';
-                let final_so_far = '';
+                let final_parts = '';
+                let interim_part = ''; // Only the *last* non-final part
                 console.log(`🎙️ REC: onresult (length: ${event.results.length}, index: ${event.resultIndex})`);
 
+                // Iterate through all results for the current recognition cycle
                 for (let i = 0; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
                     const isFinal = event.results[i].isFinal;
 
                     if (isFinal) {
-                        final_so_far += transcript + ' ';
+                        final_parts += transcript + ' ';
                     } else {
-                        interim = transcript;
+                        interim_part = transcript; // Overwrite with the latest interim guess
                     }
                 }
-                currentFinalTranscript = final_so_far.trim();
-                currentInterimTranscript = interim;
+
+                currentFinalTranscript = final_parts.trim();
+                currentInterimTranscript = interim_part; // Store the latest interim guess
 
                 updateTranscriptDisplay();
-                // Volume meter updates independently via requestAnimationFrame
+                // Real volume meter updates independently
             };
+
 
             function updateTranscriptDisplay() {
                 const historyContent = transcriptSegments.map(segment => `<span class="final_span">${formatTime(segment.timestamp)} ${segment.text}</span>`).join('\n');
@@ -532,12 +529,11 @@
                     isRecognizing = false;
                     recognitionActive = false;
                     clearTimeout(restartTimer);
-                    stopAudioMeter(); // *** Stop meter immediately ***
+                    stopAudioMeter(); // Stop meter NOW
                     try {
-                        recognition.stop(); // Triggers onend
+                        recognition.stop();
                     } catch (e) {
                         console.warn('Error stopping recognition:', e);
-                        // Manual cleanup if stop fails
                         languageSelector.disabled = false;
                         endTime = new Date();
                         updateButtonStates();
@@ -562,10 +558,10 @@
                             console.error('Failed to start recognition:', e);
                             if (e.message.includes('already started')) {
                                 console.warn('...forcing stop and restart.');
-                                try { recognition.stop(); } catch(stopErr) {} // Force stop
-                                clearTimeout(restartTimer); // Cancel any pending restart
-                                stopAudioMeter(); // Ensure meter is stopped
-                                setTimeout(() => { // Delay before restarting
+                                try { recognition.stop(); } catch(stopErr) {}
+                                clearTimeout(restartTimer);
+                                stopAudioMeter();
+                                setTimeout(() => {
                                     try {
                                         isManualStop = false;
                                         isRecognizing = true;
@@ -590,7 +586,7 @@
 
                 const allSegmentsForExport = [...transcriptSegments];
                 const lingeringUtterance = (currentFinalTranscript + currentInterimTranscript).trim();
-                 if (endTime && lingeringUtterance) {
+                 if (endTime && lingeringUtterance) { // Only add if manually stopped *during* speech
                      const lastSegment = allSegmentsForExport[allSegmentsForExport.length - 1];
                      const isDuplicate = lastSegment &&
                                         lastSegment.text === lingeringUtterance &&
@@ -639,10 +635,9 @@
             return `${Y}-${M}-${D} ${h}:${m}:${s}`;
         }
 
-        // === 恢復真實音量條函式 ===
+        // === Real Volume Meter Functions (Restored) ===
         async function startAudioMeter() {
             console.log("🎤 Attempting to start audio meter...");
-            // Check if already running or if recognition isn't active
              if (audioContext || !isRecognizing) {
                  console.log("...Audio meter already running or recognition stopped.");
                  return;
@@ -653,7 +648,13 @@
             }
             try {
                 microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                // Use existing audioContext if available and running, else create new
+                if (!audioContext || audioContext.state === 'closed') {
+                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                     console.log("...New AudioContext created.");
+                } else {
+                     console.log("...Reusing existing AudioContext.");
+                }
                 analyser = audioContext.createAnalyser();
                 const source = audioContext.createMediaStreamSource(microphoneStream);
                 source.connect(analyser);
@@ -661,9 +662,9 @@
                 console.log("🔊 Audio meter started successfully.");
             } catch (err) {
                  console.error("Error starting audio meter:", err);
-                 // Clean up if partially started
-                 stopAudioMeter();
-                 throw err; // Re-throw error
+                 stopAudioMeter(); // Clean up if start failed
+                 // Don't re-throw, just warn. Meter is optional.
+                 // throw err;
             }
         }
 
@@ -673,60 +674,59 @@
                 animationFrameId = null;
                  console.log("⏹️ Audio meter drawing stopped.");
             }
-            // Important: Only stop tracks if they exist
             if (microphoneStream) {
                 microphoneStream.getTracks().forEach(track => track.stop());
                 microphoneStream = null;
                 console.log("🎤 Microphone stream stopped.");
             }
-            // Close context only if it exists and is not already closed
-            if (audioContext && audioContext.state !== 'closed') {
+            // Only close context if it exists and is running/suspended
+            if (audioContext && (audioContext.state === 'running' || audioContext.state === 'suspended')) {
+                 // Check state before closing
                 audioContext.close().then(() => {
                     console.log("🎧 Audio context closed.");
-                    audioContext = null; // Ensure it's nullified after closing
+                    audioContext = null;
                     analyser = null;
-                 }).catch(err => console.error("Error closing audio context:", err));
+                 }).catch(err => {
+                    console.error("Error closing audio context:", err);
+                    // Still nullify even if closing failed
+                    audioContext = null;
+                    analyser = null;
+                 });
+            } else if (audioContext && audioContext.state === 'closed') {
+                 console.log("...Audio context already closed.");
+                 audioContext = null; // Ensure nullified
+                 analyser = null;
             } else {
-                 // Ensure vars are nullified even if context wasn't open/active
-                audioContext = null;
-                analyser = null;
+                 audioContext = null;
+                 analyser = null;
             }
-
-            // Always reset visual level
             volumeLevel.style.width = '0%';
         }
 
 
         function drawVolume() {
-            // Check if analyser exists before using it
             if (!analyser || !isRecognizing) {
-                 // If analyser is gone or recognition stopped, stop the loop
                  if (animationFrameId) {
                     cancelAnimationFrame(animationFrameId);
                     animationFrameId = null;
                  }
-                 volumeLevel.style.width = '0%'; // Ensure reset
+                 volumeLevel.style.width = '0%';
                 return;
             }
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteTimeDomainData(dataArray); // Get waveform data
+            analyser.getByteTimeDomainData(dataArray);
             let sumSquares = 0.0;
             for (const amplitude of dataArray) {
-                // Convert to -1.0 to +1.0 range
                 const a = (amplitude / 128.0) - 1.0;
                 sumSquares += a * a;
             }
-            // Calculate RMS (Root Mean Square) - a measure of average power
             const rms = Math.sqrt(sumSquares / dataArray.length);
-            // Scale RMS to a percentage (adjust multiplier for sensitivity)
-            const volume = Math.min(100, rms * 100 * 10); // Clamp at 100%
+            const volume = Math.min(100, rms * 100 * 10);
             volumeLevel.style.width = volume + '%';
-
-            // Request next frame
             animationFrameId = requestAnimationFrame(drawVolume);
         }
-        // === 移除 simulateVolume ===
-        /* function simulateVolume(length) { ... } */
+
+        // === Removed simulateVolume ===
 
         function formatTwoDigits(n) {
             return n < 10 ? '0' + n : n;
@@ -742,7 +742,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             const browserLang = navigator.language || navigator.userLanguage;
             setUiLanguage(browserLang.startsWith('zh') ? 'zh' : 'en');
-            updateTranscriptDisplay(); // Initial display
+            updateTranscriptDisplay();
         });
     </script>
 </body>
