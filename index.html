@@ -3,73 +3,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>即時語音轉文字工具</title>
+    <title>即時語音轉文字工具 (含音量 Bar)</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100vh;
             margin: 0;
-            background-color: #f0f0f0;
+            background-color: #f4f4f9;
+        }
+        h1 {
+            color: #333;
         }
         #transcript {
             width: 80%;
-            height: 300px;
+            max-width: 800px;
+            height: 40vh;
             margin-bottom: 20px;
-            padding: 10px;
+            padding: 15px;
             border: 1px solid #ccc;
-            border-radius: 5px;
+            border-radius: 8px;
             font-size: 16px;
+            line-height: 1.5;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        #controlBtn {
-            padding: 10px 20px;
+        /* 新增的音量 Bar 樣式 */
+        .volume-meter {
+            width: 80%;
+            max-width: 800px;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+        }
+        .volume-level {
+            height: 100%;
+            width: 0%; /* 初始寬度為 0 */
+            background-color: #4CAF50;
+            transition: width 0.1s ease-out; /* 讓變化更平滑 */
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            padding: 12px 25px;
             font-size: 16px;
             cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            transition: background-color 0.3s ease;
+        }
+        #controlBtn {
+            background-color: #007bff;
+        }
+        #controlBtn:hover {
+            background-color: #0056b3;
+        }
+        #exportBtn {
+            background-color: #28a745;
+        }
+        #exportBtn:hover {
+            background-color: #218838;
+        }
+        #exportBtn:disabled {
+            background-color: #9E9E9E;
+            cursor: not-allowed;
         }
     </style>
 </head>
 <body>
-
-    <textarea id="transcript" placeholder="你的逐字稿將會顯示在這裡..."></textarea>
-    <button id="controlBtn">開始辨識</button>
+    <h1>即時語音轉文字工具</h1>
+    <textarea id="transcript" placeholder="點擊「開始辨識」後，你的逐字稿將會顯示在這裡..."></textarea>
+    
+    <!-- 新增的音量 Bar HTML 結構 -->
+    <div class="volume-meter">
+        <div class="volume-level" id="volumeLevel"></div>
+    </div>
+    
+    <div class="controls">
+        <button id="controlBtn">開始辨識</button>
+        <button id="exportBtn" disabled>輸出逐字稿</button>
+    </div>
 
     <script>
         const transcriptElement = document.getElementById('transcript');
         const controlBtn = document.getElementById('controlBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const volumeLevel = document.getElementById('volumeLevel'); // 獲取音量 Bar 的元素
 
-        // 檢查瀏覽器是否支援 Web Speech API
+        let startTime, endTime;
+
+        // --- Web Audio API 相關變數 ---
+        let audioContext;
+        let microphoneStream;
+        let analyser;
+        let animationFrameId;
+
+        // --- 檢查瀏覽器是否支援 Web Speech API ---
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
             let isRecognizing = false;
             let final_transcript = '';
-
-            // 設定語音辨識的參數
-            recognition.continuous = true; // 連續辨識
-            recognition.interimResults = true; // 即時回傳結果
-            recognition.lang = 'cmn-Hant-TW'; // 設定語言為繁體中文
+            
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US'; 
 
             recognition.onstart = () => {
                 isRecognizing = true;
                 controlBtn.textContent = '停止辨識';
+                exportBtn.disabled = true;
+                startTime = new Date();
             };
 
             recognition.onerror = (event) => {
-                console.error(event.error);
+                console.error('語音辨識錯誤:', event.error);
+                if (event.error === 'not-allowed') {
+                    alert('您拒絕了麥克風權限。請允許麥克風存取以使用此功能。');
+                }
+                stopAudioMeter(); // 如果出錯，也停止音量偵測
             };
 
             recognition.onend = () => {
                 isRecognizing = false;
                 controlBtn.textContent = '開始辨識';
+                endTime = new Date();
+                if (transcriptElement.value.trim().length > 0) {
+                    exportBtn.disabled = false;
+                }
+                stopAudioMeter(); // 辨識結束時停止音量偵測
             };
 
             recognition.onresult = (event) => {
                 let interim_transcript = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
-                        final_transcript += event.results[i][0].transcript;
+                        final_transcript += event.results[i][0].transcript + ' ';
                     } else {
                         interim_transcript += event.results[i][0].transcript;
                     }
@@ -77,20 +153,105 @@
                 transcriptElement.value = final_transcript + interim_transcript;
             };
 
+            // --- 修改後的控制按鈕邏輯 ---
             controlBtn.addEventListener('click', () => {
                 if (isRecognizing) {
                     recognition.stop();
                 } else {
-                    final_transcript = ''; // 清除舊的逐字稿
+                    final_transcript = '';
                     transcriptElement.value = '';
-                    recognition.start();
+                    // 先啟動音量偵測，成功後再啟動語音辨識
+                    startAudioMeter().then(() => {
+                        recognition.start();
+                    }).catch(err => {
+                        console.error("無法啟動音訊偵測:", err);
+                    });
                 }
             });
 
+            // --- 輸出按鈕邏輯 (不變) ---
+            exportBtn.addEventListener('click', () => {
+                if (!startTime || !endTime) return;
+                const textToSave = transcriptElement.value;
+                const fileName = createFileName(startTime, endTime);
+                const blob = new Blob([textToSave], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+
         } else {
-            alert('你的瀏覽器不支援 Web Speech API，請使用最新版本的 Chrome 瀏覽器。');
+            alert('您的瀏覽器不支援 Web Speech API，請使用最新版本的 Chrome 瀏覽器。');
+        }
+
+        // --- Web Audio API 相關函式 ---
+
+        async function startAudioMeter() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('您的瀏覽器不支援 Web Audio API。');
+                return Promise.reject('getUserMedia not supported');
+            }
+
+            // 請求麥克風權限並獲取音訊流
+            microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            const source = audioContext.createMediaStreamSource(microphoneStream);
+            source.connect(analyser);
+            
+            // 開始繪製音量 Bar
+            drawVolume();
+        }
+
+        function stopAudioMeter() {
+            // 停止動畫循環
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            // 停止麥克風的音訊軌道，瀏覽器上的 "使用中" 圖示會消失
+            if (microphoneStream) {
+                microphoneStream.getTracks().forEach(track => track.stop());
+            }
+            // 關閉 AudioContext
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close();
+            }
+            // 重設音量 Bar
+            volumeLevel.style.width = '0%';
+        }
+
+        function drawVolume() {
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteTimeDomainData(dataArray);
+
+            // 計算音量 (RMS)
+            let sumSquares = 0.0;
+            for (const amplitude of dataArray) {
+                const a = (amplitude / 128.0) - 1.0; // 將 0-255 的值轉換到 -1.0 到 1.0
+                sumSquares += a * a;
+            }
+            const rms = Math.sqrt(sumSquares / dataArray.length);
+            
+            // 將 RMS 值轉換為 Bar 的寬度百分比
+            // 這裡的 10 是個經驗值，可以調整以獲得更好的視覺效果
+            const volume = Math.min(100, rms * 100 * 10); 
+            volumeLevel.style.width = volume + '%';
+
+            // 持續呼叫自身以形成動畫
+            animationFrameId = requestAnimationFrame(drawVolume);
+        }
+
+        // --- 輔助函式 (不變) ---
+        function formatTwoDigits(n) { return n < 10 ? '0' + n : n; }
+        function createFileName(start, end) {
+            const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`;
+            const startTimeStr = `${formatTwoDigits(start.getHours())}-${formatTwoDigits(start.getMinutes())}-${formatTwoDigits(start.getSeconds())}`;
+            const endTimeStr = `${formatTwoDigits(end.getHours())}-${formatTwoDigits(end.getMinutes())}-${formatTwoDigits(end.getSeconds())}`;
+            return `${date}_${startTimeStr}_to_${endTimeStr}.txt`;
         }
     </script>
-
 </body>
 </html>
