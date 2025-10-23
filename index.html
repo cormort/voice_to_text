@@ -70,6 +70,9 @@
             color: #333;
         }
         .interim { color: #888; font-style: italic; }
+        .final_span { /* Style for final parts within the display */
+             color: #333;
+        }
         .placeholder { color: #999; }
         .volume-meter {
             width: 90%;
@@ -315,7 +318,7 @@
     </div>
 
     <script>
-        // --- (DOM 元素選取，保持不變) ---
+        // --- (DOM Elements, Translations, Global Vars - unchanged) ---
         const pageTitle = document.getElementById('pageTitle');
         const mainTitle = document.getElementById('main-title');
         const transcriptElement = document.getElementById('transcript');
@@ -335,89 +338,20 @@
         const riskScenariosTitle = document.getElementById('risk-scenarios-title');
         const riskScenariosList = document.getElementById('risk-scenarios-list');
         const privacyConclusion = document.getElementById('privacy-conclusion');
-
-        // --- (翻譯物件，保持不變) ---
         const translations = {
-            en: { // ... (內容省略) ...
-                 pageTitle: "Multilingual Real-time Transcription Tool",
-                mainTitle: "Multilingual Real-time Transcription Tool",
-                langLabel: "Recognition Language:",
-                startBtn: "Start Recognition",
-                stopBtn: "Stop Recognition",
-                exportBtn: "Export Transcript",
-                toggleUiLangBtn: "切换到中文",
-                placeholder: "Click 'Start Recognition' and your transcript will appear here...",
-                micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
-                apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome.",
-                controlBtnTooltipStart: "Click to start voice recognition",
-                controlBtnTooltipStop: "Click to stop voice recognition",
-                exportBtnTooltip: "Export the transcript as a .txt file",
-                exportBtnTooltipDisabled: "Stop recognition to enable export",
-                languageSelectorTooltip: "Select the language to be recognized",
-                uiLangToggleTooltip: "Switch the user interface language",
-                warningText: "This tool uploads audio to Google. Use with caution.",
-                privacySummary: "Usage Guide & Privacy Notice",
-                howItWorksText: "To convert speech to text, this tool uses the browser's built-in Web Speech API, which sends your voice data to Google's servers for processing. Please be aware of the following:",
-                suitableScenariosTitle: "Suitable Scenarios:",
-                suitableScenarios: [
-                    "Assisting in listening to public online lectures, webinars, or courses.",
-                    "Transcribing public content like videos or podcasts.",
-                    "Personal learning and language practice."
-                ],
-                riskScenariosTitle: "High-Risk Scenarios (DO NOT USE):",
-                riskScenarios: [
-                    "Meetings involving <strong>business secrets</strong> or confidential information.",
-                    "Conversations involving <strong>personal privacy</strong> (e.g., with doctors, lawyers).",
-                    "Any content containing <strong>sensitive personal data</strong> (ID numbers, passwords, etc.)."
-                ],
-                privacyConclusion: "For sensitive content, it is strongly recommended to use offline tools like Whisper that process data entirely on your local machine."
-            },
-            zh: { // ... (內容省略) ...
-                 pageTitle: "多國語言即時逐字稿工具",
-                mainTitle: "多國語言即時逐字稿工具",
-                langLabel: "辨識語言:",
-                startBtn: "開始辨識",
-                stopBtn: "停止辨識",
-                exportBtn: "輸出逐字稿",
-                toggleUiLangBtn: "Switch to English",
-                placeholder: "點擊「開始辨識」後,你的逐字稿將會顯示在這裡...",
-                micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。",
-                apiNotSupportedError: "您的瀏覽器不支援 Web Speech API,請使用最新版本的 Chrome 瀏覽器。",
-                controlBtnTooltipStart: "點擊以開始語音辨識",
-                controlBtnTooltipStop: "點擊以停止語音辨識",
-                exportBtnTooltip: "將逐字稿匯出為 .txt 檔案",
-                exportBtnTooltipDisabled: "停止辨識後才能匯出",
-                languageSelectorTooltip: "選擇要進行辨識的語言",
-                uiLangToggleTooltip: "切換使用者介面語言",
-                warningText: "本工具將把收到音檔上傳 Google 請謹慎使用",
-                privacySummary: "使用須知 & 隱私聲明",
-                howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google の伺服器進行處理。請務必了解以下事項：",
-                suitableScenariosTitle: "適合的使用場景：",
-                suitableScenarios: [
-                    "輔助聆聽公開的線上演講、課程。",
-                    "轉錄影片、Podcast 等公開內容。",
-                    "個人學習、語言練習。"
-                ],
-                riskScenariosTitle: "高風險場景 (絕對不要使用)：",
-                riskScenarios: [
-                    "任何涉及<strong>商業機密</strong>或公司內部資訊的會議。",
-                    "任何涉及<strong>個人隱私</strong>的對話 (例如與醫生、律師的對話)。",
-                    "任何包含<strong>敏感個資</strong>的內容 (如身分證號、密碼等)。"
-                ],
-                privacyConclusion: "針對敏感內容,強烈建議使用像 Whisper 這樣完全在您本機離線運作的工具,以確保資料安全。"
-            }
+             en: { pageTitle: "Multilingual Real-time Transcription Tool", mainTitle: "Multilingual Real-time Transcription Tool", langLabel: "Recognition Language:", startBtn: "Start Recognition", stopBtn: "Stop Recognition", exportBtn: "Export Transcript", toggleUiLangBtn: "切换到中文", placeholder: "Click 'Start Recognition' and your transcript will appear here...", micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.", apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome.", controlBtnTooltipStart: "Click to start voice recognition", controlBtnTooltipStop: "Click to stop voice recognition", exportBtnTooltip: "Export the transcript as a .txt file", exportBtnTooltipDisabled: "Stop recognition to enable export", languageSelectorTooltip: "Select the language to be recognized", uiLangToggleTooltip: "Switch the user interface language", warningText: "This tool uploads audio to Google. Use with caution.", privacySummary: "Usage Guide & Privacy Notice", howItWorksText: "To convert speech to text, this tool uses the browser's built-in Web Speech API, which sends your voice data to Google's servers for processing. Please be aware of the following:", suitableScenariosTitle: "Suitable Scenarios:", suitableScenarios: [ "Assisting in listening to public online lectures, webinars, or courses.", "Transcribing public content like videos or podcasts.", "Personal learning and language practice." ], riskScenariosTitle: "High-Risk Scenarios (DO NOT USE):", riskScenarios: [ "Meetings involving <strong>business secrets</strong> or confidential information.", "Conversations involving <strong>personal privacy</strong> (e.g., with doctors, lawyers).", "Any content containing <strong>sensitive personal data</strong> (ID numbers, passwords, etc.)." ], privacyConclusion: "For sensitive content, it is strongly recommended to use offline tools like Whisper that process data entirely on your local machine." },
+             zh: { pageTitle: "多國語言即時逐字稿工具", mainTitle: "多國語言即時逐字稿工具", langLabel: "辨識語言:", startBtn: "開始辨識", stopBtn: "停止辨識", exportBtn: "輸出逐字稿", toggleUiLangBtn: "Switch to English", placeholder: "點擊「開始辨識」後,你的逐字稿將會顯示在這裡...", micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。", apiNotSupportedError: "您的瀏覽器不支援 Web Speech API,請使用最新版本的 Chrome 瀏覽器。", controlBtnTooltipStart: "點擊以開始語音辨識", controlBtnTooltipStop: "點擊以停止語音辨識", exportBtnTooltip: "將逐字稿匯出為 .txt 檔案", exportBtnTooltipDisabled: "停止辨識後才能匯出", languageSelectorTooltip: "選擇要進行辨識的語言", uiLangToggleTooltip: "切換使用者介面語言", warningText: "本工具將把收到音檔上傳 Google 請謹慎使用", privacySummary: "使用須知 & 隱私聲明", howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google の伺服器進行處理。請務必了解以下事項：", suitableScenariosTitle: "適合的使用場景：", suitableScenarios: [ "輔助聆聽公開的線上演講、課程。", "轉錄影片、Podcast 等公開內容。", "個人學習、語言練習。" ], riskScenariosTitle: "高風險場景 (絕對不要使用)：", riskScenarios: [ "任何涉及<strong>商業機密</strong>或公司內部資訊的會議。", "任何涉及<strong>個人隱私</strong>的對話 (例如與醫生、律師的對話)。", "任何包含<strong>敏感個資</strong>的內容 (如身分證號、密碼等)。" ], privacyConclusion: "針對敏感內容,強烈建議使用像 Whisper 這樣完全在您本機離線運作的工具,以確保資料安全。" }
         };
-
-        // --- (全域變數) ---
         let currentUiLang = 'zh';
         let startTime, endTime;
-        let transcriptSegments = [];
+        let transcriptSegments = []; // Stores *saved* final segments
         let isRecognizing = false;
-        let interim_transcript = '';
+        let currentFinalTranscript = ''; // Stores the final transcript *for the current utterance*
+        let currentInterimTranscript = ''; // Stores the interim transcript *for the current utterance*
         let isManualStop = false;
-        let restartTimer = null; // 用於 onend 的重啟計時器
+        let restartTimer = null;
 
-        // --- (UI 函式，保持不變) ---
+        // --- (UI Functions - unchanged) ---
         function setUiLanguage(lang) {
             currentUiLang = lang;
             const t = translations[lang];
@@ -443,9 +377,8 @@
 
             updateButtonStates();
         }
-
         function updateButtonStates() {
-            const t = translations[currentUiLang];
+             const t = translations[currentUiLang];
             controlBtn.textContent = isRecognizing ? t.stopBtn : t.startBtn;
             controlBtn.title = isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
             controlBtn.classList.toggle('listening', isRecognizing);
@@ -453,18 +386,16 @@
             exportBtn.disabled = !canExport;
             exportBtn.title = canExport ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
         }
-
         uiLangToggle.addEventListener('click', () => {
             const newLang = currentUiLang === 'zh' ? 'en' : 'zh';
             setUiLanguage(newLang);
         });
 
-        // --- (Web Speech API 核心邏輯) ---
+        // --- (Web Speech API Core Logic - Using Continuous Mode) ---
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-            // === 修正：恢復 continuous = !isMobile ===
             recognition.continuous = !isMobile;
             recognition.interimResults = true;
             recognition.maxAlternatives = 1;
@@ -477,163 +408,147 @@
                 isRecognizing = true;
                 languageSelector.disabled = true;
                 updateButtonStates();
+                currentFinalTranscript = ''; // Reset display for new utterance
+                currentInterimTranscript = '';
             };
 
             recognition.onerror = (event) => {
                 console.error('Speech Recognition Error:', event.error, event);
                 recognitionActive = false;
-
                 if (event.error === 'not-allowed' || event.error === 'audio-capture') {
-                    // 致命錯誤
                     alert(event.error === 'not-allowed' ? translations[currentUiLang].micDeniedError : '麥克風擷取錯誤。');
                     isRecognizing = false;
                     isManualStop = true;
                     updateButtonStates();
                 } else {
-                    // 非致命錯誤
                     console.warn(`⚠️ REC: Non-fatal error (${event.error}). Letting onend handle restart.`);
                 }
             };
 
-            // === 修正：onend 邏輯 (Fallback Save + 簡化重啟) ===
+            // === onend: Saves the *full* utterance before restarting ===
             recognition.onend = () => {
                 console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
 
-                // *** Fallback Saving Logic ***
-                const lastInterim = interim_transcript.trim();
-                if (lastInterim) {
+                const fullUtterance = (currentFinalTranscript + currentInterimTranscript).trim();
+
+                if (fullUtterance) {
                     const lastSegment = transcriptSegments[transcriptSegments.length - 1];
                     const isDuplicate = lastSegment &&
-                                        lastSegment.text === lastInterim &&
-                                        (Date.now() - lastSegment.timestamp.getTime()) < 1000;
+                                        lastSegment.text === fullUtterance &&
+                                        (Date.now() - lastSegment.timestamp.getTime()) < 1500;
 
                     if (!isDuplicate) {
-                         console.log('...[onend] Saving final interim chunk:', lastInterim);
-                         transcriptSegments.push({ timestamp: new Date(), text: lastInterim });
+                         console.log('...[onend] Saving full utterance:', fullUtterance);
+                         transcriptSegments.push({ timestamp: new Date(), text: fullUtterance });
                     } else {
-                        console.log('...[onend] Skipping duplicate save:', lastInterim);
+                        console.log('...[onend] Skipping duplicate save:', fullUtterance);
                     }
-                    interim_transcript = ''; // Clear after saving attempt
-                    updateTranscriptDisplay(); // Update UI immediately
+                    // Don't clear global interim here, let onstart handle it
+                    updateTranscriptDisplay(); // Update UI with saved segment
                 }
 
-                simulateVolume(0); // Reset volume bar
+                currentFinalTranscript = ''; // Reset display vars after saving attempt
+                currentInterimTranscript = '';
+                simulateVolume(0);
 
-                // *** Simplified Restart Logic ***
                 if (isManualStop || !isRecognizing) {
-                    // Stop condition
                     console.log('...Stop condition met. Cleaning up.');
-                    isRecognizing = false; // Ensure state consistency
+                    isRecognizing = false;
                     languageSelector.disabled = false;
                     endTime = new Date();
                     updateButtonStates();
-                    clearTimeout(restartTimer); // Clear any pending restart
+                    clearTimeout(restartTimer);
                 } else {
-                    // Auto-restart condition (non-manual stop while still wanting to recognize)
-                    clearTimeout(restartTimer); // Clear previous timer just in case
+                    clearTimeout(restartTimer);
                     restartTimer = setTimeout(() => {
-                        if (isRecognizing && !recognitionActive) { // Double-check state before restarting
+                        if (isRecognizing && !recognitionActive) {
                             try {
                                 console.log('🔄 REC: Auto-restarting...');
                                 recognition.start();
                             } catch (e) {
                                 console.error('Failed to auto-restart:', e);
-                                isRecognizing = false; // Give up if restart fails
+                                isRecognizing = false;
                                 updateButtonStates();
                             }
                         } else {
                              console.log('...Restart cancelled (state changed during timeout).');
                         }
-                    }, 300); // 300ms delay seems reasonable for continuous mode too
+                    }, 300);
                 }
             };
 
-            // === 修正：onresult 邏輯 (配合 continuous=true) ===
+            // === onresult: Updates display only, reconstructs full view ===
             recognition.onresult = (event) => {
-                let current_interim = ''; // Holds the interim result from *this specific event*
-                let hasFinalInEvent = false;
+                let interim = '';
+                let final_so_far = '';
                 console.log(`🎙️ REC: onresult (length: ${event.results.length}, index: ${event.resultIndex})`);
 
-                // Iterate from the last known index
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                // Rebuild the current utterance display from scratch
+                for (let i = 0; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
                     const isFinal = event.results[i].isFinal;
-                    console.log(`... Result ${i}: "${transcript}" | isFinal: ${isFinal}`);
 
                     if (isFinal) {
-                        // A final result confirmed in this event
-                        const final_text = transcript.trim();
-                        if (final_text) {
-                             // Save final results immediately in continuous mode
-                             const lastSegment = transcriptSegments[transcriptSegments.length - 1];
-                             const isDuplicate = lastSegment &&
-                                                lastSegment.text === final_text &&
-                                                (Date.now() - lastSegment.timestamp.getTime()) < 1000;
-                            if(!isDuplicate){
-                                console.log('...[onresult] Saving final segment:', final_text);
-                                transcriptSegments.push({ timestamp: new Date(), text: final_text });
-                                hasFinalInEvent = true;
-                            } else {
-                                 console.log('...[onresult] Skipping duplicate final save:', final_text);
-                            }
-                        }
+                        final_so_far += transcript + ' ';
                     } else {
-                        // Append interim results for this event
-                        current_interim += transcript;
+                        interim = transcript; // Only the very last one is truly interim
                     }
                 }
 
-                // Update the global interim transcript
-                // If a final result came in, clear the interim. Otherwise, show the latest interim.
-                interim_transcript = hasFinalInEvent ? '' : current_interim;
+                currentFinalTranscript = final_so_far.trim();
+                currentInterimTranscript = interim;
 
-                // Update UI and volume
                 updateTranscriptDisplay();
-                simulateVolume(interim_transcript.length || (hasFinalInEvent ? 5 : 0)); // Show flicker on final
+                simulateVolume(currentInterimTranscript.length || currentFinalTranscript.length);
             };
 
-
             function updateTranscriptDisplay() {
-                const finalContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
-                transcriptElement.innerHTML = `<span class="placeholder" id="placeholder-text" style="display:none;"></span>${finalContent}\n<span class="interim">${interim_transcript}</span>`;
+                const historyContent = transcriptSegments.map(segment => `<span class="final_span">${formatTime(segment.timestamp)} ${segment.text}</span>`).join('\n');
+                const currentFinalSpan = currentFinalTranscript ? `<span class="final_span">${currentFinalTranscript}</span>` : '';
+                // Add a space before interim only if there's final text preceding it
+                const interimPrefix = currentFinalTranscript && currentInterimTranscript ? ' ' : '';
+                const currentInterimSpan = currentInterimTranscript ? `<span class="interim">${interimPrefix}${currentInterimTranscript}</span>` : '';
+
+                const hasContent = transcriptSegments.length > 1 || currentFinalTranscript || currentInterimTranscript;
+                placeholderText.style.display = hasContent ? 'none' : 'inline';
+
+                // Display: History + Current Final + Current Interim
+                transcriptElement.innerHTML = `${historyContent}\n${currentFinalSpan}${currentInterimSpan}`;
                 transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
             }
 
-            // === 修正：controlBtn 邏輯 (Clear restart timer on manual stop) ===
-            controlBtn.addEventListener('click', () => {
+
+            // === (controlBtn logic - unchanged) ===
+             controlBtn.addEventListener('click', () => {
                 if (isRecognizing) {
-                    // --- Stop ---
                     console.log('■ UI: Stop button clicked.');
                     isManualStop = true;
                     isRecognizing = false;
                     recognitionActive = false;
-                    clearTimeout(restartTimer); // *** Crucial: Cancel pending restart ***
+                    clearTimeout(restartTimer);
                     try {
-                        recognition.stop(); // This triggers onend
+                        recognition.stop();
                     } catch (e) {
                         console.warn('Error stopping recognition:', e);
-                        // If stop fails, manually trigger cleanup just in case
                         languageSelector.disabled = false;
                         endTime = new Date();
                         updateButtonStates();
                         simulateVolume(0);
                     }
                 } else {
-                    // --- Start ---
                     isManualStop = false;
                     isRecognizing = true;
                     recognition.lang = languageSelector.value;
                     console.log(`▶️ UI: Start button clicked. Lang: ${recognition.lang}`);
-
                     startTime = new Date();
                     endTime = null;
-                    transcriptSegments = [];
-                    interim_transcript = '';
+                    transcriptSegments = []; // Clear history
+                    currentFinalTranscript = ''; // Clear display vars
+                    currentInterimTranscript = '';
                     transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
-                    updateTranscriptDisplay();
+                    updateTranscriptDisplay(); // Show start marker
                     updateButtonStates();
-
                     if (!recognitionActive) {
                         try {
                             recognition.start();
@@ -641,7 +556,6 @@
                             console.error('Failed to start recognition:', e);
                             if (e.message.includes('already started')) {
                                 console.warn('...forcing stop and restart.');
-                                // Attempt immediate stop first
                                 try { recognition.stop(); } catch(stopErr) {}
                                 setTimeout(() => {
                                     try {
@@ -661,27 +575,30 @@
                 }
             });
 
-            // --- (匯出函式，保持不變 - onend fallback handles final interim) ---
+            // === (Export logic - simplified, relies on saved segments) ===
             exportBtn.addEventListener('click', () => {
                 if (!startTime) return;
+                const effectiveEndTime = endTime || new Date();
 
-                const effectiveEndTime = endTime || new Date(); // Use current time if not stopped
-
-                 // Get a final copy before generating text - onend might modify it
                 const allSegmentsForExport = [...transcriptSegments];
-                // Check if there's a lingering interim chunk *if* recognition hasn't officially stopped yet
-                const finalInterim = interim_transcript.trim();
-                 if (finalInterim && !endTime) {
-                    console.log("...Adding lingering interim to export:", finalInterim);
-                    allSegmentsForExport.push({ timestamp: effectiveEndTime, text: finalInterim });
+                const lingeringUtterance = (currentFinalTranscript + currentInterimTranscript).trim();
+                 if (endTime && lingeringUtterance) {
+                     const lastSegment = allSegmentsForExport[allSegmentsForExport.length - 1];
+                     const isDuplicate = lastSegment &&
+                                        lastSegment.text === lingeringUtterance &&
+                                        (effectiveEndTime.getTime() - lastSegment.timestamp.getTime()) < 1000;
+                    if (!isDuplicate) {
+                        console.log("...Adding lingering utterance to export:", lingeringUtterance);
+                        allSegmentsForExport.push({ timestamp: effectiveEndTime, text: lingeringUtterance });
+                    }
                 }
-
 
                 const header = `--- 開始錄製時間 (Start Time) ---\r\n${formatFullDateTime(startTime)}\r\n\r\n--- 逐字稿內容 (Transcript) ---\r\n`;
                 const transcriptContent = allSegmentsForExport.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
                 const footer = `\r\n\r\n--- 匯出結束時間 (Export Time) ---\r\n${formatFullDateTime(effectiveEndTime)}\r\n`;
                 const textToSave = header + transcriptContent + footer;
 
+                // Continue from here...
                 const fileName = createFileName(startTime, effectiveEndTime);
                 const blob = new Blob([textToSave], { type: 'text/plain' });
                 const url = URL.createObjectURL(blob);
@@ -696,7 +613,7 @@
             alert(translations.en.apiNotSupportedError);
         }
 
-        // --- (輔助函式 (Helper Functions)) ---
+        // --- (Helper Functions - unchanged) ---
 
         function formatTime(date) {
             const h = formatTwoDigits(date.getHours());
@@ -715,7 +632,6 @@
             return `${Y}-${M}-${D} ${h}:${m}:${s}`;
         }
 
-        // === (模擬音量條函式，保持不變) ===
         function simulateVolume(length) {
             if (!isRecognizing) {
                  volumeLevel.style.width = '0%';
@@ -725,8 +641,8 @@
                 volumeLevel.style.width = '5%';
                 return;
             }
-            const baseWidth = Math.min(80, length * 1.5); // Adjusted multiplier
-            const randomNoise = (Math.random() * 15) - 5; // Adjusted range
+            const baseWidth = Math.min(80, length * 1.5);
+            const randomNoise = (Math.random() * 15) - 5;
             const finalWidth = Math.max(0, Math.min(100, baseWidth + randomNoise));
             volumeLevel.style.width = finalWidth + '%';
         }
@@ -745,6 +661,8 @@
         document.addEventListener('DOMContentLoaded', () => {
             const browserLang = navigator.language || navigator.userLanguage;
             setUiLanguage(browserLang.startsWith('zh') ? 'zh' : 'en');
+            // Ensure placeholder is visible initially
+            updateTranscriptDisplay();
         });
     </script>
 </body>
