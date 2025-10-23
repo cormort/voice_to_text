@@ -527,11 +527,16 @@
             };
 
             recognition.onresult = (event) => {
+                console.log('onresult triggered, results length:', event.results.length);
                 interim_transcript = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
+                    console.log(`Result ${i}: "${transcript}", isFinal: ${event.results[i].isFinal}, confidence: ${event.results[i][0].confidence}`);
                     if (event.results[i].isFinal) {
-                        if (transcript.trim()) transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
+                        if (transcript.trim()) {
+                            transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
+                            console.log('Added to segments:', transcript.trim());
+                        }
                     } else {
                         interim_transcript += transcript;
                     }
