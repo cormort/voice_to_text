@@ -472,10 +472,6 @@
                 isRecognizing = true;
                 languageSelector.disabled = true;
                 updateButtonStates();
-                console.log('✅ Recognition started successfully');
-                console.log('Language:', recognition.lang);
-                console.log('Continuous:', recognition.continuous);
-                console.log('InterimResults:', recognition.interimResults);
             };
 
             recognition.onerror = (event) => {
@@ -487,51 +483,40 @@
                     isRecognizing = false;
                     updateButtonStates();
                 } else if (event.error === 'no-speech') {
-                    console.log('⚠️ No speech detected, will retry...');
-                    // 不顯示錯誤,讓它自動重試
+                    // 偵測到無語音，讓 onend 處理自動重啟
                 } else if (event.error === 'aborted') {
-                    console.log('⚠️ Recognition aborted');
-                    // 正常的中斷,不需處理
+                    // 正常中斷,不需處理
                 } else if (event.error === 'audio-capture') {
-                    console.error('❌ Audio capture failed - microphone issue');
+                    console.error('Audio capture failed - microphone issue');
                     alert('麥克風錯誤,請確認:\n1. 麥克風權限已允許\n2. 沒有其他 App 正在使用麥克風\n3. 嘗試重新整理頁面');
                     isRecognizing = false;
                     updateButtonStates();
                 } else if (event.error === 'network') {
                     alert('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
-                } else {
-                    console.log(`辨識錯誤: ${event.error}`);
                 }
             };
 
             recognition.onend = () => {
                 recognitionActive = false;
-                console.log('Recognition ended, isRecognizing:', isRecognizing, 'isManualStop:', isManualStop);
                 
                 if (!isManualStop && isRecognizing) {
                     clearTimeout(restartTimeout);
                     
-                    // 檢查最近是否有結果
                     const timeSinceLastResult = Date.now() - lastResultTime;
-                    console.log('Time since last result at onend:', timeSinceLastResult, 'ms');
-                    
-                    // 如果最近有結果(500ms內),延遲重啟等待可能的後續語音
                     const restartDelay = (timeSinceLastResult < 500 && isMobile) ? 1200 : (isMobile ? 400 : 300);
-                    console.log('Will restart in', restartDelay, 'ms');
                     
                     restartTimeout = setTimeout(() => {
                         if (isRecognizing && !recognitionActive) {
                             try {
                                 recognition.start();
-                                console.log('Auto-restarting recognition');
                             } catch (e) {
                                 console.error('Failed to auto-restart:', e);
+                                // 在某些行動裝置上，太快重啟會失敗，多嘗試一次
                                 if (isMobile) {
                                     setTimeout(() => {
                                         if (isRecognizing && !recognitionActive) {
                                             try {
                                                 recognition.start();
-                                                console.log('Second retry successful');
                                             } catch (e2) {
                                                 console.error('Second retry failed:', e2);
                                             }
@@ -552,58 +537,67 @@
                 }
             };
 
+            // === 優化的 onresult 處理程序 ===
             recognition.onresult = (event) => {
-                console.log('onresult triggered, results length:', event.results.length);
-                interim_transcript = '';
-                let hasFinalResult = false;
-                let hasInterimResult = false;
-                
+                let local_interim_transcript = '';
+                let hasFinalResultInEvent = false;
+                let hasInterimResultInEvent = false;
+
+                // 迴圈從 event.resultIndex 開始，處理所有新的結果
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
-                    console.log(`Result ${i}: "${transcript}", isFinal: ${event.results[i].isFinal}, confidence: ${event.results[i][0].confidence}`);
+
                     if (event.results[i].isFinal) {
-                        hasFinalResult = true;
-                        if (transcript.trim()) {
-                            // 只添加還沒加過的內容
-                            const isDuplicate = transcriptSegments.some(seg => 
-                                seg.text === transcript.trim() && 
-                                (Date.now() - seg.timestamp.getTime()) < 2000
-                            );
+                        // 這是最終確定的文字
+                        const final_text = transcript.trim();
+                        if (final_text) {
+                            // 檢查是否與最後一個片段重複
+                            const lastSegment = transcriptSegments[transcriptSegments.length - 1];
+                            const isDuplicate = lastSegment &&
+                                                lastSegment.text === final_text &&
+                                                (Date.now() - lastSegment.timestamp.getTime()) < 2000;
+
                             if (!isDuplicate) {
-                                transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
-                                console.log('✅ Added to segments:', transcript.trim());
+                                transcriptSegments.push({ timestamp: new Date(), text: final_text });
                                 lastResultTime = Date.now();
-                            } else {
-                                console.log('⚠️ Skipped duplicate:', transcript.trim());
+                                hasFinalResultInEvent = true;
                             }
                         }
                     } else {
-                        hasInterimResult = true;
-                        interim_transcript += transcript;
+                        // 這是暫定的文字，將它累加到 local_interim_transcript
+                        local_interim_transcript += transcript;
+                        hasInterimResultInEvent = true;
                         lastResultTime = Date.now();
                     }
                 }
+
+                // 用剛剛組合好的 local_interim_transcript 更新全域的 interim_transcript
+                // 這會正確地顯示 "is there" -> "is there such" -> "is there such as"
+                interim_transcript = local_interim_transcript;
+                
+                // 如果這個事件中剛好有 "最終" 結果產生，
+                // 我們就清空暫定文字，因為它已經被確認並移到 transcriptSegments 了。
+                if (hasFinalResultInEvent) {
+                    interim_transcript = '';
+                }
+
                 updateTranscriptDisplay();
                 
-                // 如果有暫時結果(表示還在說話),取消快速重啟
-                if (hasInterimResult) {
+                // --- (以下是您原有的手機重啟邏D輯，保持不變) ---
+                if (hasInterimResultInEvent) {
                     clearTimeout(silenceTimeout);
-                    console.log('🎤 Interim result detected, user still speaking');
                 }
                 
-                // 在手機上,收到最終結果後等待一下再重啟,以防還有後續語音
-                if (isMobile && hasFinalResult && isRecognizing) {
+                if (isMobile && hasFinalResultInEvent && isRecognizing) {
                     clearTimeout(silenceTimeout);
                     silenceTimeout = setTimeout(() => {
                         const timeSinceLastResult = Date.now() - lastResultTime;
-                        console.log('Time since last result:', timeSinceLastResult, 'ms');
                         
                         if (timeSinceLastResult >= 800 && isRecognizing && !recognitionActive) {
                             try {
                                 recognition.start();
-                                console.log('🔄 Restarting after silence period');
                             } catch (e) {
-                                console.log('Restart after silence failed:', e);
+                                console.error('Restart after silence failed:', e);
                             }
                         }
                     }, 1000);
@@ -632,11 +626,9 @@
                     transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
                     updateTranscriptDisplay();
                     
-                    // 手機上不啟動音量條,避免麥克風衝突
                     if (isMobile) {
-                        console.log('Mobile detected, skipping audio meter to avoid conflicts');
+                        // Mobile detected, skipping audio meter to avoid conflicts
                     } else {
-                        // 桌面版才啟動音量條
                         setTimeout(() => {
                             startAudioMeter().catch(err => {
                                 console.warn("Could not start audio meter:", err);
@@ -644,15 +636,12 @@
                         }, 500);
                     }
                     
-                    // 啟動語音辨識
                     if (!recognitionActive) {
                         try {
                             recognition.start();
-                            console.log('Starting recognition with language:', languageSelector.value);
                         } catch (e) {
                             console.error('Failed to start recognition:', e);
                             if (e.message.includes('already started')) {
-                                console.log('Force stopping and restarting...');
                                 recognition.stop();
                                 setTimeout(() => {
                                     try {
@@ -671,9 +660,12 @@
             });
 
             exportBtn.addEventListener('click', () => {
-                if (!startTime || !endTime) return;
+                if (!startTime) return;
+                // 如果 endTime 不存在 (例如使用者尚未停止)，就使用現在的時間
+                const effectiveEndTime = endTime || new Date();
+                
                 const textToSave = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
-                const fileName = createFileName(startTime, endTime);
+                const fileName = createFileName(startTime, effectiveEndTime);
                 const blob = new Blob([textToSave], { type: 'text/plain' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
