@@ -484,27 +484,25 @@
                     // 致命錯誤
                     alert(event.error === 'not-allowed' ? translations[currentUiLang].micDeniedError : '麥克風擷取錯誤。');
                     isRecognizing = false;
-                    isManualStop = true; // 標記為手動停止，防止 onend 重啟
+                    isManualStop = true;
                     updateButtonStates();
                 } else {
-                    // 非致命錯誤 (如 'no-speech', 'network', 'aborted')
+                    // 非致命錯誤
                     console.warn(`⚠️ REC: Non-fatal error (${event.error}). Letting onend handle restart.`);
                 }
             };
 
-            // === (onend 邏輯：儲存 + 500ms 延遲重啟) ===
+            // === (onend 邏輯：儲存 + 500ms 延遲重啟 - 保持不變) ===
             recognition.onend = () => {
                 console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
 
-                // *** 核心儲存邏輯 ***
                 const lastInterim = interim_transcript.trim();
                 if (lastInterim) {
-                    // 檢查是否與最後一個已儲存的片段重複 (避免 API 重複發送最終結果)
                     const lastSegment = transcriptSegments[transcriptSegments.length - 1];
                     const isDuplicate = lastSegment &&
                                         lastSegment.text === lastInterim &&
-                                        (Date.now() - lastSegment.timestamp.getTime()) < 1000; // 1 秒內重複就忽略
+                                        (Date.now() - lastSegment.timestamp.getTime()) < 1000;
 
                     if (!isDuplicate) {
                          console.log('...Saving last interim chunk:', lastInterim);
@@ -512,22 +510,21 @@
                     } else {
                         console.log('...Skipping duplicate save:', lastInterim);
                     }
-                    interim_transcript = ''; // 清空
-                    updateTranscriptDisplay(); // 更新畫面
+                    interim_transcript = '';
+                    updateTranscriptDisplay();
                 }
 
-                // 重設音量條
                 simulateVolume(0);
 
                 if (isManualStop || !isRecognizing) {
-                    // 情況 1 或 2：停止
+                    // 停止
                     console.log('...Stop chain. Cleaning up.');
                     isRecognizing = false;
                     languageSelector.disabled = false;
                     endTime = new Date();
                     updateButtonStates();
                 } else {
-                    // 情況 3：自動結束，準備重啟
+                    // 自動重啟
                     setTimeout(() => {
                         if (isRecognizing && !recognitionActive) {
                             try {
@@ -545,30 +542,23 @@
                 }
             };
 
-            // === 修正：重寫 onresult 邏輯 (最終版) ===
+            // === 修正：重寫 onresult 邏輯 (最終版 v2 - 更簡單) ===
             recognition.onresult = (event) => {
                 let current_interim = ''; // 用於重建 *當前* 的完整暫定文字
                 console.log(`🎙️ REC: onresult (length: ${event.results.length}, index: ${event.resultIndex})`);
 
-                // 遍歷 *所有* 收到的結果 (從 0 開始)
-                for (let i = 0; i < event.results.length; ++i) {
-                    const transcript = event.results[i][0].transcript;
-                    const isFinal = event.results[i].isFinal;
-                    // console.log(`... Result ${i} (from start): "${transcript}" | isFinal: ${isFinal}`); // (可選) 詳細日誌
-
-                    if (isFinal) {
-                        // 如果某個片段被標記為 final，我們 *理論上* 可以直接儲存它
-                        // 但為了避免 isFinal 不可靠的問題，我們仍然依賴 onend 儲存
-                        // 這裡我們只將 final 的部分也加到 current_interim，
-                        // 這樣即使 isFinal 出錯，onend 也能儲存它
-                        current_interim += transcript;
-                    } else {
-                        // 如果是 interim，就累加
-                        current_interim += transcript;
-                    }
+                // **簡化邏輯：** 只關心 *最新* 的那一個 result
+                // 因為瀏覽器通常會在最後一個 result 中包含整句話的最新版本
+                const lastResult = event.results[event.results.length - 1];
+                if (lastResult.length > 0) {
+                     const transcript = lastResult[0].transcript;
+                     const isFinal = lastResult.isFinal; // 雖然我們不用 isFinal 來儲存，但日誌可以看看
+                     console.log(`... Latest Result: "${transcript}" | isFinal: ${isFinal}`);
+                     current_interim = transcript; // 直接使用最新的結果
                 }
 
-                // 迴圈結束後，用重建的 current_interim 更新全域的 interim_transcript
+
+                // 更新全域的 interim_transcript
                 interim_transcript = current_interim;
 
                 // 更新畫面和音量條
@@ -644,10 +634,9 @@
                 const effectiveEndTime = endTime || new Date();
 
                 const header = `--- 開始錄製時間 (Start Time) ---\r\n${formatFullDateTime(startTime)}\r\n\r\n--- 逐字稿內容 (Transcript) ---\r\n`;
-                // **匯出時，檢查是否有最後一句未儲存的 interim**
                 const finalInterim = interim_transcript.trim();
-                const allSegments = [...transcriptSegments]; // 複製已儲存的
-                if (finalInterim && (!endTime || effectiveEndTime.getTime() - allSegments[allSegments.length-1].timestamp.getTime() > 100)) { // 避免重複加入
+                const allSegments = [...transcriptSegments];
+                if (finalInterim && (!endTime || effectiveEndTime.getTime() - allSegments[allSegments.length-1].timestamp.getTime() > 100)) {
                     console.log("...Adding final interim to export:", finalInterim);
                     allSegments.push({ timestamp: effectiveEndTime, text: finalInterim });
                 }
@@ -691,12 +680,12 @@
 
         // === (模擬音量條函式，保持不變) ===
         function simulateVolume(length) {
-            if (!isRecognizing) { // 只在辨識中才更新
+            if (!isRecognizing) {
                  volumeLevel.style.width = '0%';
                  return;
             }
             if (length === 0) {
-                volumeLevel.style.width = '5%'; // 保持一點點底噪
+                volumeLevel.style.width = '5%';
                 return;
             }
             const baseWidth = Math.min(80, length * 2.5);
