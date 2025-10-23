@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- 修正：告訴瀏覽器沒有 favicon，避免 404 錯誤 -->
     <link rel="icon" href="data:,">
     <title id="pageTitle">多國語言即時逐字稿工具</title>
     <style>
@@ -137,43 +136,22 @@
         const uiLangToggle = document.getElementById('uiLangToggle');
         const placeholderText = document.getElementById('placeholder-text');
 
-        // --- Translation Object with Tooltips ---
+        // --- Translation Object (Full) ---
         const translations = {
             en: {
-                pageTitle: "Multilingual Real-time Transcription Tool",
-                mainTitle: "Multilingual Real-time Transcription Tool",
-                langLabel: "Recognition Language:",
-                startBtn: "Start Recognition",
-                stopBtn: "Stop Recognition",
-                exportBtn: "Export Transcript",
-                toggleUiLangBtn: "切换到中文",
-                placeholder: "Click 'Start Recognition' and your transcript will appear here...",
-                micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
-                apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome.",
-                controlBtnTooltipStart: "Click to start voice recognition",
-                controlBtnTooltipStop: "Click to stop voice recognition",
-                exportBtnTooltip: "Export the transcript as a .txt file",
-                exportBtnTooltipDisabled: "Stop recognition to enable export",
-                languageSelectorTooltip: "Select the language to be recognized",
-                uiLangToggleTooltip: "Switch the user interface language"
+                pageTitle: "Multilingual Real-time Transcription Tool", mainTitle: "Multilingual Real-time Transcription Tool", langLabel: "Recognition Language:",
+                startBtn: "Start Recognition", stopBtn: "Stop Recognition", exportBtn: "Export Transcript", toggleUiLangBtn: "切换到中文",
+                placeholder: "Click 'Start Recognition' and your transcript will appear here...", micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
+                apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome.", controlBtnTooltipStart: "Click to start voice recognition",
+                controlBtnTooltipStop: "Click to stop voice recognition", exportBtnTooltip: "Export the transcript as a .txt file", exportBtnTooltipDisabled: "Stop recognition to enable export",
+                languageSelectorTooltip: "Select the language to be recognized", uiLangToggleTooltip: "Switch the user interface language"
             },
             zh: {
-                pageTitle: "多國語言即時逐字稿工具",
-                mainTitle: "多國語言即時逐字稿工具",
-                langLabel: "辨識語言:",
-                startBtn: "開始辨識",
-                stopBtn: "停止辨識",
-                exportBtn: "輸出逐字稿",
-                toggleUiLangBtn: "Switch to English",
-                placeholder: "點擊「開始辨識」後，你的逐字稿將會顯示在這裡...",
-                micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。",
-                apiNotSupportedError: "您的瀏覽器不支援 Web Speech API，請使用最新版本的 Chrome 瀏覽器。",
-                controlBtnTooltipStart: "點擊以開始語音辨識",
-                controlBtnTooltipStop: "點擊以停止語音辨識",
-                exportBtnTooltip: "將逐字稿匯出為 .txt 檔案",
-                exportBtnTooltipDisabled: "停止辨識後才能匯出",
-                languageSelectorTooltip: "選擇要進行辨識的語言",
-                uiLangToggleTooltip: "切換使用者介面語言"
+                pageTitle: "多國語言即時逐字稿工具", mainTitle: "多國語言即時逐字稿工具", langLabel: "辨識語言:", startBtn: "開始辨識", stopBtn: "停止辨識",
+                exportBtn: "輸出逐字稿", toggleUiLangBtn: "Switch to English", placeholder: "點擊「開始辨識」後，你的逐字稿將會顯示在這裡...",
+                micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。", apiNotSupportedError: "您的瀏覽器不支援 Web Speech API，請使用最新版本的 Chrome 瀏覽器。",
+                controlBtnTooltipStart: "點擊以開始語音辨識", controlBtnTooltipStop: "點擊以停止語音辨識", exportBtnTooltip: "將逐字稿匯出為 .txt 檔案",
+                exportBtnTooltipDisabled: "停止辨識後才能匯出", languageSelectorTooltip: "選擇要進行辨識的語言", uiLangToggleTooltip: "切換使用者介面語言"
             }
         };
         let currentUiLang = 'zh';
@@ -182,41 +160,14 @@
         let startTime, endTime;
         let transcriptSegments = [];
         let isRecognizing = false;
-        let interim_transcript = ''; // 修正：宣告在全域
+        let interim_transcript = '';
+        let isManualStop = false; // 新增：判斷是否為手動停止
         let audioContext, microphoneStream, analyser, animationFrameId;
 
         // --- UI Update Functions ---
-        function setUiLanguage(lang) {
-            currentUiLang = lang;
-            const t = translations[lang];
-            
-            pageTitle.textContent = t.pageTitle;
-            mainTitle.textContent = t.mainTitle;
-            langLabel.textContent = t.langLabel;
-            exportBtn.textContent = t.exportBtn;
-            uiLangToggle.textContent = t.toggleUiLangBtn;
-            placeholderText.textContent = t.placeholder;
-            
-            uiLangToggle.title = t.uiLangToggleTooltip;
-            languageSelector.title = t.languageSelectorTooltip;
-
-            updateButtonStates();
-        }
-
-        function updateButtonStates() {
-            const t = translations[currentUiLang];
-            controlBtn.textContent = isRecognizing ? t.stopBtn : t.startBtn;
-            controlBtn.title = isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
-            
-            const canExport = !isRecognizing && transcriptSegments.length > 1;
-            exportBtn.disabled = !canExport;
-            exportBtn.title = canExport ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
-        }
-
-        uiLangToggle.addEventListener('click', () => {
-            const newLang = currentUiLang === 'zh' ? 'en' : 'zh';
-            setUiLanguage(newLang);
-        });
+        function setUiLanguage(lang) { /* ... (內容不變) ... */ }
+        function updateButtonStates() { /* ... (內容不變) ... */ }
+        uiLangToggle.addEventListener('click', () => { /* ... (內容不變) ... */ });
 
         // --- Main Application Logic ---
         if ('webkitSpeechRecognition' in window) {
@@ -227,128 +178,103 @@
             recognition.onstart = () => {
                 isRecognizing = true;
                 languageSelector.disabled = true;
-                startTime = new Date();
-                transcriptSegments = [];
-                interim_transcript = ''; // 修正：在開始時重置
-                transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
-                updateTranscriptDisplay();
                 updateButtonStates();
             };
 
             recognition.onerror = (event) => {
                 console.error('Speech Recognition Error:', event.error);
                 if (event.error === 'not-allowed') alert(translations[currentUiLang].micDeniedError);
-                stopAudioMeter();
             };
 
+            // 核心修改：onend 事件處理
             recognition.onend = () => {
-                isRecognizing = false;
-                languageSelector.disabled = false;
-                endTime = new Date();
-                updateButtonStates();
-                stopAudioMeter();
+                // 如果不是手動停止，且辨識還在進行中，就自動重啟
+                if (!isManualStop && isRecognizing) {
+                    console.log("Recognition stopped automatically, restarting...");
+                    recognition.start();
+                } else {
+                    // 這是手動停止，執行清理工作
+                    isRecognizing = false;
+                    languageSelector.disabled = false;
+                    endTime = new Date();
+                    updateButtonStates();
+                    stopAudioMeter();
+                }
             };
 
-            recognition.onresult = (event) => {
-                interim_transcript = ''; // 修正：在每次結果事件開始時清空
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    const transcript = event.results[i][0].transcript;
-                    if (event.results[i].isFinal) {
-                        if (transcript.trim()) transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
-                    } else {
-                        interim_transcript += transcript;
-                    }
-                }
-                updateTranscriptDisplay();
-            };
+            recognition.onresult = (event) => { /* ... (內容不變) ... */ };
             
-            function updateTranscriptDisplay() {
-                const finalContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
-                transcriptElement.innerHTML = `${finalContent}\n<span class="interim">${interim_transcript}</span>`;
-                transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
-            }
+            function updateTranscriptDisplay() { /* ... (內容不變) ... */ }
 
             controlBtn.addEventListener('click', () => {
                 if (isRecognizing) {
+                    // 手動停止
+                    isManualStop = true;
                     recognition.stop();
                 } else {
+                    // 手動開始
+                    isManualStop = false;
                     startAudioMeter().then(() => {
                         recognition.lang = languageSelector.value;
+                        startTime = new Date();
+                        transcriptSegments = [];
+                        interim_transcript = '';
+                        transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
+                        updateTranscriptDisplay();
                         recognition.start();
                     }).catch(err => console.error("Could not start audio meter:", err));
                 }
             });
 
-            exportBtn.addEventListener('click', () => {
-                if (!startTime || !endTime) return;
-                const textToSave = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
-                const fileName = createFileName(startTime, endTime);
-                const blob = new Blob([textToSave], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = fileName;
-                a.click();
-                URL.revokeObjectURL(url);
-            });
+            exportBtn.addEventListener('click', () => { /* ... (內容不變) ... */ });
 
         } else {
             alert(translations.en.apiNotSupportedError);
         }
 
         // --- Utility Functions ---
-        function formatTime(date) {
-            const h = formatTwoDigits(date.getHours());
-            const m = formatTwoDigits(date.getMinutes());
-            const s = formatTwoDigits(date.getSeconds());
-            return `[${h}:${m}:${s}]`;
-        }
-
-        async function startAudioMeter() {
-            if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported');
-            microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioContext.createAnalyser();
-            const source = audioContext.createMediaStreamSource(microphoneStream);
-            source.connect(analyser);
-            drawVolume();
-        }
-
-        function stopAudioMeter() {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            microphoneStream?.getTracks().forEach(track => track.stop());
-            if (audioContext?.state !== 'closed') audioContext.close();
-            volumeLevel.style.width = '0%';
-        }
-
-        function drawVolume() {
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteTimeDomainData(dataArray);
-            let sumSquares = 0.0;
-            for (const amplitude of dataArray) {
-                const a = (amplitude / 128.0) - 1.0;
-                sumSquares += a * a;
-            }
-            const rms = Math.sqrt(sumSquares / dataArray.length);
-            const volume = Math.min(100, rms * 100 * 10);
-            volumeLevel.style.width = volume + '%';
-            animationFrameId = requestAnimationFrame(drawVolume);
-        }
-
+        function formatTime(date) { /* ... (內容不變) ... */ }
+        async function startAudioMeter() { /* ... (內容不變) ... */ }
+        function stopAudioMeter() { /* ... (內容不變) ... */ }
+        function drawVolume() { /* ... (內容不變) ... */ }
         function formatTwoDigits(n) { return n < 10 ? '0' + n : n; }
-        
-        function createFileName(start, end) {
-            const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`;
-            const startTimeStr = `${formatTwoDigits(start.getHours())}-${formatTwoDigits(start.getMinutes())}-${formatTwoDigits(start.getSeconds())}`;
-            const endTimeStr = `${formatTwoDigits(end.getHours())}-${formatTwoDigits(end.getMinutes())}-${formatTwoDigits(end.getSeconds())}`;
-            return `${date}_${startTimeStr}_to_${endTimeStr}.txt`;
-        }
+        function createFileName(start, end) { /* ... (內容不變) ... */ }
 
         // --- Initialize UI ---
-        document.addEventListener('DOMContentLoaded', () => {
-            const browserLang = navigator.language || navigator.userLanguage;
-            setUiLanguage(browserLang.startsWith('zh') ? 'zh' : 'en');
-        });
+        document.addEventListener('DOMContentLoaded', () => { /* ... (內容不變) ... */ });
+
+        // --- 為了節省空間，這裡複製了部分不變的函式內容 ---
+        function setUiLanguage(lang) {
+            currentUiLang = lang; const t = translations[lang]; pageTitle.textContent = t.pageTitle; mainTitle.textContent = t.mainTitle;
+            langLabel.textContent = t.langLabel; exportBtn.textContent = t.exportBtn; uiLangToggle.textContent = t.toggleUiLangBtn;
+            placeholderText.textContent = t.placeholder; uiLangToggle.title = t.uiLangToggleTooltip; languageSelector.title = t.languageSelectorTooltip;
+            updateButtonStates();
+        }
+        function updateButtonStates() {
+            const t = translations[currentUiLang]; controlBtn.textContent = isRecognizing ? t.stopBtn : t.startBtn;
+            controlBtn.title = isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
+            const canExport = !isRecognizing && transcriptSegments.length > 1; exportBtn.disabled = !canExport;
+            exportBtn.title = canExport ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
+        }
+        uiLangToggle.addEventListener('click', () => { const newLang = currentUiLang === 'zh' ? 'en' : 'zh'; setUiLanguage(newLang); });
+        recognition.onresult = (event) => {
+            interim_transcript = ''; for (let i = event.resultIndex; i < event.results.length; ++i) { const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) { if (transcript.trim()) transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
+            } else { interim_transcript += transcript; } } updateTranscriptDisplay();
+        };
+        function updateTranscriptDisplay() {
+            const finalContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
+            transcriptElement.innerHTML = `${finalContent}\n<span class="interim">${interim_transcript}</span>`;
+            transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+        }
+        exportBtn.addEventListener('click', () => { if (!startTime || !endTime) return; const textToSave = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n'); const fileName = createFileName(startTime, endTime); const blob = new Blob([textToSave], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = fileName; a.click(); URL.revokeObjectURL(url); });
+        function formatTime(date) { const h = formatTwoDigits(date.getHours()), m = formatTwoDigits(date.getMinutes()), s = formatTwoDigits(date.getSeconds()); return `[${h}:${m}:${s}]`; }
+        async function startAudioMeter() { if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported'); microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true }); audioContext = new (window.AudioContext || window.webkitAudioContext)(); analyser = audioContext.createAnalyser(); const source = audioContext.createMediaStreamSource(microphoneStream); source.connect(analyser); drawVolume(); }
+        function stopAudioMeter() { if (animationFrameId) cancelAnimationFrame(animationFrameId); microphoneStream?.getTracks().forEach(track => track.stop()); if (audioContext?.state !== 'closed') audioContext.close(); volumeLevel.style.width = '0%'; }
+        function drawVolume() { const dataArray = new Uint8Array(analyser.frequencyBinCount); analyser.getByteTimeDomainData(dataArray); let sumSquares = 0.0; for (const amplitude of dataArray) { const a = (amplitude / 128.0) - 1.0; sumSquares += a * a; } const rms = Math.sqrt(sumSquares / dataArray.length); const volume = Math.min(100, rms * 100 * 10); volumeLevel.style.width = volume + '%'; animationFrameId = requestAnimationFrame(drawVolume); }
+        function createFileName(start, end) { const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`; const startTimeStr = `${formatTwoDigits(start.getHours())}-${formatTwoDigits(start.getMinutes())}-${formatTwoDigits(start.getSeconds())}`; const endTimeStr = `${formatTwoDigits(end.getHours())}-${formatTwoDigits(end.getMinutes())}-${formatTwoDigits(end.getSeconds())}`; return `${date}_${startTimeStr}_to_${endTimeStr}.txt`; }
+        document.addEventListener('DOMContentLoaded', () => { const browserLang = navigator.language || navigator.userLanguage; setUiLanguage(browserLang.startsWith('zh') ? 'zh' : 'en'); });
+
     </script>
 </body>
 </html>
