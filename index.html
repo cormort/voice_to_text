@@ -278,11 +278,11 @@
         <select id="languageSelector" title="選擇要進行辨識的語言">
             <option value="en-US">English (US)</option>
             <option value="en-GB">English (UK)</option>
-            <option value="zh-TW">中文 (台灣TW)</option>
-            <option value="zh-CN">中文 (中国大陆CN)</option>
-            <option value="zh-HK">粵語 (香港HK)</option>
-            <option value="ja-JP">日本語(JP)</option>
-            <option value="ko-KR">한국어(KRN)</option>
+            <option value="zh-TW">中文 (台灣)</option>
+            <option value="zh-CN">中文 (中国大陆)</option>
+            <option value="zh-HK">粵語 (香港)</option>
+            <option value="ja-JP">日本語</option>
+            <option value="ko-KR">한국어</option>
             <option value="es-ES">Español (España)</option>
             <option value="fr-FR">Français</option>
             <option value="de-DE">Deutsch</option>
@@ -564,9 +564,18 @@
                     if (event.results[i].isFinal) {
                         hasFinalResult = true;
                         if (transcript.trim()) {
-                            transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
-                            console.log('Added to segments:', transcript.trim());
-                            lastResultTime = Date.now();
+                            // 只添加還沒加過的內容
+                            const isDuplicate = transcriptSegments.some(seg => 
+                                seg.text === transcript.trim() && 
+                                (Date.now() - seg.timestamp.getTime()) < 2000
+                            );
+                            if (!isDuplicate) {
+                                transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
+                                console.log('✅ Added to segments:', transcript.trim());
+                                lastResultTime = Date.now();
+                            } else {
+                                console.log('⚠️ Skipped duplicate:', transcript.trim());
+                            }
                         }
                     } else {
                         hasInterimResult = true;
@@ -579,22 +588,20 @@
                 // 如果有暫時結果(表示還在說話),取消快速重啟
                 if (hasInterimResult) {
                     clearTimeout(silenceTimeout);
-                    console.log('Interim result detected, user still speaking');
+                    console.log('🎤 Interim result detected, user still speaking');
                 }
                 
                 // 在手機上,收到最終結果後等待一下再重啟,以防還有後續語音
                 if (isMobile && hasFinalResult && isRecognizing) {
                     clearTimeout(silenceTimeout);
-                    // 等待更長時間(1秒),確保使用者說完了
                     silenceTimeout = setTimeout(() => {
                         const timeSinceLastResult = Date.now() - lastResultTime;
                         console.log('Time since last result:', timeSinceLastResult, 'ms');
                         
-                        // 如果超過800ms沒有新結果,才重啟
                         if (timeSinceLastResult >= 800 && isRecognizing && !recognitionActive) {
                             try {
                                 recognition.start();
-                                console.log('Restarting after silence period');
+                                console.log('🔄 Restarting after silence period');
                             } catch (e) {
                                 console.log('Restart after silence failed:', e);
                             }
