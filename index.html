@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>專業即時逐字稿工具</title>
+    <title id="pageTitle">多國語言即時逐字稿工具</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -14,11 +14,27 @@
             height: 100vh;
             margin: 0;
             background-color: #f4f4f9;
+            position: relative;
+        }
+        /* UI 語言切換按鈕 */
+        #uiLangToggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 8px 15px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        #uiLangToggle:hover {
+            background-color: #5a6268;
         }
         h1 {
             color: #333;
         }
-        /* 優化顯示區域的樣式 */
         .transcript-container {
             width: 80%;
             max-width: 800px;
@@ -28,20 +44,19 @@
             border-radius: 8px;
             background-color: #fff;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            overflow-y: scroll; /* 允許垂直捲動 */
+            overflow-y: scroll;
             padding: 15px;
         }
         #transcript {
-            white-space: pre-wrap; /* 自動換行 */
-            word-wrap: break-word; /* 斷詞 */
+            white-space: pre-wrap;
+            word-wrap: break-word;
             font-size: 16px;
             line-height: 1.6;
             margin: 0;
             font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
         }
-        .interim {
-            color: #888;
-        }
+        .interim { color: #888; }
+        .placeholder { color: #999; }
         .volume-meter {
             width: 80%;
             max-width: 800px;
@@ -53,23 +68,22 @@
             border: 1px solid #ccc;
         }
         .volume-level {
-            height: 100%;
-            width: 0%;
-            background-color: #4CAF50;
+            height: 100%; width: 0%; background-color: #4CAF50;
             transition: width 0.1s ease-out;
         }
-        .controls {
+        .settings {
             display: flex;
-            gap: 15px;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
         }
+        #languageSelector {
+            padding: 8px; font-size: 15px; border: 1px solid #ccc; border-radius: 5px;
+        }
+        .controls { display: flex; gap: 15px; }
         button {
-            padding: 12px 25px;
-            font-size: 16px;
-            cursor: pointer;
-            border: none;
-            border-radius: 5px;
-            color: white;
-            transition: background-color 0.3s ease;
+            padding: 12px 25px; font-size: 16px; cursor: pointer; border: none;
+            border-radius: 5px; color: white; transition: background-color 0.3s ease;
         }
         #controlBtn { background-color: #007bff; }
         #controlBtn:hover { background-color: #0056b3; }
@@ -79,14 +93,32 @@
     </style>
 </head>
 <body>
-    <h1>專業即時逐字稿工具</h1>
+    <button id="uiLangToggle">Switch to English</button>
+
+    <h1 id="main-title">多國語言即時逐字稿工具</h1>
     
     <div class="transcript-container" id="transcriptContainer">
-        <pre id="transcript"></pre>
+        <pre id="transcript"><span class="placeholder" id="placeholder-text"></span></pre>
     </div>
     
     <div class="volume-meter">
         <div class="volume-level" id="volumeLevel"></div>
+    </div>
+
+    <div class="settings">
+        <label for="languageSelector" id="lang-label">辨識語言:</label>
+        <select id="languageSelector">
+            <option value="en-US">English (US)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="cmn-Hant-TW">中文 (台灣)</option>
+            <option value="cmn-Hans-CN">中文 (中国大陆)</option>
+            <option value="yue-Hant-HK">粵語 (香港)</option>
+            <option value="ja-JP">日本語</option>
+            <option value="ko-KR">한국어</option>
+            <option value="es-ES">Español (España)</option>
+            <option value="fr-FR">Français</option>
+            <option value="de-DE">Deutsch</option>
+        </select>
     </div>
     
     <div class="controls">
@@ -95,59 +127,116 @@
     </div>
 
     <script>
+        // --- DOM Elements ---
+        const pageTitle = document.getElementById('pageTitle');
+        const mainTitle = document.getElementById('main-title');
         const transcriptContainer = document.getElementById('transcriptContainer');
         const transcriptElement = document.getElementById('transcript');
         const controlBtn = document.getElementById('controlBtn');
         const exportBtn = document.getElementById('exportBtn');
         const volumeLevel = document.getElementById('volumeLevel');
+        const languageSelector = document.getElementById('languageSelector');
+        const langLabel = document.getElementById('lang-label');
+        const uiLangToggle = document.getElementById('uiLangToggle');
+        const placeholderText = document.getElementById('placeholder-text');
 
+        // --- Translation Object ---
+        const translations = {
+            en: {
+                pageTitle: "Multilingual Real-time Transcription Tool",
+                mainTitle: "Multilingual Real-time Transcription Tool",
+                langLabel: "Recognition Language:",
+                startBtn: "Start Recognition",
+                stopBtn: "Stop Recognition",
+                exportBtn: "Export Transcript",
+                toggleUiLangBtn: "切换到中文",
+                placeholder: "Click 'Start Recognition' and your transcript will appear here...",
+                micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
+                apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome."
+            },
+            zh: {
+                pageTitle: "多國語言即時逐字稿工具",
+                mainTitle: "多國語言即時逐字稿工具",
+                langLabel: "辨識語言:",
+                startBtn: "開始辨識",
+                stopBtn: "停止辨識",
+                exportBtn: "輸出逐字稿",
+                toggleUiLangBtn: "Switch to English",
+                placeholder: "點擊「開始辨識」後，你的逐字稿將會顯示在這裡...",
+                micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。",
+                apiNotSupportedError: "您的瀏覽器不支援 Web Speech API，請使用最新版本的 Chrome 瀏覽器。"
+            }
+        };
+        let currentUiLang = 'zh';
+
+        // --- State Variables ---
         let startTime, endTime;
-        let transcriptSegments = []; // 儲存帶時間戳的文字片段
-
+        let transcriptSegments = [];
+        let isRecognizing = false;
         let audioContext, microphoneStream, analyser, animationFrameId;
 
+        // --- Language and UI Functions ---
+        function setUiLanguage(lang) {
+            currentUiLang = lang;
+            const t = translations[lang];
+            
+            pageTitle.textContent = t.pageTitle;
+            mainTitle.textContent = t.mainTitle;
+            langLabel.textContent = t.langLabel;
+            exportBtn.textContent = t.exportBtn;
+            uiLangToggle.textContent = t.toggleUiLangBtn;
+            placeholderText.textContent = t.placeholder;
+            updateControlBtnText();
+        }
+
+        function updateControlBtnText() {
+            controlBtn.textContent = isRecognizing ? translations[currentUiLang].stopBtn : translations[currentUiLang].startBtn;
+        }
+
+        uiLangToggle.addEventListener('click', () => {
+            const newLang = currentUiLang === 'zh' ? 'en' : 'zh';
+            setUiLanguage(newLang);
+        });
+
+        // --- Main Application Logic ---
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
-            let isRecognizing = false;
-            let interim_transcript = '';
-
             recognition.continuous = true;
             recognition.interimResults = true;
-            recognition.lang = 'en-US';
 
             recognition.onstart = () => {
                 isRecognizing = true;
-                controlBtn.textContent = '停止辨識';
+                updateControlBtnText();
                 exportBtn.disabled = true;
+                languageSelector.disabled = true;
                 startTime = new Date();
-                transcriptSegments = []; // 清空之前的紀錄
-                // 增加一個開始標記
-                transcriptSegments.push({ timestamp: startTime, text: '--- 錄音開始 ---' });
+                transcriptSegments = [];
+                transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
                 updateTranscriptDisplay();
             };
 
             recognition.onerror = (event) => {
-                console.error('語音辨識錯誤:', event.error);
-                if (event.error === 'not-allowed') alert('您拒絕了麥克風權限。');
+                console.error('Speech Recognition Error:', event.error);
+                if (event.error === 'not-allowed') {
+                    alert(translations[currentUiLang].micDeniedError);
+                }
                 stopAudioMeter();
             };
 
             recognition.onend = () => {
                 isRecognizing = false;
-                controlBtn.textContent = '開始辨識';
+                updateControlBtnText();
+                languageSelector.disabled = false;
                 endTime = new Date();
-                if (transcriptSegments.length > 1) { // 至少要有一句內容
-                    exportBtn.disabled = false;
-                }
+                if (transcriptSegments.length > 1) exportBtn.disabled = false;
                 stopAudioMeter();
             };
 
             recognition.onresult = (event) => {
-                interim_transcript = '';
+                let interim_transcript = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
-                        // 這是核心：當一句話結束時，創建一個帶時間戳的物件
                         if (transcript.trim()) {
                            transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
                         }
@@ -159,14 +248,10 @@
             };
             
             function updateTranscriptDisplay() {
-                // 從結構化資料生成顯示內容
                 const finalContent = transcriptSegments.map(segment => {
                     return `${formatTime(segment.timestamp)} ${segment.text}`;
                 }).join('\n');
-
                 transcriptElement.innerHTML = `${finalContent}\n<span class="interim">${interim_transcript}</span>`;
-                
-                // 自動滾動到底部
                 transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
             }
 
@@ -175,21 +260,17 @@
                     recognition.stop();
                 } else {
                     startAudioMeter().then(() => {
+                        recognition.lang = languageSelector.value;
                         recognition.start();
-                    }).catch(err => {
-                        console.error("無法啟動音訊偵測:", err);
-                    });
+                    }).catch(err => console.error("Could not start audio meter:", err));
                 }
             });
 
             exportBtn.addEventListener('click', () => {
                 if (!startTime || !endTime) return;
-                
-                // 從結構化資料生成檔案內容
                 const textToSave = transcriptSegments.map(segment => {
                     return `${formatTime(segment.timestamp)} ${segment.text}`;
-                }).join('\r\n'); // 使用 \r\n 換行，在 Windows 的記事本中格式更佳
-
+                }).join('\r\n');
                 const fileName = createFileName(startTime, endTime);
                 const blob = new Blob([textToSave], { type: 'text/plain' });
                 const url = URL.createObjectURL(blob);
@@ -201,10 +282,10 @@
             });
 
         } else {
-            alert('您的瀏覽器不支援 Web Speech API，請使用最新版本的 Chrome 瀏覽器。');
+            alert(translations[currentUiLang].apiNotSupportedError);
         }
 
-        // --- 時間格式化輔助函式 ---
+        // --- Utility Functions ---
         function formatTime(date) {
             const h = formatTwoDigits(date.getHours());
             const m = formatTwoDigits(date.getMinutes());
@@ -212,9 +293,8 @@
             return `[${h}:${m}:${s}]`;
         }
 
-        // --- Web Audio API (音量 Bar) 相關函式 (不變) ---
         async function startAudioMeter() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            if (!navigator.mediaDevices?.getUserMedia) {
                 return Promise.reject('getUserMedia not supported');
             }
             microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -227,8 +307,8 @@
 
         function stopAudioMeter() {
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            if (microphoneStream) microphoneStream.getTracks().forEach(track => track.stop());
-            if (audioContext && audioContext.state !== 'closed') audioContext.close();
+            microphoneStream?.getTracks().forEach(track => track.stop());
+            if (audioContext?.state !== 'closed') audioContext.close();
             volumeLevel.style.width = '0%';
         }
 
@@ -246,7 +326,6 @@
             animationFrameId = requestAnimationFrame(drawVolume);
         }
 
-        // --- 其他輔助函式 (不變) ---
         function formatTwoDigits(n) { return n < 10 ? '0' + n : n; }
         function createFileName(start, end) {
             const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`;
@@ -254,6 +333,17 @@
             const endTimeStr = `${formatTwoDigits(end.getHours())}-${formatTwoDigits(end.getMinutes())}-${formatTwoDigits(end.getSeconds())}`;
             return `${date}_${startTimeStr}_to_${endTimeStr}.txt`;
         }
+
+        // --- Initialize UI ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const browserLang = navigator.language || navigator.userLanguage;
+            // 如果瀏覽器語言是中文，則預設為中文介面
+            if (browserLang.startsWith('zh')) {
+                setUiLanguage('zh');
+            } else {
+                setUiLanguage('en');
+            }
+        });
     </script>
 </body>
 </html>
