@@ -36,11 +36,11 @@
             backdrop-filter: blur(10px);
             transition: all 0.3s ease;
         }
-        #uiLangToggle:hover { 
+        #uiLangToggle:hover {
             background-color: rgba(255, 255, 255, 0.3);
             transform: translateY(-2px);
         }
-        h1 { 
+        h1 {
             color: white;
             margin: 60px 0 30px 0;
             font-size: 28px;
@@ -81,15 +81,13 @@
             margin-bottom: 20px;
             border: 2px solid rgba(255, 255, 255, 0.3);
             backdrop-filter: blur(10px);
-            /* === 修正：重新啟用音量條 === */
-            display: block; 
+            display: block;
         }
         .volume-level {
-            height: 100%; 
-            width: 0%; 
+            height: 100%;
+            width: 0%;
             background: linear-gradient(90deg, #4CAF50, #8BC34A);
-            /* === 修正：使用更平滑的 transition === */
-            transition: width 0.2s ease-out; 
+            transition: width 0.2s ease-out;
             box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
         }
         .settings {
@@ -122,10 +120,10 @@
             background: white;
             border-color: rgba(255, 255, 255, 0.5);
         }
-        .controls { 
-            display: flex; 
+        .controls {
+            display: flex;
             flex-direction: column;
-            gap: 15px; 
+            gap: 15px;
             margin-bottom: 20px;
             align-items: center;
         }
@@ -147,13 +145,13 @@
         button:active {
             transform: translateY(2px);
         }
-        #controlBtn { 
+        #controlBtn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: 2px solid rgba(255, 255, 255, 0.3);
             position: relative;
             min-width: 160px;
         }
-        #controlBtn:hover { 
+        #controlBtn:hover {
             box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
             transform: translateY(-2px);
         }
@@ -171,15 +169,15 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.3; }
         }
-        #exportBtn { 
+        #exportBtn {
             background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
             border: 2px solid rgba(255, 255, 255, 0.3);
         }
-        #exportBtn:hover { 
+        #exportBtn:hover {
             box-shadow: 0 6px 20px rgba(17, 153, 142, 0.4);
             transform: translateY(-2px);
         }
-        #exportBtn:disabled { 
+        #exportBtn:disabled {
             background: linear-gradient(135deg, #9E9E9E 0%, #BDBDBD 100%);
             cursor: not-allowed;
             opacity: 0.6;
@@ -249,7 +247,7 @@
         }
         .privacy-notice ul li.safe::before { content: '✅ '; }
         .privacy-notice ul li.unsafe::before { content: '❌ '; }
-        .privacy-notice strong { 
+        .privacy-notice strong {
             color: #FF6B6B;
             font-weight: 700;
         }
@@ -267,11 +265,11 @@
     <button id="uiLangToggle" title="Switch the user interface language">Switch to English</button>
 
     <h1 id="main-title">多國語言即時逐字稿工具</h1>
-    
+
     <div class="transcript-container" id="transcriptContainer">
         <pre id="transcript"><span class="placeholder" id="placeholder-text"></span></pre>
     </div>
-    
+
     <div class="volume-meter">
         <div class="volume-level" id="volumeLevel"></div>
     </div>
@@ -291,7 +289,7 @@
             <option value="de-DE">Deutsch</option>
         </select>
     </div>
-    
+
     <div class="controls">
         <div class="button-row">
             <button id="controlBtn" title="點擊以開始語音辨識">開始辨識</button>
@@ -422,7 +420,7 @@
         function setUiLanguage(lang) {
             currentUiLang = lang;
             const t = translations[lang];
-            
+
             pageTitle.textContent = t.pageTitle;
             mainTitle.textContent = t.mainTitle;
             langLabel.textContent = t.langLabel;
@@ -432,7 +430,7 @@
             uiLangToggle.title = t.uiLangToggleTooltip;
             languageSelector.title = t.languageSelectorTooltip;
             warningText.textContent = t.warningText;
-            
+
             privacySummary.textContent = t.privacySummary;
             howItWorksText.textContent = t.howItWorksText;
             suitableScenariosTitle.textContent = t.suitableScenariosTitle;
@@ -450,7 +448,7 @@
             controlBtn.textContent = isRecognizing ? t.stopBtn : t.startBtn;
             controlBtn.title = isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
             controlBtn.classList.toggle('listening', isRecognizing);
-            const canExport = !!startTime; 
+            const canExport = !!startTime;
             exportBtn.disabled = !canExport;
             exportBtn.title = canExport ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
         }
@@ -463,13 +461,12 @@
         // --- (Web Speech API 核心邏輯) ---
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
-            
+
             recognition.continuous = false; // 保持 false
             recognition.interimResults = true;
             recognition.maxAlternatives = 1;
 
             let recognitionActive = false;
-            // (lastResultTime 不再需要)
 
             recognition.onstart = () => {
                 console.log('✅ REC: Started. Lang:', recognition.lang);
@@ -482,7 +479,7 @@
             recognition.onerror = (event) => {
                 console.error('Speech Recognition Error:', event.error, event);
                 recognitionActive = false;
-                
+
                 if (event.error === 'not-allowed' || event.error === 'audio-capture') {
                     // 致命錯誤
                     alert(event.error === 'not-allowed' ? translations[currentUiLang].micDeniedError : '麥克風擷取錯誤。');
@@ -495,37 +492,44 @@
                 }
             };
 
-            // === 修正：onend 成為「儲存點」 ===
+            // === (onend 邏輯：儲存 + 500ms 延遲重啟) ===
             recognition.onend = () => {
                 console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
-                
+
                 // *** 核心儲存邏輯 ***
-                // 檢查是否有「上一句話」的暫定結果
-                if (interim_transcript.trim()) {
-                    console.log('...Saving last interim chunk:', interim_transcript.trim());
-                    transcriptSegments.push({ timestamp: new Date(), text: interim_transcript.trim() });
+                const lastInterim = interim_transcript.trim();
+                if (lastInterim) {
+                    // 檢查是否與最後一個已儲存的片段重複 (避免 API 重複發送最終結果)
+                    const lastSegment = transcriptSegments[transcriptSegments.length - 1];
+                    const isDuplicate = lastSegment &&
+                                        lastSegment.text === lastInterim &&
+                                        (Date.now() - lastSegment.timestamp.getTime()) < 1000; // 1 秒內重複就忽略
+
+                    if (!isDuplicate) {
+                         console.log('...Saving last interim chunk:', lastInterim);
+                         transcriptSegments.push({ timestamp: new Date(), text: lastInterim });
+                    } else {
+                        console.log('...Skipping duplicate save:', lastInterim);
+                    }
                     interim_transcript = ''; // 清空
                     updateTranscriptDisplay(); // 更新畫面
                 }
-                
+
                 // 重設音量條
                 simulateVolume(0);
 
                 if (isManualStop || !isRecognizing) {
-                    // 情況 1：使用者手動按下停止 (isManualStop = true)
-                    // 情況 2：發生致命錯誤 (isRecognizing = false)
+                    // 情況 1 或 2：停止
                     console.log('...Stop chain. Cleaning up.');
                     isRecognizing = false;
                     languageSelector.disabled = false;
                     endTime = new Date();
                     updateButtonStates();
                 } else {
-                    // 情況 3：自動結束 (例如講完一句話, 或 'no-speech' 錯誤)
-                    
-                    // 保持 500ms 延遲
+                    // 情況 3：自動結束，準備重啟
                     setTimeout(() => {
-                        if (isRecognizing && !recognitionActive) { 
+                        if (isRecognizing && !recognitionActive) {
                             try {
                                 console.log('🔄 REC: Auto-restarting (chaining)...');
                                 recognition.start();
@@ -537,39 +541,42 @@
                         } else {
                              console.log('...Restart cancelled (user may have stopped).');
                         }
-                    }, 500); 
+                    }, 500);
                 }
             };
 
-            // === 修正：onresult 只負責更新暫定文字 ===
+            // === 修正：重寫 onresult 邏輯 (最終版) ===
             recognition.onresult = (event) => {
-                let local_interim = ''; // 用於組合此事件中的所有暫定結果
+                let current_interim = ''; // 用於重建 *當前* 的完整暫定文字
                 console.log(`🎙️ REC: onresult (length: ${event.results.length}, index: ${event.resultIndex})`);
 
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                // 遍歷 *所有* 收到的結果 (從 0 開始)
+                for (let i = 0; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
                     const isFinal = event.results[i].isFinal;
-                    console.log(`... Result ${i}: "${transcript}" | isFinal: ${isFinal}`);
+                    // console.log(`... Result ${i} (from start): "${transcript}" | isFinal: ${isFinal}`); // (可選) 詳細日誌
 
-                    // 不再儲存 isFinal 的結果
-                    // 只需將所有非 final 的結果組合起來
-                    if (!isFinal) {
-                        local_interim += transcript;
+                    if (isFinal) {
+                        // 如果某個片段被標記為 final，我們 *理論上* 可以直接儲存它
+                        // 但為了避免 isFinal 不可靠的問題，我們仍然依賴 onend 儲存
+                        // 這裡我們只將 final 的部分也加到 current_interim，
+                        // 這樣即使 isFinal 出錯，onend 也能儲存它
+                        current_interim += transcript;
+                    } else {
+                        // 如果是 interim，就累加
+                        current_interim += transcript;
                     }
                 }
-                
-                // 迴圈結束後，更新全域的 interim_transcript
-                // 這裡的邏輯是：瀏覽器會不斷回傳「整句話」的最新版本
-                if (local_interim) {
-                    interim_transcript = local_interim;
-                }
-                
-                // 更新畫面
+
+                // 迴圈結束後，用重建的 current_interim 更新全域的 interim_transcript
+                interim_transcript = current_interim;
+
+                // 更新畫面和音量條
                 updateTranscriptDisplay();
-                // 模擬音量
                 simulateVolume(interim_transcript.length);
             };
-            
+
+
             function updateTranscriptDisplay() {
                 // 我們只顯示「已儲存」的 segments 和「目前」的 interim
                 const finalContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
@@ -586,7 +593,7 @@
                     isRecognizing = false;
                     recognitionActive = false;
                     try {
-                        recognition.stop(); // 這會觸發 onend, onend 中的儲存邏輯會執行
+                        recognition.stop();
                     } catch (e) {
                         console.warn('Error stopping recognition:', e);
                     }
@@ -596,15 +603,15 @@
                     isRecognizing = true;
                     recognition.lang = languageSelector.value;
                     console.log(`▶️ UI: Start button clicked. Lang: ${recognition.lang}`);
-                    
+
                     startTime = new Date();
-                    endTime = null; 
+                    endTime = null;
                     transcriptSegments = [];
                     interim_transcript = '';
                     transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
                     updateTranscriptDisplay();
-                    updateButtonStates(); 
-                    
+                    updateButtonStates();
+
                     if (!recognitionActive) {
                         try {
                             recognition.start();
@@ -614,7 +621,7 @@
                                 console.warn('...forcing stop and restart.');
                                 setTimeout(() => {
                                     try {
-                                        isManualStop = false; 
+                                        isManualStop = false;
                                         isRecognizing = true;
                                         recognition.start();
                                     } catch (e2) {
@@ -632,12 +639,20 @@
 
             // --- (匯出函式，保持不變) ---
             exportBtn.addEventListener('click', () => {
-                if (!startTime) return; 
-                
+                if (!startTime) return;
+
                 const effectiveEndTime = endTime || new Date();
-                
+
                 const header = `--- 開始錄製時間 (Start Time) ---\r\n${formatFullDateTime(startTime)}\r\n\r\n--- 逐字稿內容 (Transcript) ---\r\n`;
-                const transcriptContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
+                // **匯出時，檢查是否有最後一句未儲存的 interim**
+                const finalInterim = interim_transcript.trim();
+                const allSegments = [...transcriptSegments]; // 複製已儲存的
+                if (finalInterim && (!endTime || effectiveEndTime.getTime() - allSegments[allSegments.length-1].timestamp.getTime() > 100)) { // 避免重複加入
+                    console.log("...Adding final interim to export:", finalInterim);
+                    allSegments.push({ timestamp: effectiveEndTime, text: finalInterim });
+                }
+
+                const transcriptContent = allSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
                 const footer = `\r\n\r\n--- 匯出結束時間 (Export Time) ---\r\n${formatFullDateTime(effectiveEndTime)}\r\n`;
                 const textToSave = header + transcriptContent + footer;
 
@@ -674,19 +689,19 @@
             return `${Y}-${M}-${D} ${h}:${m}:${s}`;
         }
 
-        // === 新增：模擬音量條函式 ===
+        // === (模擬音量條函式，保持不變) ===
         function simulateVolume(length) {
+            if (!isRecognizing) { // 只在辨識中才更新
+                 volumeLevel.style.width = '0%';
+                 return;
+            }
             if (length === 0) {
-                volumeLevel.style.width = '0%';
+                volumeLevel.style.width = '5%'; // 保持一點點底噪
                 return;
             }
-            // 根據字數長度計算基礎寬度 (例如：每 2 個字 5%，上限 80%)
             const baseWidth = Math.min(80, length * 2.5);
-            // 增加隨機性，讓它看起來在跳動 (例如：在 -5% 到 +15% 之間隨機)
             const randomNoise = (Math.random() * 20) - 5;
-            // 確保寬度在 0% 到 100% 之間
             const finalWidth = Math.max(0, Math.min(100, baseWidth + randomNoise));
-            
             volumeLevel.style.width = finalWidth + '%';
         }
 
