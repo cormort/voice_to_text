@@ -338,8 +338,8 @@
 
         // --- (翻譯物件，保持不變) ---
         const translations = {
-            en: {
-                pageTitle: "Multilingual Real-time Transcription Tool",
+            en: { // ... (內容省略) ...
+                 pageTitle: "Multilingual Real-time Transcription Tool",
                 mainTitle: "Multilingual Real-time Transcription Tool",
                 langLabel: "Recognition Language:",
                 startBtn: "Start Recognition",
@@ -372,8 +372,8 @@
                 ],
                 privacyConclusion: "For sensitive content, it is strongly recommended to use offline tools like Whisper that process data entirely on your local machine."
             },
-            zh: {
-                pageTitle: "多國語言即時逐字稿工具",
+            zh: { // ... (內容省略) ...
+                 pageTitle: "多國語言即時逐字稿工具",
                 mainTitle: "多國語言即時逐字稿工具",
                 langLabel: "辨識語言:",
                 startBtn: "開始辨識",
@@ -415,6 +415,7 @@
         let isRecognizing = false;
         let interim_transcript = '';
         let isManualStop = false;
+        let restartTimer = null; // 用於 onend 的重啟計時器
 
         // --- (UI 函式，保持不變) ---
         function setUiLanguage(lang) {
@@ -461,15 +462,17 @@
         // --- (Web Speech API 核心邏輯) ---
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-            recognition.continuous = false; // 保持 false
+            // === 修正：恢復 continuous = !isMobile ===
+            recognition.continuous = !isMobile;
             recognition.interimResults = true;
             recognition.maxAlternatives = 1;
 
             let recognitionActive = false;
 
             recognition.onstart = () => {
-                console.log('✅ REC: Started. Lang:', recognition.lang);
+                console.log(`✅ REC: Started. Lang: ${recognition.lang}, Continuous: ${recognition.continuous}`);
                 recognitionActive = true;
                 isRecognizing = true;
                 languageSelector.disabled = true;
@@ -492,11 +495,12 @@
                 }
             };
 
-            // === (onend 邏輯：儲存 + 500ms 延遲重啟 - 保持不變) ===
+            // === 修正：onend 邏輯 (Fallback Save + 簡化重啟) ===
             recognition.onend = () => {
                 console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
 
+                // *** Fallback Saving Logic ***
                 const lastInterim = interim_transcript.trim();
                 if (lastInterim) {
                     const lastSegment = transcriptSegments[transcriptSegments.length - 1];
@@ -505,90 +509,118 @@
                                         (Date.now() - lastSegment.timestamp.getTime()) < 1000;
 
                     if (!isDuplicate) {
-                         console.log('...Saving last interim chunk:', lastInterim);
+                         console.log('...[onend] Saving final interim chunk:', lastInterim);
                          transcriptSegments.push({ timestamp: new Date(), text: lastInterim });
                     } else {
-                        console.log('...Skipping duplicate save:', lastInterim);
+                        console.log('...[onend] Skipping duplicate save:', lastInterim);
                     }
-                    interim_transcript = '';
-                    updateTranscriptDisplay();
+                    interim_transcript = ''; // Clear after saving attempt
+                    updateTranscriptDisplay(); // Update UI immediately
                 }
 
-                simulateVolume(0);
+                simulateVolume(0); // Reset volume bar
 
+                // *** Simplified Restart Logic ***
                 if (isManualStop || !isRecognizing) {
-                    // 停止
-                    console.log('...Stop chain. Cleaning up.');
-                    isRecognizing = false;
+                    // Stop condition
+                    console.log('...Stop condition met. Cleaning up.');
+                    isRecognizing = false; // Ensure state consistency
                     languageSelector.disabled = false;
                     endTime = new Date();
                     updateButtonStates();
+                    clearTimeout(restartTimer); // Clear any pending restart
                 } else {
-                    // 自動重啟
-                    setTimeout(() => {
-                        if (isRecognizing && !recognitionActive) {
+                    // Auto-restart condition (non-manual stop while still wanting to recognize)
+                    clearTimeout(restartTimer); // Clear previous timer just in case
+                    restartTimer = setTimeout(() => {
+                        if (isRecognizing && !recognitionActive) { // Double-check state before restarting
                             try {
-                                console.log('🔄 REC: Auto-restarting (chaining)...');
+                                console.log('🔄 REC: Auto-restarting...');
                                 recognition.start();
                             } catch (e) {
                                 console.error('Failed to auto-restart:', e);
-                                isRecognizing = false;
+                                isRecognizing = false; // Give up if restart fails
                                 updateButtonStates();
                             }
                         } else {
-                             console.log('...Restart cancelled (user may have stopped).');
+                             console.log('...Restart cancelled (state changed during timeout).');
                         }
-                    }, 500);
+                    }, 300); // 300ms delay seems reasonable for continuous mode too
                 }
             };
 
-            // === 修正：重寫 onresult 邏輯 (最終版 v2 - 更簡單) ===
+            // === 修正：onresult 邏輯 (配合 continuous=true) ===
             recognition.onresult = (event) => {
-                let current_interim = ''; // 用於重建 *當前* 的完整暫定文字
+                let current_interim = ''; // Holds the interim result from *this specific event*
+                let hasFinalInEvent = false;
                 console.log(`🎙️ REC: onresult (length: ${event.results.length}, index: ${event.resultIndex})`);
 
-                // **簡化邏輯：** 只關心 *最新* 的那一個 result
-                // 因為瀏覽器通常會在最後一個 result 中包含整句話的最新版本
-                const lastResult = event.results[event.results.length - 1];
-                if (lastResult.length > 0) {
-                     const transcript = lastResult[0].transcript;
-                     const isFinal = lastResult.isFinal; // 雖然我們不用 isFinal 來儲存，但日誌可以看看
-                     console.log(`... Latest Result: "${transcript}" | isFinal: ${isFinal}`);
-                     current_interim = transcript; // 直接使用最新的結果
+                // Iterate from the last known index
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const transcript = event.results[i][0].transcript;
+                    const isFinal = event.results[i].isFinal;
+                    console.log(`... Result ${i}: "${transcript}" | isFinal: ${isFinal}`);
+
+                    if (isFinal) {
+                        // A final result confirmed in this event
+                        const final_text = transcript.trim();
+                        if (final_text) {
+                             // Save final results immediately in continuous mode
+                             const lastSegment = transcriptSegments[transcriptSegments.length - 1];
+                             const isDuplicate = lastSegment &&
+                                                lastSegment.text === final_text &&
+                                                (Date.now() - lastSegment.timestamp.getTime()) < 1000;
+                            if(!isDuplicate){
+                                console.log('...[onresult] Saving final segment:', final_text);
+                                transcriptSegments.push({ timestamp: new Date(), text: final_text });
+                                hasFinalInEvent = true;
+                            } else {
+                                 console.log('...[onresult] Skipping duplicate final save:', final_text);
+                            }
+                        }
+                    } else {
+                        // Append interim results for this event
+                        current_interim += transcript;
+                    }
                 }
 
+                // Update the global interim transcript
+                // If a final result came in, clear the interim. Otherwise, show the latest interim.
+                interim_transcript = hasFinalInEvent ? '' : current_interim;
 
-                // 更新全域的 interim_transcript
-                interim_transcript = current_interim;
-
-                // 更新畫面和音量條
+                // Update UI and volume
                 updateTranscriptDisplay();
-                simulateVolume(interim_transcript.length);
+                simulateVolume(interim_transcript.length || (hasFinalInEvent ? 5 : 0)); // Show flicker on final
             };
 
 
             function updateTranscriptDisplay() {
-                // 我們只顯示「已儲存」的 segments 和「目前」的 interim
                 const finalContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
                 transcriptElement.innerHTML = `<span class="placeholder" id="placeholder-text" style="display:none;"></span>${finalContent}\n<span class="interim">${interim_transcript}</span>`;
                 transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
             }
 
-            // === (controlBtn 函式，保持不變) ===
+            // === 修正：controlBtn 邏輯 (Clear restart timer on manual stop) ===
             controlBtn.addEventListener('click', () => {
                 if (isRecognizing) {
-                    // --- 停止辨識 ---
+                    // --- Stop ---
                     console.log('■ UI: Stop button clicked.');
                     isManualStop = true;
                     isRecognizing = false;
                     recognitionActive = false;
+                    clearTimeout(restartTimer); // *** Crucial: Cancel pending restart ***
                     try {
-                        recognition.stop();
+                        recognition.stop(); // This triggers onend
                     } catch (e) {
                         console.warn('Error stopping recognition:', e);
+                        // If stop fails, manually trigger cleanup just in case
+                        languageSelector.disabled = false;
+                        endTime = new Date();
+                        updateButtonStates();
+                        simulateVolume(0);
                     }
                 } else {
-                    // --- 開始辨識 ---
+                    // --- Start ---
                     isManualStop = false;
                     isRecognizing = true;
                     recognition.lang = languageSelector.value;
@@ -609,6 +641,8 @@
                             console.error('Failed to start recognition:', e);
                             if (e.message.includes('already started')) {
                                 console.warn('...forcing stop and restart.');
+                                // Attempt immediate stop first
+                                try { recognition.stop(); } catch(stopErr) {}
                                 setTimeout(() => {
                                     try {
                                         isManualStop = false;
@@ -627,21 +661,24 @@
                 }
             });
 
-            // --- (匯出函式，保持不變) ---
+            // --- (匯出函式，保持不變 - onend fallback handles final interim) ---
             exportBtn.addEventListener('click', () => {
                 if (!startTime) return;
 
-                const effectiveEndTime = endTime || new Date();
+                const effectiveEndTime = endTime || new Date(); // Use current time if not stopped
 
-                const header = `--- 開始錄製時間 (Start Time) ---\r\n${formatFullDateTime(startTime)}\r\n\r\n--- 逐字稿內容 (Transcript) ---\r\n`;
+                 // Get a final copy before generating text - onend might modify it
+                const allSegmentsForExport = [...transcriptSegments];
+                // Check if there's a lingering interim chunk *if* recognition hasn't officially stopped yet
                 const finalInterim = interim_transcript.trim();
-                const allSegments = [...transcriptSegments];
-                if (finalInterim && (!endTime || effectiveEndTime.getTime() - allSegments[allSegments.length-1].timestamp.getTime() > 100)) {
-                    console.log("...Adding final interim to export:", finalInterim);
-                    allSegments.push({ timestamp: effectiveEndTime, text: finalInterim });
+                 if (finalInterim && !endTime) {
+                    console.log("...Adding lingering interim to export:", finalInterim);
+                    allSegmentsForExport.push({ timestamp: effectiveEndTime, text: finalInterim });
                 }
 
-                const transcriptContent = allSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
+
+                const header = `--- 開始錄製時間 (Start Time) ---\r\n${formatFullDateTime(startTime)}\r\n\r\n--- 逐字稿內容 (Transcript) ---\r\n`;
+                const transcriptContent = allSegmentsForExport.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
                 const footer = `\r\n\r\n--- 匯出結束時間 (Export Time) ---\r\n${formatFullDateTime(effectiveEndTime)}\r\n`;
                 const textToSave = header + transcriptContent + footer;
 
@@ -688,8 +725,8 @@
                 volumeLevel.style.width = '5%';
                 return;
             }
-            const baseWidth = Math.min(80, length * 2.5);
-            const randomNoise = (Math.random() * 20) - 5;
+            const baseWidth = Math.min(80, length * 1.5); // Adjusted multiplier
+            const randomNoise = (Math.random() * 15) - 5; // Adjusted range
             const finalWidth = Math.max(0, Math.min(100, baseWidth + randomNoise));
             volumeLevel.style.width = finalWidth + '%';
         }
