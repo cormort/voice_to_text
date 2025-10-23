@@ -282,7 +282,7 @@
             <option value="zh-CN">中文 (中国大陆CN)</option>
             <option value="zh-HK">粵語 (香港HK)</option>
             <option value="ja-JP">日本語(JP)</option>
-            <option value="ko-KR">한국어(KR)</option>
+            <option value="ko-KR">한국어(KRN)</option>
             <option value="es-ES">Español (España)</option>
             <option value="fr-FR">Français</option>
             <option value="de-DE">Deutsch</option>
@@ -464,6 +464,8 @@
 
             let restartTimeout;
             let recognitionActive = false;
+            let lastResultTime = 0;
+            let silenceTimeout;
 
             recognition.onstart = () => {
                 recognitionActive = true;
@@ -482,8 +484,19 @@
                 
                 if (event.error === 'not-allowed') {
                     alert(translations[currentUiLang].micDeniedError);
+                    isRecognizing = false;
+                    updateButtonStates();
                 } else if (event.error === 'no-speech') {
-                    console.log('No speech detected, will retry...');
+                    console.log('⚠️ No speech detected, will retry...');
+                    // 不顯示錯誤,讓它自動重試
+                } else if (event.error === 'aborted') {
+                    console.log('⚠️ Recognition aborted');
+                    // 正常的中斷,不需處理
+                } else if (event.error === 'audio-capture') {
+                    console.error('❌ Audio capture failed - microphone issue');
+                    alert('麥克風錯誤,請確認:\n1. 麥克風權限已允許\n2. 沒有其他 App 正在使用麥克風\n3. 嘗試重新整理頁面');
+                    isRecognizing = false;
+                    updateButtonStates();
                 } else if (event.error === 'network') {
                     alert('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
                 } else {
@@ -497,8 +510,15 @@
                 
                 if (!isManualStop && isRecognizing) {
                     clearTimeout(restartTimeout);
-                    // 手機上用較短的延遲時間
-                    const restartDelay = isMobile ? 200 : 300;
+                    
+                    // 檢查最近是否有結果
+                    const timeSinceLastResult = Date.now() - lastResultTime;
+                    console.log('Time since last result at onend:', timeSinceLastResult, 'ms');
+                    
+                    // 如果最近有結果(500ms內),延遲重啟等待可能的後續語音
+                    const restartDelay = (timeSinceLastResult < 500 && isMobile) ? 1200 : (isMobile ? 400 : 300);
+                    console.log('Will restart in', restartDelay, 'ms');
+                    
                     restartTimeout = setTimeout(() => {
                         if (isRecognizing && !recognitionActive) {
                             try {
@@ -506,7 +526,6 @@
                                 console.log('Auto-restarting recognition');
                             } catch (e) {
                                 console.error('Failed to auto-restart:', e);
-                                // 在手機上如果重啟失敗,稍後再試
                                 if (isMobile) {
                                     setTimeout(() => {
                                         if (isRecognizing && !recognitionActive) {
@@ -517,7 +536,7 @@
                                                 console.error('Second retry failed:', e2);
                                             }
                                         }
-                                    }, 800);
+                                    }, 1000);
                                 }
                             }
                         }
@@ -529,6 +548,7 @@
                     updateButtonStates();
                     stopAudioMeter();
                     clearTimeout(restartTimeout);
+                    clearTimeout(silenceTimeout);
                 }
             };
 
@@ -536,6 +556,7 @@
                 console.log('onresult triggered, results length:', event.results.length);
                 interim_transcript = '';
                 let hasFinalResult = false;
+                let hasInterimResult = false;
                 
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
@@ -545,26 +566,40 @@
                         if (transcript.trim()) {
                             transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
                             console.log('Added to segments:', transcript.trim());
+                            lastResultTime = Date.now();
                         }
                     } else {
+                        hasInterimResult = true;
                         interim_transcript += transcript;
+                        lastResultTime = Date.now();
                     }
                 }
                 updateTranscriptDisplay();
                 
-                // 在手機上,辨識到最終結果後立即重啟
+                // 如果有暫時結果(表示還在說話),取消快速重啟
+                if (hasInterimResult) {
+                    clearTimeout(silenceTimeout);
+                    console.log('Interim result detected, user still speaking');
+                }
+                
+                // 在手機上,收到最終結果後等待一下再重啟,以防還有後續語音
                 if (isMobile && hasFinalResult && isRecognizing) {
-                    console.log('Final result detected on mobile, will restart soon');
-                    setTimeout(() => {
-                        if (isRecognizing && !recognitionActive) {
+                    clearTimeout(silenceTimeout);
+                    // 等待更長時間(1秒),確保使用者說完了
+                    silenceTimeout = setTimeout(() => {
+                        const timeSinceLastResult = Date.now() - lastResultTime;
+                        console.log('Time since last result:', timeSinceLastResult, 'ms');
+                        
+                        // 如果超過800ms沒有新結果,才重啟
+                        if (timeSinceLastResult >= 800 && isRecognizing && !recognitionActive) {
                             try {
                                 recognition.start();
-                                console.log('Quick restart after final result');
+                                console.log('Restarting after silence period');
                             } catch (e) {
-                                console.log('Quick restart failed, will use normal restart');
+                                console.log('Restart after silence failed:', e);
                             }
                         }
-                    }, 100);
+                    }, 1000);
                 }
             };
             
@@ -580,6 +615,7 @@
                     recognitionActive = false;
                     recognition.stop();
                     if (restartTimeout) clearTimeout(restartTimeout);
+                    if (silenceTimeout) clearTimeout(silenceTimeout);
                 } else {
                     isManualStop = false;
                     recognition.lang = languageSelector.value;
