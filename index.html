@@ -497,6 +497,8 @@
                 
                 if (!isManualStop && isRecognizing) {
                     clearTimeout(restartTimeout);
+                    // 手機上用較短的延遲時間
+                    const restartDelay = isMobile ? 200 : 300;
                     restartTimeout = setTimeout(() => {
                         if (isRecognizing && !recognitionActive) {
                             try {
@@ -510,15 +512,16 @@
                                         if (isRecognizing && !recognitionActive) {
                                             try {
                                                 recognition.start();
+                                                console.log('Second retry successful');
                                             } catch (e2) {
                                                 console.error('Second retry failed:', e2);
                                             }
                                         }
-                                    }, 1000);
+                                    }, 800);
                                 }
                             }
                         }
-                    }, 300);
+                    }, restartDelay);
                 } else {
                     isRecognizing = false;
                     languageSelector.disabled = false;
@@ -586,18 +589,23 @@
                     transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
                     updateTranscriptDisplay();
                     
-                    // 先啟動語音辨識,它會自動要求麥克風權限
+                    // 手機上不啟動音量條,避免麥克風衝突
+                    if (isMobile) {
+                        console.log('Mobile detected, skipping audio meter to avoid conflicts');
+                    } else {
+                        // 桌面版才啟動音量條
+                        setTimeout(() => {
+                            startAudioMeter().catch(err => {
+                                console.warn("Could not start audio meter:", err);
+                            });
+                        }, 500);
+                    }
+                    
+                    // 啟動語音辨識
                     if (!recognitionActive) {
                         try {
                             recognition.start();
                             console.log('Starting recognition with language:', languageSelector.value);
-                            // 語音辨識啟動後,再啟動音量條(使用同一個麥克風串流)
-                            setTimeout(() => {
-                                startAudioMeter().catch(err => {
-                                    console.warn("Could not start audio meter:", err);
-                                    // 音量條失敗不影響語音辨識
-                                });
-                            }, 500);
                         } catch (e) {
                             console.error('Failed to start recognition:', e);
                             if (e.message.includes('already started')) {
