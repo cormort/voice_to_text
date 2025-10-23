@@ -6,159 +6,663 @@
     <link rel="icon" href="data:,">
     <title id="pageTitle">多國語言即時逐字稿工具</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; min-height: 100vh; margin: 0; background-color: #f4f4f9; position: relative; padding: 20px 0; }
-        #uiLangToggle { position: absolute; top: 20px; right: 20px; padding: 8px 15px; background-color: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; }
-        h1 { color: #333; margin-top: 50px; text-align: center; }
-        .transcript-container { width: 80%; max-width: 800px; height: 40vh; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow-y: scroll; padding: 15px; }
-        #transcript { white-space: pre-wrap; word-wrap: break-word; font-size: 16px; line-height: 1.6; margin: 0; font-family: 'Menlo', 'Monaco', 'Courier New', monospace; }
-        .segment { margin-bottom: 12px; }
-        .original { display: block; }
-        .translation { display: block; color: #007bff; font-style: italic; margin-top: 4px; padding-left: 15px; border-left: 2px solid #007bff; }
-        .interim { color: #888; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            position: relative;
+            padding: 20px;
+        }
+        #uiLangToggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+        #uiLangToggle:hover { 
+            background-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        h1 { 
+            color: white;
+            margin: 60px 0 30px 0;
+            font-size: 28px;
+            font-weight: 700;
+            text-align: center;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .transcript-container {
+            width: 90%;
+            max-width: 900px;
+            height: 45vh;
+            margin-bottom: 20px;
+            border: none;
+            border-radius: 16px;
+            background-color: #fff;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow-y: scroll;
+            padding: 20px;
+        }
+        #transcript {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 16px;
+            line-height: 1.8;
+            margin: 0;
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            color: #333;
+        }
+        .interim { color: #888; font-style: italic; }
         .placeholder { color: #999; }
-        .volume-meter { width: 80%; max-width: 800px; height: 20px; background-color: #e0e0e0; border-radius: 10px; overflow: hidden; margin-bottom: 15px; border: 1px solid #ccc; }
-        .volume-level { height: 100%; width: 0%; background-color: #4CAF50; transition: width 0.1s ease-out; }
-        .settings-grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 20px; align-items: center; margin-bottom: 15px; max-width: 800px; width: 80%; }
-        .settings-grid label { justify-self: end; font-weight: bold; }
-        .settings-grid input[type="checkbox"] { justify-self: start; }
-        select, input { padding: 8px; font-size: 15px; border: 1px solid #ccc; border-radius: 5px; }
-        .controls { display: flex; gap: 15px; margin-bottom: 15px; }
-        button { padding: 12px 25px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; color: white; transition: background-color 0.3s ease; }
-        #controlBtn { background-color: #007bff; } #controlBtn:hover { background-color: #0056b3; }
-        #exportBtn { background-color: #28a745; } #exportBtn:hover { background-color: #218838; }
-        #exportBtn:disabled { background-color: #9E9E9E; cursor: not-allowed; }
-        .privacy-notice { width: 80%; max-width: 800px; font-size: 14px; margin-top: auto; }
-        .privacy-notice details { border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9; }
-        .privacy-notice summary { padding: 10px 15px; font-weight: bold; cursor: pointer; outline: none; }
-        .privacy-notice .content { padding: 0 15px 15px 15px; line-height: 1.5; color: #333; }
-        .privacy-notice h3 { margin-top: 15px; margin-bottom: 5px; }
-        .privacy-notice ul { padding-left: 20px; margin: 0; }
+        .volume-meter {
+            width: 90%;
+            max-width: 900px;
+            height: 24px;
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+        }
+        .volume-level {
+            height: 100%; 
+            width: 0%; 
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            transition: width 0.1s ease-out;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
+        .settings {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 15px 25px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        #lang-label {
+            color: white;
+            font-weight: 600;
+            font-size: 15px;
+        }
+        #languageSelector {
+            padding: 10px 15px;
+            font-size: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.9);
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        #languageSelector:hover {
+            background: white;
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+        .controls { 
+            display: flex; 
+            flex-direction: column;
+            gap: 15px; 
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        .button-row {
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            padding: 14px 30px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 12px;
+            color: white;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        button:active {
+            transform: translateY(2px);
+        }
+        #controlBtn { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            position: relative;
+            min-width: 160px;
+        }
+        #controlBtn:hover { 
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+            transform: translateY(-2px);
+        }
+        #controlBtn.listening::after {
+            content: '●';
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #ff4444;
+            font-size: 20px;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        #exportBtn { 
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+        #exportBtn:hover { 
+            box-shadow: 0 6px 20px rgba(17, 153, 142, 0.4);
+            transform: translateY(-2px);
+        }
+        #exportBtn:disabled { 
+            background: linear-gradient(135deg, #9E9E9E 0%, #BDBDBD 100%);
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .warning-notice {
+            background: rgba(255, 193, 7, 0.95);
+            color: #000;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            max-width: 600px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            border: 2px solid rgba(255, 152, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .warning-notice::before {
+            content: '⚠️';
+            font-size: 18px;
+        }
+
+        .privacy-notice {
+            width: 90%;
+            max-width: 900px;
+            font-size: 14px;
+            margin-top: auto;
+            margin-bottom: 20px;
+        }
+        .privacy-notice details {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+        }
+        .privacy-notice summary {
+            padding: 15px 20px;
+            font-weight: bold;
+            cursor: pointer;
+            outline: none;
+            color: white;
+            font-size: 15px;
+        }
+        .privacy-notice summary:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .privacy-notice .content {
+            padding: 0 20px 20px 20px;
+            line-height: 1.6;
+            color: white;
+        }
+        .privacy-notice h3 {
+            margin-top: 15px;
+            margin-bottom: 8px;
+            color: #FFD54F;
+        }
+        .privacy-notice ul {
+            padding-left: 20px;
+            margin: 0;
+        }
+        .privacy-notice ul li {
+            margin-bottom: 8px;
+        }
         .privacy-notice ul li.safe::before { content: '✅ '; }
         .privacy-notice ul li.unsafe::before { content: '❌ '; }
-        .privacy-notice strong { color: #d9534f; }
+        .privacy-notice strong { 
+            color: #FF6B6B;
+            font-weight: 700;
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 22px; margin: 50px 20px 20px 20px; }
+            .transcript-container { height: 40vh; }
+            .button-row { flex-direction: column; width: 100%; }
+            button { width: 100%; }
+            .settings { flex-direction: column; width: 90%; }
+        }
     </style>
 </head>
 <body>
-    <button id="uiLangToggle" title="Switch UI language">English</button>
-    <h1 id="main-title"></h1>
-    <div class="transcript-container" id="transcriptContainer"><div id="transcript"><span class="placeholder" id="placeholder-text"></span></div></div>
-    <div class="volume-meter"><div class="volume-level" id="volumeLevel"></div></div>
+    <button id="uiLangToggle" title="Switch the user interface language">Switch to English</button>
 
-    <div class="settings-grid">
-        <label for="languageSelector" id="lang-label"></label>
-        <select id="languageSelector" title="Select recognition language"></select>
-        <label for="translateCheckbox" id="translate-label"></label>
-        <input type="checkbox" id="translateCheckbox">
-        <label for="targetLangSelector" id="target-lang-label"></label>
-        <select id="targetLangSelector" title="Select translation target language"></select>
+    <h1 id="main-title">多國語言即時逐字稿工具</h1>
+    
+    <div class="transcript-container" id="transcriptContainer">
+        <pre id="transcript"><span class="placeholder" id="placeholder-text"></span></pre>
+    </div>
+    
+    <div class="volume-meter">
+        <div class="volume-level" id="volumeLevel"></div>
+    </div>
+
+    <div class="settings">
+        <label for="languageSelector" id="lang-label">辨識語言:</label>
+        <select id="languageSelector" title="選擇要進行辨識的語言">
+            <option value="en-US">English (US)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="cmn-Hant-TW">中文 (台灣)</option>
+            <option value="cmn-Hans-CN">中文 (中国大陆)</option>
+            <option value="yue-Hant-HK">粵語 (香港)</option>
+            <option value="ja-JP">日本語</option>
+            <option value="ko-KR">한국어</option>
+            <option value="es-ES">Español (España)</option>
+            <option value="fr-FR">Français</option>
+            <option value="de-DE">Deutsch</option>
+        </select>
     </div>
     
     <div class="controls">
-        <button id="controlBtn"></button>
-        <button id="exportBtn" disabled></button>
+        <div class="button-row">
+            <button id="controlBtn" title="點擊以開始語音辨識">開始辨識</button>
+            <button id="exportBtn" disabled title="停止辨識後才能匯出">輸出逐字稿</button>
+        </div>
+        <div class="warning-notice" id="warning-text">
+            本工具將把收到音檔上傳 Google 請謹慎使用
+        </div>
     </div>
 
     <div class="privacy-notice">
-        <details><summary id="privacy-summary"></summary><div class="content" id="privacy-content"></div></details>
+        <details>
+            <summary id="privacy-summary">使用須知 & 隱私聲明</summary>
+            <div class="content">
+                <p id="how-it-works-text"></p>
+                <h3 id="suitable-scenarios-title"></h3>
+                <ul id="suitable-scenarios-list"></ul>
+                <h3 id="risk-scenarios-title"></h3>
+                <ul id="risk-scenarios-list"></ul>
+                <p id="privacy-conclusion"></p>
+            </div>
+        </details>
     </div>
 
     <script>
-        // --- 這是您的 Google Apps Script 翻譯 API URL ---
-        const SCRIPT_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE'; // 如果您未使用翻譯功能，保留此樣即可
+        const pageTitle = document.getElementById('pageTitle');
+        const mainTitle = document.getElementById('main-title');
+        const transcriptElement = document.getElementById('transcript');
+        const transcriptContainer = document.getElementById('transcriptContainer');
+        const controlBtn = document.getElementById('controlBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const volumeLevel = document.getElementById('volumeLevel');
+        const languageSelector = document.getElementById('languageSelector');
+        const langLabel = document.getElementById('lang-label');
+        const uiLangToggle = document.getElementById('uiLangToggle');
+        const placeholderText = document.getElementById('placeholder-text');
+        const warningText = document.getElementById('warning-text');
+        const privacySummary = document.getElementById('privacy-summary');
+        const howItWorksText = document.getElementById('how-it-works-text');
+        const suitableScenariosTitle = document.getElementById('suitable-scenarios-title');
+        const suitableScenariosList = document.getElementById('suitable-scenarios-list');
+        const riskScenariosTitle = document.getElementById('risk-scenarios-title');
+        const riskScenariosList = document.getElementById('risk-scenarios-list');
+        const privacyConclusion = document.getElementById('privacy-conclusion');
 
-        // --- DOM Elements ---
-        const pageTitle = document.getElementById('pageTitle'), mainTitle = document.getElementById('main-title'), transcriptElement = document.getElementById('transcript'), transcriptContainer = document.getElementById('transcriptContainer'), controlBtn = document.getElementById('controlBtn'), exportBtn = document.getElementById('exportBtn'), volumeLevel = document.getElementById('volumeLevel'), languageSelector = document.getElementById('languageSelector'), langLabel = document.getElementById('lang-label'), uiLangToggle = document.getElementById('uiLangToggle'), placeholderText = document.getElementById('placeholder-text'), translateCheckbox = document.getElementById('translateCheckbox'), targetLangSelector = document.getElementById('targetLangSelector'), translateLabel = document.getElementById('translate-label'), targetLangLabel = document.getElementById('target-lang-label'), privacySummary = document.getElementById('privacy-summary'), privacyContent = document.getElementById('privacy-content');
+        const translations = {
+            en: {
+                pageTitle: "Multilingual Real-time Transcription Tool",
+                mainTitle: "Multilingual Real-time Transcription Tool",
+                langLabel: "Recognition Language:",
+                startBtn: "Start Recognition",
+                stopBtn: "Stop Recognition",
+                exportBtn: "Export Transcript",
+                toggleUiLangBtn: "切换到中文",
+                placeholder: "Click 'Start Recognition' and your transcript will appear here...",
+                micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
+                apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome.",
+                controlBtnTooltipStart: "Click to start voice recognition",
+                controlBtnTooltipStop: "Click to stop voice recognition",
+                exportBtnTooltip: "Export the transcript as a .txt file",
+                exportBtnTooltipDisabled: "Stop recognition to enable export",
+                languageSelectorTooltip: "Select the language to be recognized",
+                uiLangToggleTooltip: "Switch the user interface language",
+                warningText: "This tool uploads audio to Google. Use with caution.",
+                privacySummary: "Usage Guide & Privacy Notice",
+                howItWorksText: "To convert speech to text, this tool uses the browser's built-in Web Speech API, which sends your voice data to Google's servers for processing. Please be aware of the following:",
+                suitableScenariosTitle: "Suitable Scenarios:",
+                suitableScenarios: [
+                    "Assisting in listening to public online lectures, webinars, or courses.",
+                    "Transcribing public content like videos or podcasts.",
+                    "Personal learning and language practice."
+                ],
+                riskScenariosTitle: "High-Risk Scenarios (DO NOT USE):",
+                riskScenarios: [
+                    "Meetings involving <strong>business secrets</strong> or confidential information.",
+                    "Conversations involving <strong>personal privacy</strong> (e.g., with doctors, lawyers).",
+                    "Any content containing <strong>sensitive personal data</strong> (ID numbers, passwords, etc.)."
+                ],
+                privacyConclusion: "For sensitive content, it is strongly recommended to use offline tools like Whisper that process data entirely on your local machine."
+            },
+            zh: {
+                pageTitle: "多國語言即時逐字稿工具",
+                mainTitle: "多國語言即時逐字稿工具",
+                langLabel: "辨識語言:",
+                startBtn: "開始辨識",
+                stopBtn: "停止辨識",
+                exportBtn: "輸出逐字稿",
+                toggleUiLangBtn: "Switch to English",
+                placeholder: "點擊「開始辨識」後,你的逐字稿將會顯示在這裡...",
+                micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。",
+                apiNotSupportedError: "您的瀏覽器不支援 Web Speech API,請使用最新版本的 Chrome 瀏覽器。",
+                controlBtnTooltipStart: "點擊以開始語音辨識",
+                controlBtnTooltipStop: "點擊以停止語音辨識",
+                exportBtnTooltip: "將逐字稿匯出為 .txt 檔案",
+                exportBtnTooltipDisabled: "停止辨識後才能匯出",
+                languageSelectorTooltip: "選擇要進行辨識的語言",
+                uiLangToggleTooltip: "切換使用者介面語言",
+                warningText: "本工具將把收到音檔上傳 Google 請謹慎使用",
+                privacySummary: "使用須知 & 隱私聲明",
+                howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google 的伺服器進行處理。請務必了解以下事項：",
+                suitableScenariosTitle: "適合的使用場景：",
+                suitableScenarios: [
+                    "輔助聆聽公開的線上演講、課程。",
+                    "轉錄影片、Podcast 等公開內容。",
+                    "個人學習、語言練習。"
+                ],
+                riskScenariosTitle: "高風險場景 (絕對不要使用)：",
+                riskScenarios: [
+                    "任何涉及<strong>商業機密</strong>或公司內部資訊的會議。",
+                    "任何涉及<strong>個人隱私</strong>的對話 (例如與醫生、律師的對話)。",
+                    "任何包含<strong>敏感個資</strong>的內容 (如身分證號、密碼等)。"
+                ],
+                privacyConclusion: "針對敏感內容,強烈建議使用像 Whisper 這樣完全在您本機離線運作的工具,以確保資料安全。"
+            }
+        };
 
-        // --- Language Options ---
-        const recognitionLangs = { "en-US": "English (US)", "en-GB": "English (UK)", "cmn-Hant-TW": "中文 (台灣)", "cmn-Hans-CN": "中文 (中国大陆)", "yue-Hant-HK": "粵語 (香港)", "ja-JP": "日本語", "ko-KR": "한국어", "es-ES": "Español (España)", "fr-FR": "Français", "de-DE": "Deutsch" };
-        const translationLangs = { "en": "English", "zh-TW": "中文 (繁體)", "zh-CN": "中文 (简体)", "ja": "日本語", "ko": "한국어", "es": "Español", "fr": "Français", "de": "Deutsch" };
-
-        // --- Translation Object ---
-        const translations = { /* ... (內容與之前相同，為節省空間省略) ... */ };
         let currentUiLang = 'zh';
+        let startTime, endTime;
+        let transcriptSegments = [];
+        let isRecognizing = false;
+        let interim_transcript = '';
+        let isManualStop = false;
+        let audioContext, microphoneStream, analyser, animationFrameId;
 
-        // --- State Variables ---
-        let startTime, endTime, transcriptSegments = [], isRecognizing = false, isManualStop = false, audioContext, microphoneStream, analyser, animationFrameId;
+        function setUiLanguage(lang) {
+            currentUiLang = lang;
+            const t = translations[lang];
+            
+            pageTitle.textContent = t.pageTitle;
+            mainTitle.textContent = t.mainTitle;
+            langLabel.textContent = t.langLabel;
+            exportBtn.textContent = t.exportBtn;
+            uiLangToggle.textContent = t.toggleUiLangBtn;
+            placeholderText.textContent = t.placeholder;
+            uiLangToggle.title = t.uiLangToggleTooltip;
+            languageSelector.title = t.languageSelectorTooltip;
+            warningText.textContent = t.warningText;
+            
+            privacySummary.textContent = t.privacySummary;
+            howItWorksText.textContent = t.howItWorksText;
+            suitableScenariosTitle.textContent = t.suitableScenariosTitle;
+            riskScenariosTitle.textContent = t.riskScenariosTitle;
+            privacyConclusion.innerHTML = t.privacyConclusion;
 
-        // --- UI Update Functions ---
-        function setUiLanguage(lang) { /* ... (內容與之前相同，為節省空間省略) ... */ }
-        function updateButtonStates() { /* ... (內容與之前相同，為節省空間省略) ... */ }
-        uiLangToggle.addEventListener('click', () => { setUiLanguage(currentUiLang === 'zh' ? 'en' : 'zh'); });
+            suitableScenariosList.innerHTML = t.suitableScenarios.map(item => `<li class="safe">${item}</li>`).join('');
+            riskScenariosList.innerHTML = t.riskScenarios.map(item => `<li class="unsafe">${item}</li>`).join('');
 
-        // --- Main Application Logic ---
+            updateButtonStates();
+        }
+
+        function updateButtonStates() {
+            const t = translations[currentUiLang];
+            controlBtn.textContent = isRecognizing ? t.stopBtn : t.startBtn;
+            controlBtn.title = isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
+            controlBtn.classList.toggle('listening', isRecognizing);
+            const canExport = !isRecognizing && transcriptSegments.length > 1;
+            exportBtn.disabled = !canExport;
+            exportBtn.title = canExport ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
+        }
+
+        uiLangToggle.addEventListener('click', () => {
+            const newLang = currentUiLang === 'zh' ? 'en' : 'zh';
+            setUiLanguage(newLang);
+        });
+
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
-            recognition.continuous = true; recognition.interimResults = true;
-            recognition.onstart = () => { isRecognizing = true; languageSelector.disabled = true; targetLangSelector.disabled = true; translateCheckbox.disabled = true; updateButtonStates(); console.log("Recognition started."); };
-            recognition.onerror = (event) => { console.error('Speech Recognition Error:', event.error, event.message); if (event.error === 'not-allowed') alert(translations[currentUiLang].micDeniedError); };
             
-            // --- 核心修正處 ---
-            recognition.onend = () => {
-                console.log("Recognition ended.");
-                if (!isManualStop && isRecognizing) {
-                    console.log("Attempting to restart recognition...");
-                    // 使用 setTimeout 確保在下一個事件循環中重啟
-                    setTimeout(() => {
-                        if (isRecognizing) { // 再次檢查狀態，避免在手動停止後還重啟
-                            recognition.start();
-                        }
-                    }, 100); // 100毫秒的延遲足夠且安全
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            recognition.continuous = !isMobile;
+            recognition.interimResults = true;
+            recognition.maxAlternatives = 1;
+
+            let restartTimeout;
+            let recognitionActive = false;
+
+            recognition.onstart = () => {
+                recognitionActive = true;
+                isRecognizing = true;
+                languageSelector.disabled = true;
+                updateButtonStates();
+                console.log('Recognition started');
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech Recognition Error:', event.error, event);
+                recognitionActive = false;
+                
+                if (event.error === 'not-allowed') {
+                    alert(translations[currentUiLang].micDeniedError);
+                } else if (event.error === 'no-speech') {
+                    console.log('No speech detected, will retry...');
+                } else if (event.error === 'network') {
+                    alert('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
                 } else {
-                    isRecognizing = false; languageSelector.disabled = false; targetLangSelector.disabled = false; translateCheckbox.disabled = false; endTime = new Date(); updateButtonStates(); stopAudioMeter();
-                    console.log("Recognition stopped manually or session ended.");
+                    console.log(`辨識錯誤: ${event.error}`);
                 }
             };
-            // --- 修正結束 ---
 
-            recognition.onresult = async (event) => { /* ... (內容與之前相同，為節省空間省略) ... */ };
-            async function translateText(text, segmentId) { /* ... (內容與之前相同，為節省空間省略) ... */ }
-            function updateTranscriptDisplay() { /* ... (內容與之前相同，為節省空間省略) ... */ }
+            recognition.onend = () => {
+                recognitionActive = false;
+                console.log('Recognition ended, isRecognizing:', isRecognizing, 'isManualStop:', isManualStop);
+                
+                if (!isManualStop && isRecognizing) {
+                    clearTimeout(restartTimeout);
+                    restartTimeout = setTimeout(() => {
+                        if (isRecognizing && !recognitionActive) {
+                            try {
+                                recognition.start();
+                                console.log('Auto-restarting recognition');
+                            } catch (e) {
+                                console.error('Failed to auto-restart:', e);
+                                // 在手機上如果重啟失敗,稍後再試
+                                if (isMobile) {
+                                    setTimeout(() => {
+                                        if (isRecognizing && !recognitionActive) {
+                                            try {
+                                                recognition.start();
+                                            } catch (e2) {
+                                                console.error('Second retry failed:', e2);
+                                            }
+                                        }
+                                    }, 1000);
+                                }
+                            }
+                        }
+                    }, 300);
+                } else {
+                    isRecognizing = false;
+                    languageSelector.disabled = false;
+                    endTime = new Date();
+                    updateButtonStates();
+                    stopAudioMeter();
+                    clearTimeout(restartTimeout);
+                }
+            };
+
+            recognition.onresult = (event) => {
+                interim_transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        if (transcript.trim()) transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
+                    } else {
+                        interim_transcript += transcript;
+                    }
+                }
+                updateTranscriptDisplay();
+            };
+            
+            function updateTranscriptDisplay() {
+                const finalContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
+                transcriptElement.innerHTML = `<span class="placeholder" id="placeholder-text" style="display:none;"></span>${finalContent}\n<span class="interim">${interim_transcript}</span>`;
+                transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+            }
+
             controlBtn.addEventListener('click', () => {
-                if (isRecognizing) { isManualStop = true; recognition.stop();
+                if (isRecognizing) {
+                    isManualStop = true;
+                    recognitionActive = false;
+                    recognition.stop();
+                    if (restartTimeout) clearTimeout(restartTimeout);
                 } else {
                     isManualStop = false;
-                    startAudioMeter().then(() => {
-                        recognition.lang = languageSelector.value; startTime = new Date(); transcriptSegments = [];
-                        transcriptSegments.push({ id: Date.now(), timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
-                        updateTranscriptDisplay(); recognition.start();
-                    }).catch(err => console.error("Could not start audio meter:", err));
+                    recognition.lang = languageSelector.value;
+                    startTime = new Date();
+                    transcriptSegments = [];
+                    interim_transcript = '';
+                    transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
+                    updateTranscriptDisplay();
+                    
+                    // 先啟動語音辨識,它會自動要求麥克風權限
+                    if (!recognitionActive) {
+                        try {
+                            recognition.start();
+                            console.log('Starting recognition with language:', languageSelector.value);
+                            // 語音辨識啟動後,再啟動音量條(使用同一個麥克風串流)
+                            setTimeout(() => {
+                                startAudioMeter().catch(err => {
+                                    console.warn("Could not start audio meter:", err);
+                                    // 音量條失敗不影響語音辨識
+                                });
+                            }, 500);
+                        } catch (e) {
+                            console.error('Failed to start recognition:', e);
+                            if (e.message.includes('already started')) {
+                                console.log('Force stopping and restarting...');
+                                recognition.stop();
+                                setTimeout(() => {
+                                    try {
+                                        recognition.start();
+                                    } catch (e2) {
+                                        console.error('Still failed:', e2);
+                                        alert('無法啟動語音辨識,請重新整理頁面再試。\nFailed to start recognition, please refresh and try again.');
+                                    }
+                                }, 500);
+                            } else {
+                                alert('無法啟動語音辨識,請重新整理頁面再試。\nFailed to start recognition, please refresh and try again.');
+                            }
+                        }
+                    }
                 }
             });
-            exportBtn.addEventListener('click', () => { /* ... (內容與之前相同，為節省空間省略) ... */ });
-        } else { alert(translations.en.apiNotSupportedError); }
 
-        // --- Utility Functions ---
-        function formatTime(date) { /* ... (內容與之前相同，為節省空間省略) ... */ }
-        async function startAudioMeter() { /* ... (內容與之前相同，為節省空間省略) ... */ }
-        function stopAudioMeter() { /* ... (內容與之前相同，為節省空間省略) ... */ }
-        function drawVolume() { /* ... (內容與之前相同，為節省空間省略) ... */ }
-        function formatTwoDigits(n) { return n < 10 ? '0' + n : n; }
-        function createFileName(start, end) { /* ... (內容與之前相同，為節省空間省略) ... */ }
+            exportBtn.addEventListener('click', () => {
+                if (!startTime || !endTime) return;
+                const textToSave = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
+                const fileName = createFileName(startTime, endTime);
+                const blob = new Blob([textToSave], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.click();
+                URL.revokeObjectURL(url);
+            });
 
-        // --- Initialize UI ---
+        } else {
+            alert(translations.en.apiNotSupportedError);
+        }
+
+        function formatTime(date) {
+            const h = formatTwoDigits(date.getHours());
+            const m = formatTwoDigits(date.getMinutes());
+            const s = formatTwoDigits(date.getSeconds());
+            return `[${h}:${m}:${s}]`;
+        }
+
+        async function startAudioMeter() {
+            if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported');
+            microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            const source = audioContext.createMediaStreamSource(microphoneStream);
+            source.connect(analyser);
+            drawVolume();
+        }
+
+        function stopAudioMeter() {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            microphoneStream?.getTracks().forEach(track => track.stop());
+            if (audioContext?.state !== 'closed') audioContext.close();
+            volumeLevel.style.width = '0%';
+        }
+
+        function drawVolume() {
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteTimeDomainData(dataArray);
+            let sumSquares = 0.0;
+            for (const amplitude of dataArray) {
+                const a = (amplitude / 128.0) - 1.0;
+                sumSquares += a * a;
+            }
+            const rms = Math.sqrt(sumSquares / dataArray.length);
+            const volume = Math.min(100, rms * 100 * 10);
+            volumeLevel.style.width = volume + '%';
+            animationFrameId = requestAnimationFrame(drawVolume);
+        }
+
+        function formatTwoDigits(n) {
+            return n < 10 ? '0' + n : n;
+        }
+
+        function createFileName(start, end) {
+            const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`;
+            const startTimeStr = `${formatTwoDigits(start.getHours())}-${formatTwoDigits(start.getMinutes())}-${formatTwoDigits(start.getSeconds())}`;
+            const endTimeStr = `${formatTwoDigits(end.getHours())}-${formatTwoDigits(end.getMinutes())}-${formatTwoDigits(end.getSeconds())}`;
+            return `${date}_${startTimeStr}_to_${endTimeStr}.txt`;
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
-            Object.keys(recognitionLangs).forEach(key => { const option = document.createElement('option'); option.value = key; option.textContent = recognitionLangs[key]; languageSelector.appendChild(option); });
-            Object.keys(translationLangs).forEach(key => { const option = document.createElement('option'); option.value = key; option.textContent = translationLangs[key]; targetLangSelector.appendChild(option); });
             const browserLang = navigator.language || navigator.userLanguage;
             setUiLanguage(browserLang.startsWith('zh') ? 'zh' : 'en');
         });
-
-        // --- 為了讓程式碼區塊完整，這裡複製了所有被省略的函式 ---
-        const t_en = { pageTitle: "Multilingual Real-time Transcription Tool", mainTitle: "Multilingual Real-time Transcription Tool", langLabel: "Recognize:", startBtn: "Start", stopBtn: "Stop", exportBtn: "Export", toggleUiLangBtn: "中文", placeholder: "Click 'Start' and your transcript will appear here...", micDeniedError: "You have denied microphone access. Please allow it to use this feature.", apiNotSupportedError: "Your browser does not support the Web Speech API. Please use Chrome.", controlBtnTooltipStart: "Click to start voice recognition", controlBtnTooltipStop: "Click to stop voice recognition", exportBtnTooltip: "Export the transcript as a .txt file", exportBtnTooltipDisabled: "Stop recognition to enable export", languageSelectorTooltip: "Select the language to be recognized", uiLangToggleTooltip: "Switch the user interface language", translateLabel: "Translate:", targetLangLabel: "To:", privacySummary: "Usage Guide & Privacy Notice", privacyContent: `<p>To convert speech to text, this tool sends your voice data to Google's servers. <strong>If translation is enabled, the finalized text transcript will ALSO be sent to Google's translation servers.</strong> Please be aware of the following:</p><h3>Suitable Scenarios:</h3><ul><li class="safe">Assisting in listening to public online lectures.</li><li class="safe">Transcribing public content like videos.</li><li class="safe">Personal language practice.</li></ul><h3>High-Risk Scenarios (DO NOT USE):</h3><ul><li class="unsafe">Meetings involving <strong>business secrets</strong>.</li><li class="unsafe">Conversations involving <strong>personal privacy</strong>.</li><li class="unsafe">Any content containing <strong>sensitive personal data</strong>.</li></ul><p>For sensitive content, it is strongly recommended to use offline tools like Whisper.</p>` };
-        const t_zh = { pageTitle: "多國語言即時逐字稿工具", mainTitle: "多國語言即時逐字稿工具", langLabel: "辨識語言:", startBtn: "開始", stopBtn: "停止", exportBtn: "輸出", toggleUiLangBtn: "English", placeholder: "點擊「開始」後，你的逐字稿將會顯示在這裡...", micDeniedError: "您拒絕了麥克風權限，請允許後再使用。", apiNotSupportedError: "您的瀏覽器不支援 Web Speech API，請使用最新版 Chrome。", controlBtnTooltipStart: "點擊以開始語音辨識", controlBtnTooltipStop: "點擊以停止語音辨識", exportBtnTooltip: "將逐字稿匯出為 .txt 檔案", exportBtnTooltipDisabled: "停止辨識後才能匯出", languageSelectorTooltip: "選擇要進行辨識的語言", uiLangToggleTooltip: "切換使用者介面語言", translateLabel: "啟用翻譯:", targetLangLabel: "翻譯目標:", privacySummary: "使用須知 & 隱私聲明", privacyContent: `<p>本工具透過瀏覽器內建 API 進行語音轉文字，這會將您的聲音資料傳送到 Google 的伺服器處理。<strong>若啟用翻譯，最終的逐字稿「文字」也將會被傳送到 Google 的翻譯伺服器。</strong>請務必了解：</p><h3>適合的使用場景：</h3><ul><li class="safe">輔助聆聽公開的線上演講、課程。</li><li class="safe">轉錄影片、Podcast 等公開內容。</li><li class="safe">個人學習、語言練習。</li></ul><h3>高風險場景 (絕對不要使用)：</h3><ul><li class="unsafe">任何涉及<strong>商業機密</strong>的會議。</li><li class="unsafe">任何涉及<strong>個人隱私</strong>的對話。</li><li class="unsafe">任何包含<strong>敏感個資</strong>的內容。</li></ul><p>針對敏感內容，強烈建議使用像 Whisper 這樣完全在您本機離線運作的工具。</p>` };
-        Object.assign(translations, { en: t_en, zh: t_zh });
-        function setUiLanguage(lang) { currentUiLang = lang; const t = translations[lang]; pageTitle.textContent = t.pageTitle; mainTitle.textContent = t.mainTitle; langLabel.textContent = t.langLabel; exportBtn.textContent = t.exportBtn; uiLangToggle.textContent = t.toggleUiLangBtn; placeholderText.textContent = t.placeholder; uiLangToggle.title = t.uiLangToggleTooltip; languageSelector.title = t.languageSelectorTooltip; translateLabel.textContent = t.translateLabel; targetLangLabel.textContent = t.targetLangLabel; privacySummary.textContent = t.privacySummary; privacyContent.innerHTML = t.privacyContent; updateButtonStates(); }
-        function updateButtonStates() { const t = translations[currentUiLang]; controlBtn.textContent = isRecognizing ? t.stopBtn : t.startBtn; controlBtn.title = isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart; const canExport = !isRecognizing && transcriptSegments.length > 1; exportBtn.disabled = !canExport; exportBtn.title = canExport ? t.exportBtnTooltip : t.exportBtnTooltipDisabled; }
-        recognition.onresult = async (event) => { let interim_transcript = ''; for (let i = event.resultIndex; i < event.results.length; ++i) { const transcript = event.results[i][0].transcript; if (event.results[i].isFinal) { if (transcript.trim()) { const segmentId = Date.now(); transcriptSegments.push({ id: segmentId, timestamp: new Date(), text: transcript.trim() }); updateTranscriptDisplay(); if (translateCheckbox.checked && SCRIPT_URL !== 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') { translateText(transcript.trim(), segmentId).catch(err => console.error("Translation failed:", err)); } } } else { interim_transcript += transcript; } } const interimSpan = document.getElementById('interim-span'); if(interimSpan) interimSpan.textContent = interim_transcript; };
-        async function translateText(text, segmentId) { const sourceLang = languageSelector.value.split('-')[0]; const targetLang = targetLangSelector.value; if (sourceLang === targetLang.split('-')[0]) return; const url = `${SCRIPT_URL}?text=${encodeURIComponent(text)}&source=${sourceLang}&target=${targetLang}`; const response = await fetch(url); const data = await response.json(); if (data.translatedText) { const segment = transcriptSegments.find(s => s.id === segmentId); if (segment) { segment.translation = data.translatedText; updateTranscriptDisplay(); } } else { console.error("Translation API Error:", data.error); } }
-        function updateTranscriptDisplay() { let html = ''; transcriptSegments.forEach(segment => { html += `<div class="segment"><span class="original">${formatTime(segment.timestamp)} ${segment.text}</span>`; if (segment.translation) { html += `<span class="translation">${segment.translation}</span>`; } html += `</div>`; }); html += `<span id="interim-span" class="interim"></span>`; transcriptElement.innerHTML = html; transcriptContainer.scrollTop = transcriptContainer.scrollHeight; }
-        exportBtn.addEventListener('click', () => { if (!startTime || !endTime) return; let textToSave = ''; transcriptSegments.forEach(s => { textToSave += `${formatTime(s.timestamp)} ${s.text}\r\n`; if(s.translation){ textToSave += `  -> ${s.translation}\r\n`; } textToSave += `\r\n`; }); const fileName = createFileName(startTime, endTime); const blob = new Blob([textToSave], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = fileName; a.click(); URL.revokeObjectURL(url); });
-        function formatTime(date) { const h = formatTwoDigits(date.getHours()), m = formatTwoDigits(date.getMinutes()), s = formatTwoDigits(date.getSeconds()); return `[${h}:${m}:${s}]`; }
-        async function startAudioMeter() { if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported'); microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true }); audioContext = new (window.AudioContext || window.webkitAudioContext)(); analyser = audioContext.createAnalyser(); const source = audioContext.createMediaStreamSource(microphoneStream); source.connect(analyser); drawVolume(); }
-        function stopAudioMeter() { if (animationFrameId) cancelAnimationFrame(animationFrameId); microphoneStream?.getTracks().forEach(track => track.stop()); if (audioContext?.state !== 'closed') audio-Context.close(); volumeLevel.style.width = '0%'; }
-        function drawVolume() { const dataArray = new Uint8Array(analyser.frequencyBinCount); analyser.getByteTimeDomainData(dataArray); let sumSquares = 0.0; for (const amplitude of dataArray) { const a = (amplitude / 128.0) - 1.0; sumSquares += a * a; } const rms = Math.sqrt(sumSquares / dataArray.length); const volume = Math.min(100, rms * 100 * 10); volumeLevel.style.width = volume + '%'; animationFrameId = requestAnimationFrame(drawVolume); }
-        function formatTwoDigits(n) { return n < 10 ? '0' + n : n; }
-        function createFileName(start, end) { const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`; const startTimeStr = `${formatTwoDigits(start.getHours())}-${formatTwoDigits(start.getMinutes())}`; const endTimeStr = `${formatTwoDigits(end.getHours())}-${formatTwoDigits(end.getMinutes())}`; return `${date}_${startTimeStr}_to_${endTimeStr}.txt`; }
     </script>
 </body>
 </html>
