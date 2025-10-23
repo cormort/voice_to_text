@@ -462,18 +462,14 @@
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
             
-            // 保留 isMobile 偵測，僅用於音量條
             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
             
-            // === 修正：一律使用 `continuous: false` ===
-            recognition.continuous = false;
+            recognition.continuous = false; // 保持 false
             recognition.interimResults = true;
             recognition.maxAlternatives = 1;
 
-            // 移除了 restartTimeout 和 silenceTimeout，不再需要
-
             let recognitionActive = false;
-            let lastResultTime = 0; // 保留 lastResultTime 供 onresult 檢查重複
+            let lastResultTime = 0;
 
             recognition.onstart = () => {
                 console.log('✅ REC: Started. Lang:', recognition.lang, 'Continuous:', recognition.continuous);
@@ -483,7 +479,7 @@
                 updateButtonStates();
             };
 
-            // === 修正：簡化 onerror ===
+            // === 修正：onerror 邏輯 ===
             recognition.onerror = (event) => {
                 console.error('Speech Recognition Error:', event.error, event);
                 recognitionActive = false;
@@ -491,46 +487,56 @@
                 if (event.error === 'not-allowed' || event.error === 'audio-capture') {
                     // 致命錯誤：麥克風權限或硬體問題
                     alert(event.error === 'not-allowed' ? translations[currentUiLang].micDeniedError : '麥克風擷取錯誤。');
-                    isRecognizing = false;
+                    isRecognizing = false; // 停止
                     isManualStop = true; // 標記為手動停止，防止 onend 重啟
-                    updateButtonStates();
+                    updateButtonStates(); // 更新UI
                 } else {
                     // 非致命錯誤 (如 'no-speech', 'network', 'aborted')
                     // 只要記錄下來，讓 onend() 自動處理重啟即可
                     console.warn(`⚠️ REC: Non-fatal error (${event.error}). Letting onend handle restart.`);
+                    // **注意：** 這裡 *不能* 設置 isRecognizing = false
+                    // 我們仍然 *想要* 辨識，只是這個回合失敗了
                 }
             };
 
-            // === 修正：核心重啟邏輯 ===
+            // === 修正：onend 邏輯 (加入 setTimeout) ===
             recognition.onend = () => {
-                console.log(`⏹️ REC: Ended. (ManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
+                console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
                 
                 if (isManualStop || !isRecognizing) {
-                    // 情況 1：使用者手動按下停止
-                    // 情況 2：辨識中途發生錯誤 (isRecognizing 已被設為 false)
-                    console.log('...Stop signal received. Cleaning up.');
-                    isRecognizing = false;
+                    // 情況 1：使用者手動按下停止 (isManualStop = true)
+                    // 情況 2：發生致命錯誤 (isRecognizing = false)
+                    console.log('...Stop chain. Cleaning up.');
+                    isRecognizing = false; // 確保狀態一致
                     languageSelector.disabled = false;
                     endTime = new Date();
                     updateButtonStates();
                     stopAudioMeter();
                 } else {
-                    // 情況 3：自動結束 (例如講完一句話)
-                    // 立刻重新啟動，準備接收下一句 (鏈式呼叫)
-                    try {
-                        console.log('🔄 REC: Auto-restarting (chaining)...');
-                        recognition.start();
-                    } catch (e) {
-                        console.error('Failed to auto-restart:', e);
-                        // 如果重啟失敗，只好放棄
-                        isRecognizing = false;
-                        updateButtonStates();
-                    }
+                    // 情況 3：自動結束 (例如講完一句話, 或 'no-speech' 錯誤)
+                    // 我們仍然想繼續辨識 (isRecognizing = true)
+                    
+                    // *** 關鍵修正：加入延遲 ***
+                    setTimeout(() => {
+                        // 在延遲後，再次檢查使用者是否 *剛好* 在這 100ms 內按了停止
+                        if (isRecognizing && !recognitionActive) { 
+                            try {
+                                console.log('🔄 REC: Auto-restarting (chaining)...');
+                                recognition.start();
+                            } catch (e) {
+                                console.error('Failed to auto-restart:', e);
+                                isRecognizing = false; // 放棄
+                                updateButtonStates(); // 更新UI
+                            }
+                        } else {
+                             console.log('...Restart cancelled (user stopped during 100ms timeout).');
+                        }
+                    }, 100); // <-- 增加 100ms 延遲
                 }
             };
 
-            // === 修正：移除 onresult 中的 mobile 邏輯 ===
+            // === (onresult 函式，保持不變) ===
             recognition.onresult = (event) => {
                 let local_interim_transcript = '';
                 let hasFinalResultInEvent = false;
@@ -569,8 +575,6 @@
                 }
 
                 updateTranscriptDisplay();
-                
-                // (移除了所有 isMobile 和 silenceTimeout 邏輯)
             };
             
             function updateTranscriptDisplay() {
@@ -579,18 +583,19 @@
                 transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
             }
 
-            // === 修正：移除 controlBtn 中的 timeout 清除 ===
+            // === (controlBtn 函式，保持不變) ===
             controlBtn.addEventListener('click', () => {
                 if (isRecognizing) {
                     // --- 停止辨識 ---
                     console.log('■ UI: Stop button clicked.');
                     isManualStop = true; // 設置旗標，讓 onend 知道是手動停止
+                    isRecognizing = false; // 立即更新 "意圖"
                     recognitionActive = false;
                     recognition.stop();
-                    // (移除了 timeout 清除)
                 } else {
                     // --- 開始辨識 ---
                     isManualStop = false; // 重設旗標
+                    isRecognizing = true; // 更新 "意圖"
                     recognition.lang = languageSelector.value;
                     console.log(`▶️ UI: Start button clicked. Lang: ${recognition.lang}`);
                     
@@ -602,7 +607,6 @@
                     updateTranscriptDisplay();
                     updateButtonStates(); 
                     
-                    // (保留了 isMobile 判斷，僅用於音量條)
                     if (isMobile) {
                         console.log('...Mobile detected, skipping audio meter.');
                     } else {
@@ -620,10 +624,11 @@
                             console.error('Failed to start recognition:', e);
                             if (e.message.includes('already started')) {
                                 console.warn('...forcing stop and restart.');
-                                recognition.stop(); // 先強制停止
+                                recognition.stop(); 
                                 setTimeout(() => {
                                     try {
-                                        isManualStop = false; // 確保重啟時旗標是 false
+                                        isManualStop = false; 
+                                        isRecognizing = true;
                                         recognition.start();
                                     } catch (e2) {
                                         console.error('Still failed:', e2);
