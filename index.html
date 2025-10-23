@@ -81,14 +81,15 @@
             margin-bottom: 20px;
             border: 2px solid rgba(255, 255, 255, 0.3);
             backdrop-filter: blur(10px);
-            /* === 修正：隱藏音量條 === */
-            display: none; 
+            /* === 修正：重新啟用音量條 === */
+            display: block; 
         }
         .volume-level {
             height: 100%; 
             width: 0%; 
             background: linear-gradient(90deg, #4CAF50, #8BC34A);
-            transition: width 0.1s ease-out;
+            /* === 修正：使用更平滑的 transition === */
+            transition: width 0.2s ease-out; 
             box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
         }
         .settings {
@@ -416,8 +417,6 @@
         let isRecognizing = false;
         let interim_transcript = '';
         let isManualStop = false;
-        // === 修正：移除 audioContext, microphoneStream, analyser, animationFrameId ===
-        // (這些變數只被已停用的音量條使用)
 
         // --- (UI 函式，保持不變) ---
         function setUiLanguage(lang) {
@@ -465,17 +464,15 @@
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
             
-            // (isMobile 變數不再需要，已移除)
-            
             recognition.continuous = false; // 保持 false
             recognition.interimResults = true;
             recognition.maxAlternatives = 1;
 
             let recognitionActive = false;
-            let lastResultTime = 0;
+            // (lastResultTime 不再需要)
 
             recognition.onstart = () => {
-                console.log('✅ REC: Started. Lang:', recognition.lang, 'Continuous:', recognition.continuous);
+                console.log('✅ REC: Started. Lang:', recognition.lang);
                 recognitionActive = true;
                 isRecognizing = true;
                 languageSelector.disabled = true;
@@ -498,11 +495,23 @@
                 }
             };
 
-            // === 修正：onend 邏輯 (增加延遲到 500ms) ===
+            // === 修正：onend 成為「儲存點」 ===
             recognition.onend = () => {
                 console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
                 
+                // *** 核心儲存邏輯 ***
+                // 檢查是否有「上一句話」的暫定結果
+                if (interim_transcript.trim()) {
+                    console.log('...Saving last interim chunk:', interim_transcript.trim());
+                    transcriptSegments.push({ timestamp: new Date(), text: interim_transcript.trim() });
+                    interim_transcript = ''; // 清空
+                    updateTranscriptDisplay(); // 更新畫面
+                }
+                
+                // 重設音量條
+                simulateVolume(0);
+
                 if (isManualStop || !isRecognizing) {
                     // 情況 1：使用者手動按下停止 (isManualStop = true)
                     // 情況 2：發生致命錯誤 (isRecognizing = false)
@@ -511,13 +520,11 @@
                     languageSelector.disabled = false;
                     endTime = new Date();
                     updateButtonStates();
-                    // (stopAudioMeter 呼叫已移除)
                 } else {
                     // 情況 3：自動結束 (例如講完一句話, 或 'no-speech' 錯誤)
                     
-                    // *** 關鍵修正：增加延遲 ***
+                    // 保持 500ms 延遲
                     setTimeout(() => {
-                        // 在延遲後，再次檢查使用者是否 *剛好* 在這 500ms 內按了停止
                         if (isRecognizing && !recognitionActive) { 
                             try {
                                 console.log('🔄 REC: Auto-restarting (chaining)...');
@@ -528,16 +535,15 @@
                                 updateButtonStates();
                             }
                         } else {
-                             console.log('...Restart cancelled (user stopped during 500ms timeout).');
+                             console.log('...Restart cancelled (user may have stopped).');
                         }
-                    }, 500); // <-- 增加到 500ms 延遲
+                    }, 500); 
                 }
             };
 
-            // === (onresult 邏輯，保持上一版的修正不變) ===
+            // === 修正：onresult 只負責更新暫定文字 ===
             recognition.onresult = (event) => {
-                let local_interim_append = '';
-                let hasFinalInEvent = false;
+                let local_interim = ''; // 用於組合此事件中的所有暫定結果
                 console.log(`🎙️ REC: onresult (length: ${event.results.length}, index: ${event.resultIndex})`);
 
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
@@ -545,42 +551,33 @@
                     const isFinal = event.results[i].isFinal;
                     console.log(`... Result ${i}: "${transcript}" | isFinal: ${isFinal}`);
 
-                    if (isFinal) {
-                        const final_text = transcript.trim();
-                        if (final_text) {
-                            const lastSegment = transcriptSegments[transcriptSegments.length - 1];
-                            const isDuplicate = lastSegment &&
-                                                lastSegment.text === final_text &&
-                                                (Date.now() - lastSegment.timestamp.getTime()) < 2000;
-
-                            if (!isDuplicate) {
-                                transcriptSegments.push({ timestamp: new Date(), text: final_text });
-                                console.log('... Added to final segments:', final_text);
-                                lastResultTime = Date.now();
-                                hasFinalInEvent = true;
-                            }
-                        }
-                    } else {
-                        local_interim_append += transcript;
+                    // 不再儲存 isFinal 的結果
+                    // 只需將所有非 final 的結果組合起來
+                    if (!isFinal) {
+                        local_interim += transcript;
                     }
                 }
                 
-                if (hasFinalInEvent) {
-                    interim_transcript = '';
-                } else if (local_interim_append) {
-                    interim_transcript = local_interim_append;
+                // 迴圈結束後，更新全域的 interim_transcript
+                // 這裡的邏輯是：瀏覽器會不斷回傳「整句話」的最新版本
+                if (local_interim) {
+                    interim_transcript = local_interim;
                 }
                 
+                // 更新畫面
                 updateTranscriptDisplay();
+                // 模擬音量
+                simulateVolume(interim_transcript.length);
             };
             
             function updateTranscriptDisplay() {
+                // 我們只顯示「已儲存」的 segments 和「目前」的 interim
                 const finalContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
                 transcriptElement.innerHTML = `<span class="placeholder" id="placeholder-text" style="display:none;"></span>${finalContent}\n<span class="interim">${interim_transcript}</span>`;
                 transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
             }
 
-            // === 修正：controlBtn 邏輯 (移除音量條) ===
+            // === (controlBtn 函式，保持不變) ===
             controlBtn.addEventListener('click', () => {
                 if (isRecognizing) {
                     // --- 停止辨識 ---
@@ -589,7 +586,7 @@
                     isRecognizing = false;
                     recognitionActive = false;
                     try {
-                        recognition.stop();
+                        recognition.stop(); // 這會觸發 onend, onend 中的儲存邏輯會執行
                     } catch (e) {
                         console.warn('Error stopping recognition:', e);
                     }
@@ -607,9 +604,6 @@
                     transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
                     updateTranscriptDisplay();
                     updateButtonStates(); 
-                    
-                    // === 修正：完全移除 startAudioMeter 的呼叫 ===
-                    console.log('...Audio meter disabled to prevent mic conflict.');
                     
                     if (!recognitionActive) {
                         try {
@@ -680,12 +674,21 @@
             return `${Y}-${M}-${D} ${h}:${m}:${s}`;
         }
 
-        // === 修正：移除 startAudioMeter, stopAudioMeter, drawVolume ===
-        /* (這些函式不再被呼叫，可以移除)
-        async function startAudioMeter() { ... }
-        function stopAudioMeter() { ... }
-        function drawVolume() { ... }
-        */
+        // === 新增：模擬音量條函式 ===
+        function simulateVolume(length) {
+            if (length === 0) {
+                volumeLevel.style.width = '0%';
+                return;
+            }
+            // 根據字數長度計算基礎寬度 (例如：每 2 個字 5%，上限 80%)
+            const baseWidth = Math.min(80, length * 2.5);
+            // 增加隨機性，讓它看起來在跳動 (例如：在 -5% 到 +15% 之間隨機)
+            const randomNoise = (Math.random() * 20) - 5;
+            // 確保寬度在 0% 到 100% 之間
+            const finalWidth = Math.max(0, Math.min(100, baseWidth + randomNoise));
+            
+            volumeLevel.style.width = finalWidth + '%';
+        }
 
         function formatTwoDigits(n) {
             return n < 10 ? '0' + n : n;
