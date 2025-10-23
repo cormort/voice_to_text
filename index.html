@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>即時語音轉文字工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        #transcript {
+            width: 80%;
+            height: 300px;
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        #controlBtn {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <textarea id="transcript" placeholder="你的逐字稿將會顯示在這裡..."></textarea>
+    <button id="controlBtn">開始辨識</button>
+
+    <script>
+        const transcriptElement = document.getElementById('transcript');
+        const controlBtn = document.getElementById('controlBtn');
+
+        // 檢查瀏覽器是否支援 Web Speech API
+        if ('webkitSpeechRecognition' in window) {
+            const recognition = new webkitSpeechRecognition();
+            let isRecognizing = false;
+            let final_transcript = '';
+
+            // 設定語音辨識的參數
+            recognition.continuous = true; // 連續辨識
+            recognition.interimResults = true; // 即時回傳結果
+            recognition.lang = 'cmn-Hant-TW'; // 設定語言為繁體中文
+
+            recognition.onstart = () => {
+                isRecognizing = true;
+                controlBtn.textContent = '停止辨識';
+            };
+
+            recognition.onerror = (event) => {
+                console.error(event.error);
+            };
+
+            recognition.onend = () => {
+                isRecognizing = false;
+                controlBtn.textContent = '開始辨識';
+            };
+
+            recognition.onresult = (event) => {
+                let interim_transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        final_transcript += event.results[i][0].transcript;
+                    } else {
+                        interim_transcript += event.results[i][0].transcript;
+                    }
+                }
+                transcriptElement.value = final_transcript + interim_transcript;
+            };
+
+            controlBtn.addEventListener('click', () => {
+                if (isRecognizing) {
+                    recognition.stop();
+                } else {
+                    final_transcript = ''; // 清除舊的逐字稿
+                    transcriptElement.value = '';
+                    recognition.start();
+                }
+            });
+
+        } else {
+            alert('你的瀏覽器不支援 Web Speech API，請使用最新版本的 Chrome 瀏覽器。');
+        }
+    </script>
+
+</body>
+</html>
