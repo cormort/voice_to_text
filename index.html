@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 修正：告訴瀏覽器沒有 favicon，避免 404 錯誤 -->
+    <link rel="icon" href="data:,">
     <title id="pageTitle">多國語言即時逐字稿工具</title>
     <style>
         body {
@@ -148,7 +150,6 @@
                 placeholder: "Click 'Start Recognition' and your transcript will appear here...",
                 micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
                 apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome.",
-                // Tooltips
                 controlBtnTooltipStart: "Click to start voice recognition",
                 controlBtnTooltipStop: "Click to stop voice recognition",
                 exportBtnTooltip: "Export the transcript as a .txt file",
@@ -167,7 +168,6 @@
                 placeholder: "點擊「開始辨識」後，你的逐字稿將會顯示在這裡...",
                 micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。",
                 apiNotSupportedError: "您的瀏覽器不支援 Web Speech API，請使用最新版本的 Chrome 瀏覽器。",
-                // Tooltips
                 controlBtnTooltipStart: "點擊以開始語音辨識",
                 controlBtnTooltipStop: "點擊以停止語音辨識",
                 exportBtnTooltip: "將逐字稿匯出為 .txt 檔案",
@@ -182,6 +182,7 @@
         let startTime, endTime;
         let transcriptSegments = [];
         let isRecognizing = false;
+        let interim_transcript = ''; // 修正：宣告在全域
         let audioContext, microphoneStream, analyser, animationFrameId;
 
         // --- UI Update Functions ---
@@ -196,7 +197,6 @@
             uiLangToggle.textContent = t.toggleUiLangBtn;
             placeholderText.textContent = t.placeholder;
             
-            // Set static tooltips
             uiLangToggle.title = t.uiLangToggleTooltip;
             languageSelector.title = t.languageSelectorTooltip;
 
@@ -229,6 +229,7 @@
                 languageSelector.disabled = true;
                 startTime = new Date();
                 transcriptSegments = [];
+                interim_transcript = ''; // 修正：在開始時重置
                 transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
                 updateTranscriptDisplay();
                 updateButtonStates();
@@ -249,7 +250,7 @@
             };
 
             recognition.onresult = (event) => {
-                let interim_transcript = '';
+                interim_transcript = ''; // 修正：在每次結果事件開始時清空
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
@@ -292,12 +293,14 @@
             });
 
         } else {
-            alert(translations.en.apiNotSupportedError); // Default to English if UI hasn't loaded
+            alert(translations.en.apiNotSupportedError);
         }
 
         // --- Utility Functions ---
         function formatTime(date) {
-            const h = formatTwoDigits(date.getHours()), m = formatTwoDigits(date.getMinutes()), s = formatTwoDigits(date.getSeconds());
+            const h = formatTwoDigits(date.getHours());
+            const m = formatTwoDigits(date.getMinutes());
+            const s = formatTwoDigits(date.getSeconds());
             return `[${h}:${m}:${s}]`;
         }
 
@@ -333,6 +336,7 @@
         }
 
         function formatTwoDigits(n) { return n < 10 ? '0' + n : n; }
+        
         function createFileName(start, end) {
             const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`;
             const startTimeStr = `${formatTwoDigits(start.getHours())}-${formatTwoDigits(start.getMinutes())}-${formatTwoDigits(start.getSeconds())}`;
