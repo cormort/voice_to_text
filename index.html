@@ -278,9 +278,9 @@
         <select id="languageSelector" title="選擇要進行辨識的語言">
             <option value="en-US">English (US)</option>
             <option value="en-GB">English (UK)</option>
-            <option value="cmn-Hant-TW">中文 (台灣)</option>
-            <option value="cmn-Hans-CN">中文 (中国大陆)</option>
-            <option value="yue-Hant-HK">粵語 (香港)</option>
+            <option value="zh-TW">中文 (台灣)</option>
+            <option value="zh-CN">中文 (中国大陆)</option>
+            <option value="zh-HK">粵語 (香港)</option>
             <option value="ja-JP">日本語</option>
             <option value="ko-KR">한국어</option>
             <option value="es-ES">Español (España)</option>
@@ -470,7 +470,10 @@
                 isRecognizing = true;
                 languageSelector.disabled = true;
                 updateButtonStates();
-                console.log('Recognition started');
+                console.log('✅ Recognition started successfully');
+                console.log('Language:', recognition.lang);
+                console.log('Continuous:', recognition.continuous);
+                console.log('InterimResults:', recognition.interimResults);
             };
 
             recognition.onerror = (event) => {
@@ -529,10 +532,13 @@
             recognition.onresult = (event) => {
                 console.log('onresult triggered, results length:', event.results.length);
                 interim_transcript = '';
+                let hasFinalResult = false;
+                
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
                     console.log(`Result ${i}: "${transcript}", isFinal: ${event.results[i].isFinal}, confidence: ${event.results[i][0].confidence}`);
                     if (event.results[i].isFinal) {
+                        hasFinalResult = true;
                         if (transcript.trim()) {
                             transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
                             console.log('Added to segments:', transcript.trim());
@@ -542,6 +548,21 @@
                     }
                 }
                 updateTranscriptDisplay();
+                
+                // 在手機上,辨識到最終結果後立即重啟
+                if (isMobile && hasFinalResult && isRecognizing) {
+                    console.log('Final result detected on mobile, will restart soon');
+                    setTimeout(() => {
+                        if (isRecognizing && !recognitionActive) {
+                            try {
+                                recognition.start();
+                                console.log('Quick restart after final result');
+                            } catch (e) {
+                                console.log('Quick restart failed, will use normal restart');
+                            }
+                        }
+                    }, 100);
+                }
             };
             
             function updateTranscriptDisplay() {
