@@ -314,6 +314,7 @@
     </div>
 
     <script>
+        // --- (DOM 元素選取，保持不變) ---
         const pageTitle = document.getElementById('pageTitle');
         const mainTitle = document.getElementById('main-title');
         const transcriptElement = document.getElementById('transcript');
@@ -334,6 +335,7 @@
         const riskScenariosList = document.getElementById('risk-scenarios-list');
         const privacyConclusion = document.getElementById('privacy-conclusion');
 
+        // --- (翻譯物件，保持不變) ---
         const translations = {
             en: {
                 pageTitle: "Multilingual Real-time Transcription Tool",
@@ -388,7 +390,7 @@
                 uiLangToggleTooltip: "切換使用者介面語言",
                 warningText: "本工具將把收到音檔上傳 Google 請謹慎使用",
                 privacySummary: "使用須知 & 隱私聲明",
-                howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google 的伺服器進行處理。請務必了解以下事項：",
+                howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google の伺服器進行處理。請務必了解以下事項：",
                 suitableScenariosTitle: "適合的使用場景：",
                 suitableScenarios: [
                     "輔助聆聽公開的線上演講、課程。",
@@ -405,6 +407,7 @@
             }
         };
 
+        // --- (全域變數，保持不變) ---
         let currentUiLang = 'zh';
         let startTime, endTime;
         let transcriptSegments = [];
@@ -413,6 +416,7 @@
         let isManualStop = false;
         let audioContext, microphoneStream, analyser, animationFrameId;
 
+        // --- (setUiLanguage, updateButtonStates, uiLangToggle 函式，保持不變) ---
         function setUiLanguage(lang) {
             currentUiLang = lang;
             const t = translations[lang];
@@ -444,7 +448,7 @@
             controlBtn.textContent = isRecognizing ? t.stopBtn : t.startBtn;
             controlBtn.title = isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
             controlBtn.classList.toggle('listening', isRecognizing);
-            const canExport = !isRecognizing && transcriptSegments.length > 1;
+            const canExport = !!startTime; 
             exportBtn.disabled = !canExport;
             exportBtn.title = canExport ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
         }
@@ -454,6 +458,7 @@
             setUiLanguage(newLang);
         });
 
+        // --- (Web Speech API 核心邏輯) ---
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
             
@@ -467,55 +472,67 @@
             let lastResultTime = 0;
             let silenceTimeout;
 
+            // === 恢復 Log ===
             recognition.onstart = () => {
+                console.log('✅ REC: Started. Lang:', recognition.lang, 'Continuous:', recognition.continuous);
                 recognitionActive = true;
                 isRecognizing = true;
                 languageSelector.disabled = true;
                 updateButtonStates();
             };
 
+            // === 修正：移除 blocking alerts ===
             recognition.onerror = (event) => {
                 console.error('Speech Recognition Error:', event.error, event);
                 recognitionActive = false;
                 
                 if (event.error === 'not-allowed') {
                     alert(translations[currentUiLang].micDeniedError);
-                    isRecognizing = false;
+                    isRecognizing = false; // 強制停止
                     updateButtonStates();
-                } else if (event.error === 'no-speech') {
-                    // 偵測到無語音，讓 onend 處理自動重啟
-                } else if (event.error === 'aborted') {
-                    // 正常中斷,不需處理
                 } else if (event.error === 'audio-capture') {
-                    console.error('Audio capture failed - microphone issue');
                     alert('麥克風錯誤,請確認:\n1. 麥克風權限已允許\n2. 沒有其他 App 正在使用麥克風\n3. 嘗試重新整理頁面');
-                    isRecognizing = false;
+                    isRecognizing = false; // 強制停止
                     updateButtonStates();
                 } else if (event.error === 'network') {
-                    alert('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
+                    // **不再使用 alert()**
+                    console.error('⚠️ REC: Network error. Will attempt to recover.');
+                    // 讓 onend 處理自動重啟
+                } else if (event.error === 'no-speech') {
+                    console.log('⚠️ REC: No speech detected.');
+                    // 讓 onend 處理自動重啟
+                } else if (event.error === 'aborted') {
+                    console.log('⚠️ REC: Aborted (often normal).');
+                    // 讓 onend 處理
                 }
             };
 
+            // === 恢復 Log ===
             recognition.onend = () => {
+                console.log(`⏹️ REC: Ended. (ManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
                 
                 if (!isManualStop && isRecognizing) {
+                    // 辨識服務自己停止了 (例如 'no-speech' 或 'network' 錯誤)，嘗試自動重啟
                     clearTimeout(restartTimeout);
                     
                     const timeSinceLastResult = Date.now() - lastResultTime;
                     const restartDelay = (timeSinceLastResult < 500 && isMobile) ? 1200 : (isMobile ? 400 : 300);
                     
+                    console.log(`...will attempt auto-restart in ${restartDelay}ms`);
+                    
                     restartTimeout = setTimeout(() => {
                         if (isRecognizing && !recognitionActive) {
                             try {
+                                console.log('🔄 REC: Auto-restarting...');
                                 recognition.start();
                             } catch (e) {
                                 console.error('Failed to auto-restart:', e);
-                                // 在某些行動裝置上，太快重啟會失敗，多嘗試一次
                                 if (isMobile) {
                                     setTimeout(() => {
                                         if (isRecognizing && !recognitionActive) {
                                             try {
+                                                console.log('🔄 REC: Second auto-restart attempt...');
                                                 recognition.start();
                                             } catch (e2) {
                                                 console.error('Second retry failed:', e2);
@@ -524,12 +541,15 @@
                                     }, 1000);
                                 }
                             }
+                        } else {
+                            console.log('...auto-restart cancelled (state changed).');
                         }
                     }, restartDelay);
                 } else {
+                    // 這是手動停止
                     isRecognizing = false;
                     languageSelector.disabled = false;
-                    endTime = new Date();
+                    endTime = new Date(); // 設定結束時間
                     updateButtonStates();
                     stopAudioMeter();
                     clearTimeout(restartTimeout);
@@ -537,21 +557,19 @@
                 }
             };
 
-            // === 優化的 onresult 處理程序 ===
+            // === 恢復 Log ===
             recognition.onresult = (event) => {
                 let local_interim_transcript = '';
                 let hasFinalResultInEvent = false;
                 let hasInterimResultInEvent = false;
 
-                // 迴圈從 event.resultIndex 開始，處理所有新的結果
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
+                    console.log(`🎙️ REC: Result (index ${i}): "${transcript}" | isFinal: ${event.results[i].isFinal}`);
 
                     if (event.results[i].isFinal) {
-                        // 這是最終確定的文字
                         const final_text = transcript.trim();
                         if (final_text) {
-                            // 檢查是否與最後一個片段重複
                             const lastSegment = transcriptSegments[transcriptSegments.length - 1];
                             const isDuplicate = lastSegment &&
                                                 lastSegment.text === final_text &&
@@ -561,29 +579,25 @@
                                 transcriptSegments.push({ timestamp: new Date(), text: final_text });
                                 lastResultTime = Date.now();
                                 hasFinalResultInEvent = true;
+                            } else {
+                                console.log('...skipped duplicate final result.');
                             }
                         }
                     } else {
-                        // 這是暫定的文字，將它累加到 local_interim_transcript
                         local_interim_transcript += transcript;
                         hasInterimResultInEvent = true;
                         lastResultTime = Date.now();
                     }
                 }
 
-                // 用剛剛組合好的 local_interim_transcript 更新全域的 interim_transcript
-                // 這會正確地顯示 "is there" -> "is there such" -> "is there such as"
                 interim_transcript = local_interim_transcript;
                 
-                // 如果這個事件中剛好有 "最終" 結果產生，
-                // 我們就清空暫定文字，因為它已經被確認並移到 transcriptSegments 了。
                 if (hasFinalResultInEvent) {
                     interim_transcript = '';
                 }
 
                 updateTranscriptDisplay();
                 
-                // --- (以下是您原有的手機重啟邏D輯，保持不變) ---
                 if (hasInterimResultInEvent) {
                     clearTimeout(silenceTimeout);
                 }
@@ -595,6 +609,7 @@
                         
                         if (timeSinceLastResult >= 800 && isRecognizing && !recognitionActive) {
                             try {
+                                console.log('🔄 REC: Restarting after mobile silence period...');
                                 recognition.start();
                             } catch (e) {
                                 console.error('Restart after silence failed:', e);
@@ -610,24 +625,32 @@
                 transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
             }
 
+            // === 恢復 Log ===
             controlBtn.addEventListener('click', () => {
                 if (isRecognizing) {
+                    // --- 停止辨識 ---
+                    console.log('■ UI: Stop button clicked.');
                     isManualStop = true;
                     recognitionActive = false;
                     recognition.stop();
                     if (restartTimeout) clearTimeout(restartTimeout);
                     if (silenceTimeout) clearTimeout(silenceTimeout);
                 } else {
+                    // --- 開始辨識 ---
                     isManualStop = false;
                     recognition.lang = languageSelector.value;
+                    console.log(`▶️ UI: Start button clicked. Lang: ${recognition.lang}`);
+                    
                     startTime = new Date();
+                    endTime = null; 
                     transcriptSegments = [];
                     interim_transcript = '';
                     transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
                     updateTranscriptDisplay();
+                    updateButtonStates(); 
                     
                     if (isMobile) {
-                        // Mobile detected, skipping audio meter to avoid conflicts
+                        console.log('...Mobile detected, skipping audio meter.');
                     } else {
                         setTimeout(() => {
                             startAudioMeter().catch(err => {
@@ -642,6 +665,7 @@
                         } catch (e) {
                             console.error('Failed to start recognition:', e);
                             if (e.message.includes('already started')) {
+                                console.warn('...forcing stop and restart.');
                                 recognition.stop();
                                 setTimeout(() => {
                                     try {
@@ -659,12 +683,17 @@
                 }
             });
 
+            // --- (匯出函式，保持不變) ---
             exportBtn.addEventListener('click', () => {
-                if (!startTime) return;
-                // 如果 endTime 不存在 (例如使用者尚未停止)，就使用現在的時間
+                if (!startTime) return; 
+                
                 const effectiveEndTime = endTime || new Date();
                 
-                const textToSave = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
+                const header = `--- 開始錄製時間 (Start Time) ---\r\n${formatFullDateTime(startTime)}\r\n\r\n--- 逐字稿內容 (Transcript) ---\r\n`;
+                const transcriptContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
+                const footer = `\r\n\r\n--- 匯出結束時間 (Export Time) ---\r\n${formatFullDateTime(effectiveEndTime)}\r\n`;
+                const textToSave = header + transcriptContent + footer;
+
                 const fileName = createFileName(startTime, effectiveEndTime);
                 const blob = new Blob([textToSave], { type: 'text/plain' });
                 const url = URL.createObjectURL(blob);
@@ -679,11 +708,23 @@
             alert(translations.en.apiNotSupportedError);
         }
 
+        // --- (輔助函式 (Helper Functions)，保持不變) ---
+
         function formatTime(date) {
             const h = formatTwoDigits(date.getHours());
             const m = formatTwoDigits(date.getMinutes());
             const s = formatTwoDigits(date.getSeconds());
             return `[${h}:${m}:${s}]`;
+        }
+
+        function formatFullDateTime(date) {
+            const Y = date.getFullYear();
+            const M = formatTwoDigits(date.getMonth() + 1);
+            const D = formatTwoDigits(date.getDate());
+            const h = formatTwoDigits(date.getHours());
+            const m = formatTwoDigits(date.getMinutes());
+            const s = formatTwoDigits(date.getSeconds());
+            return `${Y}-${M}-${D} ${h}:${m}:${s}`;
         }
 
         async function startAudioMeter() {
