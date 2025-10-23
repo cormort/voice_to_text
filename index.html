@@ -495,7 +495,7 @@
                 }
             };
 
-            // === 修正：onend 邏輯 (增加延遲) ===
+            // === (onend 邏輯，保持 300ms 延遲不變) ===
             recognition.onend = () => {
                 console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
@@ -512,9 +512,8 @@
                 } else {
                     // 情況 3：自動結束 (例如講完一句話, 或 'no-speech' 錯誤)
                     
-                    // *** 關鍵修正：增加延遲 ***
+                    // 保持 300ms 延遲
                     setTimeout(() => {
-                        // 在延遲後，再次檢查使用者是否 *剛好* 在這 300ms 內按了停止
                         if (isRecognizing && !recognitionActive) { 
                             try {
                                 console.log('🔄 REC: Auto-restarting (chaining)...');
@@ -527,14 +526,15 @@
                         } else {
                              console.log('...Restart cancelled (user stopped during 300ms timeout).');
                         }
-                    }, 300); // <-- 增加到 300ms 延遲
+                    }, 300); 
                 }
             };
 
-            // === 修正：onresult 邏輯 (更穩健的處理) ===
+            // === 修正：重寫 onresult 邏輯 ===
             recognition.onresult = (event) => {
-                let local_interim = '';
-                console.log(`🎙️ REC: onresult (length: ${event.results.length})`);
+                let local_interim_append = ''; // 用於累加 *此事件中* 的所有暫定結果
+                let hasFinalInEvent = false;
+                console.log(`🎙️ REC: onresult (length: ${event.results.length}, index: ${event.resultIndex})`);
 
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     const transcript = event.results[i][0].transcript;
@@ -542,10 +542,10 @@
                     console.log(`... Result ${i}: "${transcript}" | isFinal: ${isFinal}`);
 
                     if (isFinal) {
-                        // 這是最終結果，將它加入到永久儲存區
+                        // 這是最終結果
                         const final_text = transcript.trim();
                         if (final_text) {
-                            // 檢查是否與最後一個片段重複 (有時 API 會重複發送)
+                            // 檢查是否與最後一個片段重複
                             const lastSegment = transcriptSegments[transcriptSegments.length - 1];
                             const isDuplicate = lastSegment &&
                                                 lastSegment.text === final_text &&
@@ -555,18 +555,25 @@
                                 transcriptSegments.push({ timestamp: new Date(), text: final_text });
                                 console.log('... Added to final segments:', final_text);
                                 lastResultTime = Date.now();
+                                hasFinalInEvent = true;
                             }
                         }
-                        // 因為這句話已經結束了，所以清除暫定文字
-                        local_interim = ''; 
                     } else {
-                        // 這是暫定結果，它會 *覆蓋* 舊的暫定文字
-                        local_interim = transcript;
+                        // 這是暫定結果，將它們 *累加* 起來
+                        local_interim_append += transcript;
                     }
                 }
                 
-                // 迴圈結束後，更新全域的暫定文字
-                interim_transcript = local_interim;
+                // 迴圈結束後，更新全域的 interim_transcript
+                if (hasFinalInEvent) {
+                    // 如果這個事件中包含了一個「最終」結果，表示這句話結束了，清除暫定文字
+                    interim_transcript = '';
+                } else if (local_interim_append) {
+                    // 如果這個事件中 *只* 包含暫定結果，就用它來更新 (或覆蓋) 全域的暫定文字
+                    interim_transcript = local_interim_append;
+                }
+                
+                // 最後，呼叫 UI 更新
                 updateTranscriptDisplay();
             };
             
