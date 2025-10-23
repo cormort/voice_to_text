@@ -81,6 +81,8 @@
             margin-bottom: 20px;
             border: 2px solid rgba(255, 255, 255, 0.3);
             backdrop-filter: blur(10px);
+            /* === 修正：隱藏音量條 === */
+            display: none; 
         }
         .volume-level {
             height: 100%; 
@@ -414,7 +416,8 @@
         let isRecognizing = false;
         let interim_transcript = '';
         let isManualStop = false;
-        let audioContext, microphoneStream, analyser, animationFrameId;
+        // === 修正：移除 audioContext, microphoneStream, analyser, animationFrameId ===
+        // (這些變數只被已停用的音量條使用)
 
         // --- (UI 函式，保持不變) ---
         function setUiLanguage(lang) {
@@ -462,7 +465,7 @@
         if ('webkitSpeechRecognition' in window) {
             const recognition = new webkitSpeechRecognition();
             
-            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            // (isMobile 變數不再需要，已移除)
             
             recognition.continuous = false; // 保持 false
             recognition.interimResults = true;
@@ -495,7 +498,7 @@
                 }
             };
 
-            // === (onend 邏輯，保持 300ms 延遲不變) ===
+            // === 修正：onend 邏輯 (增加延遲到 500ms) ===
             recognition.onend = () => {
                 console.log(`⏹️ REC: Ended. (isManualStop: ${isManualStop}, isRecognizing: ${isRecognizing})`);
                 recognitionActive = false;
@@ -508,12 +511,13 @@
                     languageSelector.disabled = false;
                     endTime = new Date();
                     updateButtonStates();
-                    stopAudioMeter();
+                    // (stopAudioMeter 呼叫已移除)
                 } else {
                     // 情況 3：自動結束 (例如講完一句話, 或 'no-speech' 錯誤)
                     
-                    // 保持 300ms 延遲
+                    // *** 關鍵修正：增加延遲 ***
                     setTimeout(() => {
+                        // 在延遲後，再次檢查使用者是否 *剛好* 在這 500ms 內按了停止
                         if (isRecognizing && !recognitionActive) { 
                             try {
                                 console.log('🔄 REC: Auto-restarting (chaining)...');
@@ -524,15 +528,15 @@
                                 updateButtonStates();
                             }
                         } else {
-                             console.log('...Restart cancelled (user stopped during 300ms timeout).');
+                             console.log('...Restart cancelled (user stopped during 500ms timeout).');
                         }
-                    }, 300); 
+                    }, 500); // <-- 增加到 500ms 延遲
                 }
             };
 
-            // === 修正：重寫 onresult 邏輯 ===
+            // === (onresult 邏輯，保持上一版的修正不變) ===
             recognition.onresult = (event) => {
-                let local_interim_append = ''; // 用於累加 *此事件中* 的所有暫定結果
+                let local_interim_append = '';
                 let hasFinalInEvent = false;
                 console.log(`🎙️ REC: onresult (length: ${event.results.length}, index: ${event.resultIndex})`);
 
@@ -542,10 +546,8 @@
                     console.log(`... Result ${i}: "${transcript}" | isFinal: ${isFinal}`);
 
                     if (isFinal) {
-                        // 這是最終結果
                         const final_text = transcript.trim();
                         if (final_text) {
-                            // 檢查是否與最後一個片段重複
                             const lastSegment = transcriptSegments[transcriptSegments.length - 1];
                             const isDuplicate = lastSegment &&
                                                 lastSegment.text === final_text &&
@@ -559,21 +561,16 @@
                             }
                         }
                     } else {
-                        // 這是暫定結果，將它們 *累加* 起來
                         local_interim_append += transcript;
                     }
                 }
                 
-                // 迴圈結束後，更新全域的 interim_transcript
                 if (hasFinalInEvent) {
-                    // 如果這個事件中包含了一個「最終」結果，表示這句話結束了，清除暫定文字
                     interim_transcript = '';
                 } else if (local_interim_append) {
-                    // 如果這個事件中 *只* 包含暫定結果，就用它來更新 (或覆蓋) 全域的暫定文字
                     interim_transcript = local_interim_append;
                 }
                 
-                // 最後，呼叫 UI 更新
                 updateTranscriptDisplay();
             };
             
@@ -583,7 +580,7 @@
                 transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
             }
 
-            // === (controlBtn 函式，保持不變) ===
+            // === 修正：controlBtn 邏輯 (移除音量條) ===
             controlBtn.addEventListener('click', () => {
                 if (isRecognizing) {
                     // --- 停止辨識 ---
@@ -611,15 +608,8 @@
                     updateTranscriptDisplay();
                     updateButtonStates(); 
                     
-                    if (isMobile) {
-                        console.log('...Mobile detected, skipping audio meter.');
-                    } else {
-                        setTimeout(() => {
-                            startAudioMeter().catch(err => {
-                                console.warn("Could not start audio meter:", err);
-                            });
-                        }, 500);
-                    }
+                    // === 修正：完全移除 startAudioMeter 的呼叫 ===
+                    console.log('...Audio meter disabled to prevent mic conflict.');
                     
                     if (!recognitionActive) {
                         try {
@@ -671,7 +661,7 @@
             alert(translations.en.apiNotSupportedError);
         }
 
-        // --- (輔助函式 (Helper Functions)，保持不變) ---
+        // --- (輔助函式 (Helper Functions)) ---
 
         function formatTime(date) {
             const h = formatTwoDigits(date.getHours());
@@ -690,36 +680,12 @@
             return `${Y}-${M}-${D} ${h}:${m}:${s}`;
         }
 
-        async function startAudioMeter() {
-            if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported');
-            microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioContext.createAnalyser();
-            const source = audioContext.createMediaStreamSource(microphoneStream);
-            source.connect(analyser);
-            drawVolume();
-        }
-
-        function stopAudioMeter() {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            microphoneStream?.getTracks().forEach(track => track.stop());
-            if (audioContext?.state !== 'closed') audioContext.close();
-            volumeLevel.style.width = '0%';
-        }
-
-        function drawVolume() {
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteTimeDomainData(dataArray);
-            let sumSquares = 0.0;
-            for (const amplitude of dataArray) {
-                const a = (amplitude / 128.0) - 1.0;
-                sumSquares += a * a;
-            }
-            const rms = Math.sqrt(sumSquares / dataArray.length);
-            const volume = Math.min(100, rms * 100 * 10);
-            volumeLevel.style.width = volume + '%';
-            animationFrameId = requestAnimationFrame(drawVolume);
-        }
+        // === 修正：移除 startAudioMeter, stopAudioMeter, drawVolume ===
+        /* (這些函式不再被呼叫，可以移除)
+        async function startAudioMeter() { ... }
+        function stopAudioMeter() { ... }
+        function drawVolume() { ... }
+        */
 
         function formatTwoDigits(n) {
             return n < 10 ? '0' + n : n;
