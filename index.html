@@ -6,6 +6,7 @@
     <link rel="icon" href="data:,">
     <title id="pageTitle">多國語言即時逐字稿工具</title>
     <style>
+        /* ... 您的原有 CSS ... */
         * {
             margin: 0;
             padding: 0;
@@ -144,6 +145,11 @@
         button:active {
             transform: translateY(2px);
         }
+        button:disabled { 
+            background: linear-gradient(135deg, #9E9E9E 0%, #BDBDBD 100%);
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
         #controlBtn { 
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: 2px solid rgba(255, 255, 255, 0.3);
@@ -172,16 +178,21 @@
             background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
             border: 2px solid rgba(255, 255, 255, 0.3);
         }
-        #exportBtn:hover { 
+        #exportBtn:hover:not(:disabled) { 
             box-shadow: 0 6px 20px rgba(17, 153, 142, 0.4);
             transform: translateY(-2px);
         }
-        #exportBtn:disabled { 
-            background: linear-gradient(135deg, #9E9E9E 0%, #BDBDBD 100%);
-            cursor: not-allowed;
-            opacity: 0.6;
+        
+        /* [新增] 複製按鈕樣式 */
+        #copyBtn {
+            background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+            border: 2px solid rgba(255, 255, 255, 0.3);
         }
-
+        #copyBtn:hover:not(:disabled) {
+            box-shadow: 0 6px 20px rgba(253, 160, 133, 0.4);
+            transform: translateY(-2px);
+        }
+        
         .warning-notice {
             background: rgba(255, 193, 7, 0.95);
             color: #000;
@@ -250,7 +261,7 @@
             color: #FF6B6B;
             font-weight: 700;
         }
-
+        
         @media (max-width: 768px) {
             h1 { font-size: 22px; margin: 50px 20px 20px 20px; }
             .transcript-container { height: 40vh; }
@@ -292,6 +303,8 @@
     <div class="controls">
         <div class="button-row">
             <button id="controlBtn" title="點擊以開始語音辨識">開始辨識</button>
+            <!-- [新增] 複製按鈕 -->
+            <button id="copyBtn" disabled title="停止辨識後才能複製">複製內容</button>
             <button id="exportBtn" disabled title="停止辨識後才能匯出">輸出逐字稿</button>
         </div>
         <div class="warning-notice" id="warning-text">
@@ -314,26 +327,33 @@
     </div>
 
     <script>
-        const pageTitle = document.getElementById('pageTitle');
-        const mainTitle = document.getElementById('main-title');
-        const transcriptElement = document.getElementById('transcript');
-        const transcriptContainer = document.getElementById('transcriptContainer');
-        const controlBtn = document.getElementById('controlBtn');
-        const exportBtn = document.getElementById('exportBtn');
-        const volumeLevel = document.getElementById('volumeLevel');
-        const languageSelector = document.getElementById('languageSelector');
-        const langLabel = document.getElementById('lang-label');
-        const uiLangToggle = document.getElementById('uiLangToggle');
-        const placeholderText = document.getElementById('placeholder-text');
-        const warningText = document.getElementById('warning-text');
-        const privacySummary = document.getElementById('privacy-summary');
-        const howItWorksText = document.getElementById('how-it-works-text');
-        const suitableScenariosTitle = document.getElementById('suitable-scenarios-title');
-        const suitableScenariosList = document.getElementById('suitable-scenarios-list');
-        const riskScenariosTitle = document.getElementById('risk-scenarios-title');
-        const riskScenariosList = document.getElementById('risk-scenarios-list');
-        const privacyConclusion = document.getElementById('privacy-conclusion');
+    // 使用 IIFE (立即調用函式表達式) 避免污染全域作用域
+    (function() {
+        // [優化] 集中管理所有 DOM 元素
+        const UIElements = {
+            pageTitle: document.getElementById('pageTitle'),
+            mainTitle: document.getElementById('main-title'),
+            transcript: document.getElementById('transcript'),
+            transcriptContainer: document.getElementById('transcriptContainer'),
+            controlBtn: document.getElementById('controlBtn'),
+            exportBtn: document.getElementById('exportBtn'),
+            copyBtn: document.getElementById('copyBtn'),
+            volumeLevel: document.getElementById('volumeLevel'),
+            languageSelector: document.getElementById('languageSelector'),
+            langLabel: document.getElementById('lang-label'),
+            uiLangToggle: document.getElementById('uiLangToggle'),
+            placeholderText: document.getElementById('placeholder-text'),
+            warningText: document.getElementById('warning-text'),
+            privacySummary: document.getElementById('privacy-summary'),
+            howItWorksText: document.getElementById('how-it-works-text'),
+            suitableScenariosTitle: document.getElementById('suitable-scenarios-title'),
+            suitableScenariosList: document.getElementById('suitable-scenarios-list'),
+            riskScenariosTitle: document.getElementById('risk-scenarios-title'),
+            riskScenariosList: document.getElementById('risk-scenarios-list'),
+            privacyConclusion: document.getElementById('privacy-conclusion'),
+        };
 
+        // 多國語言翻譯內容 (保持不變)
         const translations = {
             en: {
                 pageTitle: "Multilingual Real-time Transcription Tool",
@@ -342,6 +362,7 @@
                 startBtn: "Start Recognition",
                 stopBtn: "Stop Recognition",
                 exportBtn: "Export Transcript",
+                copyBtn: "Copy Transcript",
                 toggleUiLangBtn: "切换到中文",
                 placeholder: "Click 'Start Recognition' and your transcript will appear here...",
                 micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
@@ -350,23 +371,19 @@
                 controlBtnTooltipStop: "Click to stop voice recognition",
                 exportBtnTooltip: "Export the transcript as a .txt file",
                 exportBtnTooltipDisabled: "Stop recognition to enable export",
+                copyBtnTooltip: "Copy the transcript to your clipboard",
+                copyBtnTooltipDisabled: "Stop recognition to enable copy",
                 languageSelectorTooltip: "Select the language to be recognized",
                 uiLangToggleTooltip: "Switch the user interface language",
                 warningText: "This tool uploads audio to Google. Use with caution.",
+                copiedSuccess: "Copied to clipboard!",
+                copiedError: "Copy failed. Please try again.",
                 privacySummary: "Usage Guide & Privacy Notice",
                 howItWorksText: "To convert speech to text, this tool uses the browser's built-in Web Speech API, which sends your voice data to Google's servers for processing. Please be aware of the following:",
                 suitableScenariosTitle: "Suitable Scenarios:",
-                suitableScenarios: [
-                    "Assisting in listening to public online lectures, webinars, or courses.",
-                    "Transcribing public content like videos or podcasts.",
-                    "Personal learning and language practice."
-                ],
+                suitableScenarios: ["Assisting in listening to public online lectures, webinars, or courses.", "Transcribing public content like videos or podcasts.", "Personal learning and language practice."],
                 riskScenariosTitle: "High-Risk Scenarios (DO NOT USE):",
-                riskScenarios: [
-                    "Meetings involving <strong>business secrets</strong> or confidential information.",
-                    "Conversations involving <strong>personal privacy</strong> (e.g., with doctors, lawyers).",
-                    "Any content containing <strong>sensitive personal data</strong> (ID numbers, passwords, etc.)."
-                ],
+                riskScenarios: ["Meetings involving <strong>business secrets</strong> or confidential information.", "Conversations involving <strong>personal privacy</strong> (e.g., with doctors, lawyers).", "Any content containing <strong>sensitive personal data</strong> (ID numbers, passwords, etc.)."],
                 privacyConclusion: "For sensitive content, it is strongly recommended to use offline tools like Whisper that process data entirely on your local machine."
             },
             zh: {
@@ -376,6 +393,7 @@
                 startBtn: "開始辨識",
                 stopBtn: "停止辨識",
                 exportBtn: "輸出逐字稿",
+                copyBtn: "複製內容",
                 toggleUiLangBtn: "Switch to English",
                 placeholder: "點擊「開始辨識」後,你的逐字稿將會顯示在這裡...",
                 micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。",
@@ -384,293 +402,347 @@
                 controlBtnTooltipStop: "點擊以停止語音辨識",
                 exportBtnTooltip: "將逐字稿匯出為 .txt 檔案",
                 exportBtnTooltipDisabled: "停止辨識後才能匯出",
+                copyBtnTooltip: "將逐字稿複製到剪貼簿",
+                copyBtnTooltipDisabled: "停止辨識後才能複製",
                 languageSelectorTooltip: "選擇要進行辨識的語言",
                 uiLangToggleTooltip: "切換使用者介面語言",
                 warningText: "本工具將把收到音檔上傳 Google 請謹慎使用",
+                copiedSuccess: "已複製到剪貼簿！",
+                copiedError: "複製失敗，請重試。",
                 privacySummary: "使用須知 & 隱私聲明",
                 howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google 的伺服器進行處理。請務必了解以下事項：",
                 suitableScenariosTitle: "適合的使用場景：",
-                suitableScenarios: [
-                    "輔助聆聽公開的線上演講、課程。",
-                    "轉錄影片、Podcast 等公開內容。",
-                    "個人學習、語言練習。"
-                ],
+                suitableScenarios: ["輔助聆聽公開的線上演講、課程。", "轉錄影片、Podcast 等公開內容。", "個人學習、語言練習。"],
                 riskScenariosTitle: "高風險場景 (絕對不要使用)：",
-                riskScenarios: [
-                    "任何涉及<strong>商業機密</strong>或公司內部資訊的會議。",
-                    "任何涉及<strong>個人隱私</strong>的對話 (例如與醫生、律師的對話)。",
-                    "任何包含<strong>敏感個資</strong>的內容 (如身分證號、密碼等)。"
-                ],
+                riskScenarios: ["任何涉及<strong>商業機密</strong>或公司內部資訊的會議。", "任何涉及<strong>個人隱私</strong>的對話 (例如與醫生、律師的對話)。", "任何包含<strong>敏感個資</strong>的內容 (如身分證號、密碼等)。"],
                 privacyConclusion: "針對敏感內容,強烈建議使用像 Whisper 這樣完全在您本機離線運作的工具,以確保資料安全。"
             }
         };
 
-        let currentUiLang = 'zh';
-        let startTime, endTime;
-        let transcriptSegments = [];
-        let isRecognizing = false;
-        let interim_transcript = '';
-        let isManualStop = false;
-        let audioContext, microphoneStream, analyser, animationFrameId;
+        // [優化] 集中管理應用程式狀態
+        const state = {
+            currentUiLang: 'zh',
+            startTime: null,
+            endTime: null,
+            transcriptSegments: [],
+            isRecognizing: false,
+            interimTranscript: '',
+            isManualStop: false,
+            recognition: null,
+            isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+            restartTimeout: null,
+            recognitionActive: false,
+        };
+        
+        // 音量條的獨立狀態管理
+        const audioState = {
+            context: null,
+            stream: null,
+            analyser: null,
+            animationFrameId: null,
+        };
+        
+        /**
+         * 初始化應用程式
+         */
+        function init() {
+            loadPreferences();
+            setupEventListeners();
+            initSpeechRecognition();
+            setUiLanguage(state.currentUiLang);
+        }
 
+        /**
+         * 統一設定所有事件監聽器
+         */
+        function setupEventListeners() {
+            UIElements.uiLangToggle.addEventListener('click', toggleUiLanguage);
+            UIElements.controlBtn.addEventListener('click', toggleRecognition);
+            UIElements.exportBtn.addEventListener('click', exportTranscript);
+            UIElements.copyBtn.addEventListener('click', copyTranscript);
+            UIElements.languageSelector.addEventListener('change', () => {
+                if (state.recognition) {
+                    state.recognition.lang = UIElements.languageSelector.value;
+                }
+                savePreferences();
+            });
+        }
+
+        /**
+         * 初始化 Web Speech API 辨識引擎
+         */
+        function initSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window)) {
+                alert(translations.en.apiNotSupportedError);
+                UIElements.controlBtn.disabled = true;
+                return;
+            }
+            state.recognition = new webkitSpeechRecognition();
+            state.recognition.continuous = !state.isMobile;
+            state.recognition.interimResults = true;
+            state.recognition.maxAlternatives = 1;
+            
+            state.recognition.onstart = handleRecognitionStart;
+            state.recognition.onerror = handleRecognitionError;
+            state.recognition.onend = handleRecognitionEnd;
+            state.recognition.onresult = handleRecognitionResult;
+        }
+
+        /**
+         * 切換 UI 語言
+         */
+        function toggleUiLanguage() {
+            const newLang = state.currentUiLang === 'zh' ? 'en' : 'zh';
+            setUiLanguage(newLang);
+            savePreferences();
+        }
+
+        /**
+         * 根據指定語言更新所有 UI 文字
+         * @param {string} lang - 'en' 或 'zh'
+         */
         function setUiLanguage(lang) {
-            currentUiLang = lang;
+            state.currentUiLang = lang;
             const t = translations[lang];
             
-            pageTitle.textContent = t.pageTitle;
-            mainTitle.textContent = t.mainTitle;
-            langLabel.textContent = t.langLabel;
-            exportBtn.textContent = t.exportBtn;
-            uiLangToggle.textContent = t.toggleUiLangBtn;
-            placeholderText.textContent = t.placeholder;
-            uiLangToggle.title = t.uiLangToggleTooltip;
-            languageSelector.title = t.languageSelectorTooltip;
-            warningText.textContent = t.warningText;
+            UIElements.pageTitle.textContent = t.pageTitle;
+            UIElements.mainTitle.textContent = t.mainTitle;
+            UIElements.langLabel.textContent = t.langLabel;
+            UIElements.exportBtn.textContent = t.exportBtn;
+            UIElements.copyBtn.textContent = t.copyBtn;
+            UIElements.uiLangToggle.textContent = t.toggleUiLangBtn;
+            UIElements.placeholderText.textContent = t.placeholder;
+            UIElements.uiLangToggle.title = t.uiLangToggleTooltip;
+            UIElements.languageSelector.title = t.languageSelectorTooltip;
+            UIElements.warningText.textContent = t.warningText;
             
-            privacySummary.textContent = t.privacySummary;
-            howItWorksText.textContent = t.howItWorksText;
-            suitableScenariosTitle.textContent = t.suitableScenariosTitle;
-            riskScenariosTitle.textContent = t.riskScenariosTitle;
-            privacyConclusion.innerHTML = t.privacyConclusion;
+            UIElements.privacySummary.textContent = t.privacySummary;
+            UIElements.howItWorksText.textContent = t.howItWorksText;
+            UIElements.suitableScenariosTitle.textContent = t.suitableScenariosTitle;
+            UIElements.riskScenariosTitle.textContent = t.riskScenariosTitle;
+            UIElements.privacyConclusion.innerHTML = t.privacyConclusion;
 
-            suitableScenariosList.innerHTML = t.suitableScenarios.map(item => `<li class="safe">${item}</li>`).join('');
-            riskScenariosList.innerHTML = t.riskScenarios.map(item => `<li class="unsafe">${item}</li>`).join('');
+            UIElements.suitableScenariosList.innerHTML = t.suitableScenarios.map(item => `<li class="safe">${item}</li>`).join('');
+            UIElements.riskScenariosList.innerHTML = t.riskScenarios.map(item => `<li class="unsafe">${item}</li>`).join('');
 
             updateButtonStates();
         }
-
+        
+        /**
+         * 更新所有按鈕的狀態 (文字、啟用/禁用、提示)
+         */
         function updateButtonStates() {
-            const t = translations[currentUiLang];
-            controlBtn.textContent = isRecognizing ? t.stopBtn : t.startBtn;
-            controlBtn.title = isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
-            controlBtn.classList.toggle('listening', isRecognizing);
-            const canExport = !isRecognizing && transcriptSegments.length > 1;
-            exportBtn.disabled = !canExport;
-            exportBtn.title = canExport ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
+            const t = translations[state.currentUiLang];
+            UIElements.controlBtn.textContent = state.isRecognizing ? t.stopBtn : t.startBtn;
+            UIElements.controlBtn.title = state.isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
+            UIElements.controlBtn.classList.toggle('listening', state.isRecognizing);
+            
+            const canExportOrCopy = !state.isRecognizing && state.transcriptSegments.length > 1;
+            UIElements.exportBtn.disabled = !canExportOrCopy;
+            UIElements.copyBtn.disabled = !canExportOrCopy;
+            
+            UIElements.exportBtn.title = canExportOrCopy ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
+            UIElements.copyBtn.title = canExportOrCopy ? t.copyBtnTooltip : t.copyBtnTooltipDisabled;
         }
 
-        uiLangToggle.addEventListener('click', () => {
-            const newLang = currentUiLang === 'zh' ? 'en' : 'zh';
-            setUiLanguage(newLang);
-        });
-
-        if ('webkitSpeechRecognition' in window) {
-            const recognition = new webkitSpeechRecognition();
+        /**
+         * 開始或停止語音辨識
+         */
+        function toggleRecognition() {
+            if (state.isRecognizing) {
+                stopRecognition();
+            } else {
+                startRecognition();
+            }
+        }
+        
+        /**
+         * 開始語音辨識
+         */
+        function startRecognition() {
+            state.isManualStop = false;
+            state.recognition.lang = UIElements.languageSelector.value;
+            state.startTime = new Date();
+            state.transcriptSegments = [{ timestamp: state.startTime, text: '--- Recording Start / 錄音開始 ---' }];
+            state.interimTranscript = '';
             
-            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            recognition.continuous = !isMobile;
-            recognition.interimResults = true;
-            recognition.maxAlternatives = 1;
+            updateTranscriptDisplay();
+            
+            if (!state.isMobile) {
+                setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), 300);
+            }
+            
+            try {
+                if (!state.recognitionActive) state.recognition.start();
+            } catch (e) {
+                console.error("Error starting recognition:", e);
+                alert("無法啟動語音辨識，請重新整理頁面再試。\nFailed to start recognition, please refresh and try again.");
+            }
+        }
 
-            let restartTimeout;
-            let recognitionActive = false;
+        /**
+         * 手動停止語音辨識
+         */
+        function stopRecognition() {
+            state.isManualStop = true;
+            if (state.recognitionActive) {
+                state.recognition.stop();
+            } else {
+                // 如果辨識引擎已自行停止但狀態未更新，手動觸發結束流程
+                handleRecognitionEnd();
+            }
+        }
 
-            recognition.onstart = () => {
-                recognitionActive = true;
-                isRecognizing = true;
-                languageSelector.disabled = true;
-                updateButtonStates();
-                console.log('✅ Recognition started successfully');
-                console.log('Language:', recognition.lang);
-                console.log('Continuous:', recognition.continuous);
-                console.log('InterimResults:', recognition.interimResults);
-            };
+        // --- SpeechRecognition 事件處理函式 ---
 
-            recognition.onerror = (event) => {
-                console.error('Speech Recognition Error:', event.error, event);
-                recognitionActive = false;
-                
-                if (event.error === 'not-allowed') {
-                    alert(translations[currentUiLang].micDeniedError);
-                } else if (event.error === 'no-speech') {
-                    console.log('No speech detected, will retry...');
-                } else if (event.error === 'network') {
-                    alert('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
-                } else {
-                    console.log(`辨識錯誤: ${event.error}`);
-                }
-            };
+        function handleRecognitionStart() {
+            state.recognitionActive = true;
+            state.isRecognizing = true;
+            UIElements.languageSelector.disabled = true;
+            updateButtonStates();
+            console.log('✅ Recognition started successfully');
+        }
 
-            recognition.onend = () => {
-                recognitionActive = false;
-                console.log('Recognition ended, isRecognizing:', isRecognizing, 'isManualStop:', isManualStop);
-                
-                if (!isManualStop && isRecognizing) {
-                    clearTimeout(restartTimeout);
-                    // 手機上用較短的延遲時間
-                    const restartDelay = isMobile ? 200 : 300;
-                    restartTimeout = setTimeout(() => {
-                        if (isRecognizing && !recognitionActive) {
-                            try {
-                                recognition.start();
-                                console.log('Auto-restarting recognition');
-                            } catch (e) {
-                                console.error('Failed to auto-restart:', e);
-                                // 在手機上如果重啟失敗,稍後再試
-                                if (isMobile) {
-                                    setTimeout(() => {
-                                        if (isRecognizing && !recognitionActive) {
-                                            try {
-                                                recognition.start();
-                                                console.log('Second retry successful');
-                                            } catch (e2) {
-                                                console.error('Second retry failed:', e2);
-                                            }
-                                        }
-                                    }, 800);
-                                }
-                            }
+        function handleRecognitionError(event) {
+            console.error('Speech Recognition Error:', event.error, event);
+            state.recognitionActive = false;
+            if (event.error === 'not-allowed') {
+                alert(translations[state.currentUiLang].micDeniedError);
+            } else if (event.error === 'no-speech') {
+                console.log('No speech detected, will retry...');
+            } else if (event.error === 'network') {
+                alert('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
+            }
+        }
+
+        function handleRecognitionEnd() {
+            state.recognitionActive = false;
+            clearTimeout(state.restartTimeout);
+
+            if (!state.isManualStop && state.isRecognizing) {
+                const restartDelay = state.isMobile ? 200 : 500;
+                state.restartTimeout = setTimeout(() => {
+                    if (state.isRecognizing && !state.recognitionActive) {
+                        try {
+                            state.recognition.start();
+                            console.log('Auto-restarting recognition');
+                        } catch (e) {
+                            console.error('Failed to auto-restart:', e);
                         }
-                    }, restartDelay);
-                } else {
-                    isRecognizing = false;
-                    languageSelector.disabled = false;
-                    endTime = new Date();
-                    updateButtonStates();
-                    stopAudioMeter();
-                    clearTimeout(restartTimeout);
-                }
-            };
-
-            recognition.onresult = (event) => {
-                console.log('onresult triggered, results length:', event.results.length);
-                interim_transcript = '';
-                let hasFinalResult = false;
-                
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    const transcript = event.results[i][0].transcript;
-                    console.log(`Result ${i}: "${transcript}", isFinal: ${event.results[i].isFinal}, confidence: ${event.results[i][0].confidence}`);
-                    if (event.results[i].isFinal) {
-                        hasFinalResult = true;
-                        if (transcript.trim()) {
-                            transcriptSegments.push({ timestamp: new Date(), text: transcript.trim() });
-                            console.log('Added to segments:', transcript.trim());
-                        }
-                    } else {
-                        interim_transcript += transcript;
                     }
+                }, restartDelay);
+            } else {
+                state.isRecognizing = false;
+                UIElements.languageSelector.disabled = false;
+                state.endTime = new Date();
+                updateButtonStates();
+                stopAudioMeter();
+            }
+        }
+
+        function handleRecognitionResult(event) {
+            state.interimTranscript = '';
+            let final_transcript_this_turn = '';
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    final_transcript_this_turn += transcript.trim() + ' ';
+                } else {
+                    state.interimTranscript += transcript;
                 }
-                updateTranscriptDisplay();
-                
-                // 在手機上,辨識到最終結果後立即重啟
-                if (isMobile && hasFinalResult && isRecognizing) {
-                    console.log('Final result detected on mobile, will restart soon');
-                    setTimeout(() => {
-                        if (isRecognizing && !recognitionActive) {
-                            try {
-                                recognition.start();
-                                console.log('Quick restart after final result');
-                            } catch (e) {
-                                console.log('Quick restart failed, will use normal restart');
-                            }
-                        }
-                    }, 100);
-                }
-            };
-            
-            function updateTranscriptDisplay() {
-                const finalContent = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
-                transcriptElement.innerHTML = `<span class="placeholder" id="placeholder-text" style="display:none;"></span>${finalContent}\n<span class="interim">${interim_transcript}</span>`;
-                transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
             }
 
-            controlBtn.addEventListener('click', () => {
-                if (isRecognizing) {
-                    isManualStop = true;
-                    recognitionActive = false;
-                    recognition.stop();
-                    if (restartTimeout) clearTimeout(restartTimeout);
-                } else {
-                    isManualStop = false;
-                    recognition.lang = languageSelector.value;
-                    startTime = new Date();
-                    transcriptSegments = [];
-                    interim_transcript = '';
-                    transcriptSegments.push({ timestamp: startTime, text: '--- Recording Start / 錄音開始 ---' });
-                    updateTranscriptDisplay();
-                    
-                    // 手機上不啟動音量條,避免麥克風衝突
-                    if (isMobile) {
-                        console.log('Mobile detected, skipping audio meter to avoid conflicts');
-                    } else {
-                        // 桌面版才啟動音量條
-                        setTimeout(() => {
-                            startAudioMeter().catch(err => {
-                                console.warn("Could not start audio meter:", err);
-                            });
-                        }, 500);
-                    }
-                    
-                    // 啟動語音辨識
-                    if (!recognitionActive) {
-                        try {
-                            recognition.start();
-                            console.log('Starting recognition with language:', languageSelector.value);
-                        } catch (e) {
-                            console.error('Failed to start recognition:', e);
-                            if (e.message.includes('already started')) {
-                                console.log('Force stopping and restarting...');
-                                recognition.stop();
-                                setTimeout(() => {
-                                    try {
-                                        recognition.start();
-                                    } catch (e2) {
-                                        console.error('Still failed:', e2);
-                                        alert('無法啟動語音辨識,請重新整理頁面再試。\nFailed to start recognition, please refresh and try again.');
-                                    }
-                                }, 500);
-                            } else {
-                                alert('無法啟動語音辨識,請重新整理頁面再試。\nFailed to start recognition, please refresh and try again.');
-                            }
-                        }
-                    }
-                }
-            });
+            if (final_transcript_this_turn) {
+                state.transcriptSegments.push({ timestamp: new Date(), text: final_transcript_this_turn.trim() });
+            }
 
-            exportBtn.addEventListener('click', () => {
-                if (!startTime || !endTime) return;
-                const textToSave = transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\r\n');
-                const fileName = createFileName(startTime, endTime);
-                const blob = new Blob([textToSave], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = fileName;
-                a.click();
-                URL.revokeObjectURL(url);
-            });
+            updateTranscriptDisplay();
+        }
+        
+        // --- 逐字稿顯示與檔案處理 ---
 
-        } else {
-            alert(translations.en.apiNotSupportedError);
+        function updateTranscriptDisplay() {
+            const finalContent = state.transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
+            UIElements.transcript.innerHTML = `<span class="placeholder" id="placeholder-text" style="display:none;"></span>${finalContent}\n<span class="interim">${state.interimTranscript}</span>`;
+            UIElements.transcriptContainer.scrollTop = UIElements.transcriptContainer.scrollHeight;
         }
 
-        function formatTime(date) {
-            const h = formatTwoDigits(date.getHours());
-            const m = formatTwoDigits(date.getMinutes());
-            const s = formatTwoDigits(date.getSeconds());
-            return `[${h}:${m}:${s}]`;
+        function getFullTranscriptText() {
+            return state.transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
         }
 
+        function exportTranscript() {
+            if (!state.startTime || !state.endTime) return;
+            const textToSave = getFullTranscriptText().replace(/\n/g, '\r\n');
+            const fileName = createFileName(state.startTime, state.endTime);
+            const blob = new Blob([textToSave], { type: 'text/plain;charset=utf-8' });
+            
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+        }
+
+        function copyTranscript() {
+            if (state.transcriptSegments.length <= 1) return;
+
+            const textToCopy = getFullTranscriptText();
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                alert(translations[state.currentUiLang].copiedSuccess);
+            }, (err) => {
+                console.error('Could not copy text: ', err);
+                alert(translations[state.currentUiLang].copiedError);
+            });
+        }
+        
+        // --- 使用者偏好設定 (localStorage) ---
+        function savePreferences() {
+            localStorage.setItem('stt_ui_lang', state.currentUiLang);
+            localStorage.setItem('stt_rec_lang', UIElements.languageSelector.value);
+        }
+
+        function loadPreferences() {
+            const savedUiLang = localStorage.getItem('stt_ui_lang');
+            const savedRecLang = localStorage.getItem('stt_rec_lang');
+            const browserLang = navigator.language || navigator.userLanguage;
+            
+            // 優先載入儲存的設定，若無則根據瀏覽器語言判斷
+            state.currentUiLang = savedUiLang || (browserLang.startsWith('zh') ? 'zh' : 'en');
+            
+            if (savedRecLang) {
+                UIElements.languageSelector.value = savedRecLang;
+            }
+        }
+
+        // --- 音量條相關函式 ---
         async function startAudioMeter() {
             if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported');
-            microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioContext.createAnalyser();
-            const source = audioContext.createMediaStreamSource(microphoneStream);
-            source.connect(analyser);
+            if(audioState.context) return; // 避免重複啟動
+            
+            audioState.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioState.context = new (window.AudioContext || window.webkitAudioContext)();
+            audioState.analyser = audioState.context.createAnalyser();
+            const source = audioState.context.createMediaStreamSource(audioState.stream);
+            source.connect(audioState.analyser);
             drawVolume();
         }
 
         function stopAudioMeter() {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            microphoneStream?.getTracks().forEach(track => track.stop());
-            if (audioContext?.state !== 'closed') audioContext.close();
-            volumeLevel.style.width = '0%';
+            if (audioState.animationFrameId) cancelAnimationFrame(audioState.animationFrameId);
+            audioState.stream?.getTracks().forEach(track => track.stop());
+            if (audioState.context?.state !== 'closed') {
+                audioState.context.close().then(() => audioState.context = null);
+            }
+            UIElements.volumeLevel.style.width = '0%';
         }
 
         function drawVolume() {
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteTimeDomainData(dataArray);
+            const dataArray = new Uint8Array(audioState.analyser.frequencyBinCount);
+            audioState.analyser.getByteTimeDomainData(dataArray);
             let sumSquares = 0.0;
             for (const amplitude of dataArray) {
                 const a = (amplitude / 128.0) - 1.0;
@@ -678,25 +750,32 @@
             }
             const rms = Math.sqrt(sumSquares / dataArray.length);
             const volume = Math.min(100, rms * 100 * 10);
-            volumeLevel.style.width = volume + '%';
-            animationFrameId = requestAnimationFrame(drawVolume);
+            UIElements.volumeLevel.style.width = volume + '%';
+            audioState.animationFrameId = requestAnimationFrame(drawVolume);
+        }
+
+        // --- 工具函式 ---
+        function formatTime(date) {
+            const h = formatTwoDigits(date.getHours());
+            const m = formatTwoDigits(date.getMinutes());
+            const s = formatTwoDigits(date.getSeconds());
+            return `[${h}:${m}:${s}]`;
         }
 
         function formatTwoDigits(n) {
-            return n < 10 ? '0' + n : n;
+            return n < 10 ? '0' + n : String(n);
         }
 
         function createFileName(start, end) {
             const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`;
             const startTimeStr = `${formatTwoDigits(start.getHours())}-${formatTwoDigits(start.getMinutes())}-${formatTwoDigits(start.getSeconds())}`;
             const endTimeStr = `${formatTwoDigits(end.getHours())}-${formatTwoDigits(end.getMinutes())}-${formatTwoDigits(end.getSeconds())}`;
-            return `${date}_${startTimeStr}_to_${endTimeStr}.txt`;
+            return `transcript_${date}_${startTimeStr}_to_${endTimeStr}.txt`;
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            const browserLang = navigator.language || navigator.userLanguage;
-            setUiLanguage(browserLang.startsWith('zh') ? 'zh' : 'en');
-        });
+        // 應用程式進入點
+        document.addEventListener('DOMContentLoaded', init);
+    })();
     </script>
 </body>
 </html>
