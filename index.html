@@ -433,8 +433,8 @@
     (function() {
         const VOSK_CDN = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
         const VOSK_BUILTIN_MODELS = {
-            cn: 'models/vosk-model-small-cn-0.22.zip',
-            en: 'models/vosk-model-small-en-us-0.15.zip',
+            cn: new URL('models/vosk-model-small-cn-0.22.zip', document.baseURI).href,
+            en: new URL('models/vosk-model-small-en-us-0.15.zip', document.baseURI).href,
         };
 
         const UIElements = {
