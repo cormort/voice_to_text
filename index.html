@@ -6,7 +6,6 @@
     <link rel="icon" href="data:,">
     <title id="pageTitle">多國語言即時逐字稿工具</title>
     <style>
-        /* ... 您的原有 CSS ... */
         * {
             margin: 0;
             padding: 0;
@@ -37,11 +36,11 @@
             backdrop-filter: blur(10px);
             transition: all 0.3s ease;
         }
-        #uiLangToggle:hover { 
+        #uiLangToggle:hover {
             background-color: rgba(255, 255, 255, 0.3);
             transform: translateY(-2px);
         }
-        h1 { 
+        h1 {
             color: white;
             margin: 60px 0 30px 0;
             font-size: 28px;
@@ -58,8 +57,9 @@
             border-radius: 16px;
             background-color: #fff;
             box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            overflow-y: scroll;
+            overflow-y: auto;
             padding: 20px;
+            scroll-behavior: smooth;
         }
         #transcript {
             white-space: pre-wrap;
@@ -72,6 +72,7 @@
         }
         .interim { color: #888; font-style: italic; }
         .placeholder { color: #999; }
+
         .volume-meter {
             width: 90%;
             max-width: 900px;
@@ -84,12 +85,16 @@
             backdrop-filter: blur(10px);
         }
         .volume-level {
-            height: 100%; 
-            width: 0%; 
+            height: 100%;
+            width: 100%;
             background: linear-gradient(90deg, #4CAF50, #8BC34A);
-            transition: width 0.1s ease-out;
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.1s ease-out;
+            will-change: transform;
             box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
         }
+
         .settings {
             display: flex;
             align-items: center;
@@ -100,13 +105,11 @@
             border-radius: 12px;
             backdrop-filter: blur(10px);
             border: 2px solid rgba(255, 255, 255, 0.2);
+            flex-wrap: wrap;
+            justify-content: center;
         }
-        #lang-label {
-            color: white;
-            font-weight: 600;
-            font-size: 15px;
-        }
-        #languageSelector {
+        .settings label { color: white; font-weight: 600; font-size: 15px; }
+        .settings select, .settings input[type="url"] {
             padding: 10px 15px;
             font-size: 15px;
             border: 2px solid rgba(255, 255, 255, 0.3);
@@ -116,21 +119,89 @@
             font-weight: 500;
             transition: all 0.3s ease;
         }
-        #languageSelector:hover {
+        .settings select:hover, .settings input[type="url"]:hover {
             background: white;
             border-color: rgba(255, 255, 255, 0.5);
         }
-        .controls { 
-            display: flex; 
+
+        .vosk-config {
+            width: 90%;
+            max-width: 900px;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 15px 25px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            display: none;
+        }
+        .vosk-config.visible { display: block; }
+        .vosk-config .row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .vosk-config label { color: white; font-weight: 600; font-size: 14px; min-width: 80px; }
+        .vosk-config select, .vosk-config input[type="url"] {
+            flex: 1;
+            min-width: 200px;
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.9);
+        }
+        #loadModelBtn {
+            padding: 8px 20px;
+            font-size: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        #loadModelBtn:hover:not(:disabled) {
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            transform: translateY(-1px);
+        }
+        #loadModelBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .model-progress {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+            display: none;
+        }
+        .model-progress.visible { display: block; }
+        .model-progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .model-status {
+            color: white;
+            font-size: 13px;
+            margin-top: 8px;
+            text-align: center;
+        }
+        .model-status.error { color: #ff6b6b; }
+        .model-status.success { color: #8BC34A; }
+
+        .controls {
+            display: flex;
             flex-direction: column;
-            gap: 15px; 
+            gap: 15px;
             margin-bottom: 20px;
             align-items: center;
         }
-        .button-row {
-            display: flex;
-            gap: 15px;
-        }
+        .button-row { display: flex; gap: 15px; }
         button {
             padding: 14px 30px;
             font-size: 16px;
@@ -142,21 +213,19 @@
             font-weight: 600;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
         }
-        button:active {
-            transform: translateY(2px);
-        }
-        button:disabled { 
+        button:active { transform: translateY(2px); }
+        button:disabled {
             background: linear-gradient(135deg, #9E9E9E 0%, #BDBDBD 100%);
             cursor: not-allowed;
             opacity: 0.6;
         }
-        #controlBtn { 
+        #controlBtn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: 2px solid rgba(255, 255, 255, 0.3);
             position: relative;
             min-width: 160px;
         }
-        #controlBtn:hover { 
+        #controlBtn:hover:not(:disabled) {
             box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
             transform: translateY(-2px);
         }
@@ -174,25 +243,32 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.3; }
         }
-        #exportBtn { 
+        #exportBtn {
             background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
             border: 2px solid rgba(255, 255, 255, 0.3);
         }
-        #exportBtn:hover:not(:disabled) { 
+        #exportBtn:hover:not(:disabled) {
             box-shadow: 0 6px 20px rgba(17, 153, 142, 0.4);
             transform: translateY(-2px);
         }
-        
-        /* [新增] 複製按鈕樣式 */
         #copyBtn {
             background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
             border: 2px solid rgba(255, 255, 255, 0.3);
+            min-width: 130px;
+        }
+        #clearBtn {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+        #clearBtn:hover:not(:disabled) {
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+            transform: translateY(-2px);
         }
         #copyBtn:hover:not(:disabled) {
             box-shadow: 0 6px 20px rgba(253, 160, 133, 0.4);
             transform: translateY(-2px);
         }
-        
+
         .warning-notice {
             background: rgba(255, 193, 7, 0.95);
             color: #000;
@@ -209,10 +285,12 @@
             justify-content: center;
             gap: 8px;
         }
-        .warning-notice::before {
-            content: '⚠️';
-            font-size: 18px;
+        .warning-notice::before { content: '⚠️'; font-size: 18px; }
+        .warning-notice.offline {
+            background: rgba(76, 175, 80, 0.95);
+            border-color: rgba(56, 142, 60, 0.5);
         }
+        .warning-notice.offline::before { content: '🔒'; }
 
         .privacy-notice {
             width: 90%;
@@ -235,39 +313,26 @@
             color: white;
             font-size: 15px;
         }
-        .privacy-notice summary:hover {
-            background: rgba(255, 255, 255, 0.1);
-        }
+        .privacy-notice summary:hover { background: rgba(255, 255, 255, 0.1); }
         .privacy-notice .content {
             padding: 0 20px 20px 20px;
             line-height: 1.6;
             color: white;
         }
-        .privacy-notice h3 {
-            margin-top: 15px;
-            margin-bottom: 8px;
-            color: #FFD54F;
-        }
-        .privacy-notice ul {
-            padding-left: 20px;
-            margin: 0;
-        }
-        .privacy-notice ul li {
-            margin-bottom: 8px;
-        }
+        .privacy-notice h3 { margin-top: 15px; margin-bottom: 8px; color: #FFD54F; }
+        .privacy-notice ul { padding-left: 20px; margin: 0; }
+        .privacy-notice ul li { margin-bottom: 8px; }
         .privacy-notice ul li.safe::before { content: '✅ '; }
         .privacy-notice ul li.unsafe::before { content: '❌ '; }
-        .privacy-notice strong { 
-            color: #FF6B6B;
-            font-weight: 700;
-        }
-        
+        .privacy-notice strong { color: #FF6B6B; font-weight: 700; }
+
         @media (max-width: 768px) {
             h1 { font-size: 22px; margin: 50px 20px 20px 20px; }
             .transcript-container { height: 40vh; }
             .button-row { flex-direction: column; width: 100%; }
             button { width: 100%; }
             .settings { flex-direction: column; width: 90%; }
+            .vosk-config .row { flex-direction: column; align-items: stretch; }
         }
     </style>
 </head>
@@ -275,16 +340,21 @@
     <button id="uiLangToggle" title="Switch the user interface language">Switch to English</button>
 
     <h1 id="main-title">多國語言即時逐字稿工具</h1>
-    
+
     <div class="transcript-container" id="transcriptContainer">
-        <pre id="transcript"><span class="placeholder" id="placeholder-text"></span></pre>
+        <pre id="transcript"><span class="placeholder" id="placeholder-text"></span><span id="final-text"></span><span id="interim-text" class="interim"></span></pre>
     </div>
-    
+
     <div class="volume-meter">
         <div class="volume-level" id="volumeLevel"></div>
     </div>
 
     <div class="settings">
+        <label for="engineSelector" id="engine-label">引擎:</label>
+        <select id="engineSelector">
+            <option value="webspeech">Web Speech API (Google)</option>
+            <option value="vosk">Vosk (離線)</option>
+        </select>
         <label for="languageSelector" id="lang-label">辨識語言:</label>
         <select id="languageSelector" title="選擇要進行辨識的語言">
             <option value="en-US">English (US)</option>
@@ -299,13 +369,41 @@
             <option value="de-DE">Deutsch</option>
         </select>
     </div>
-    
+
+    <div class="vosk-config" id="voskConfig">
+        <div class="row">
+            <label id="vosk-model-label">模型:</label>
+            <select id="voskModelPreset">
+                <option value="">-- 選擇預設模型 --</option>
+                <option value="vosk-model-small-en-us-0.15">English (small, ~40MB)</option>
+                <option value="vosk-model-small-cn-0.22">中文 (small, ~42MB)</option>
+                <option value="vosk-model-small-ja-0.22">日本語 (small, ~48MB)</option>
+                <option value="vosk-model-small-ko-0.22">한국어 (small, ~42MB)</option>
+                <option value="vosk-model-small-fr-0.22">Français (small, ~40MB)</option>
+                <option value="vosk-model-small-de-0.15">Deutsch (small, ~45MB)</option>
+                <option value="vosk-model-small-es-0.42">Español (small, ~39MB)</option>
+                <option value="custom">自訂 URL...</option>
+            </select>
+        </div>
+        <div class="row" id="customUrlRow" style="display:none;">
+            <label id="vosk-url-label">URL:</label>
+            <input type="url" id="voskModelUrl" placeholder="https://your-server.com/model.tar.gz">
+        </div>
+        <div class="row" style="justify-content: center;">
+            <button id="loadModelBtn">載入模型</button>
+        </div>
+        <div class="model-progress" id="modelProgress">
+            <div class="model-progress-bar" id="modelProgressBar"></div>
+        </div>
+        <div class="model-status" id="modelStatus"></div>
+    </div>
+
     <div class="controls">
         <div class="button-row">
             <button id="controlBtn" title="點擊以開始語音辨識">開始辨識</button>
-            <!-- [新增] 複製按鈕 -->
             <button id="copyBtn" disabled title="停止辨識後才能複製">複製內容</button>
             <button id="exportBtn" disabled title="停止辨識後才能匯出">輸出逐字稿</button>
+            <button id="clearBtn" title="清空逐字稿">清空</button>
         </div>
         <div class="warning-notice" id="warning-text">
             本工具將把收到音檔上傳 Google 請謹慎使用
@@ -327,22 +425,27 @@
     </div>
 
     <script>
-    // 使用 IIFE (立即調用函式表達式) 避免污染全域作用域
     (function() {
-        // [優化] 集中管理所有 DOM 元素
+        const VOSK_CDN = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
+        const VOSK_MODEL_BASE = 'https://alphacephei.com/vosk/models';
+
         const UIElements = {
             pageTitle: document.getElementById('pageTitle'),
             mainTitle: document.getElementById('main-title'),
-            transcript: document.getElementById('transcript'),
             transcriptContainer: document.getElementById('transcriptContainer'),
+            placeholderText: document.getElementById('placeholder-text'),
+            finalText: document.getElementById('final-text'),
+            interimText: document.getElementById('interim-text'),
             controlBtn: document.getElementById('controlBtn'),
             exportBtn: document.getElementById('exportBtn'),
             copyBtn: document.getElementById('copyBtn'),
+            clearBtn: document.getElementById('clearBtn'),
             volumeLevel: document.getElementById('volumeLevel'),
+            engineSelector: document.getElementById('engineSelector'),
+            engineLabel: document.getElementById('engine-label'),
             languageSelector: document.getElementById('languageSelector'),
             langLabel: document.getElementById('lang-label'),
             uiLangToggle: document.getElementById('uiLangToggle'),
-            placeholderText: document.getElementById('placeholder-text'),
             warningText: document.getElementById('warning-text'),
             privacySummary: document.getElementById('privacy-summary'),
             howItWorksText: document.getElementById('how-it-works-text'),
@@ -351,80 +454,140 @@
             riskScenariosTitle: document.getElementById('risk-scenarios-title'),
             riskScenariosList: document.getElementById('risk-scenarios-list'),
             privacyConclusion: document.getElementById('privacy-conclusion'),
+            voskConfig: document.getElementById('voskConfig'),
+            voskModelPreset: document.getElementById('voskModelPreset'),
+            voskModelUrl: document.getElementById('voskModelUrl'),
+            customUrlRow: document.getElementById('customUrlRow'),
+            loadModelBtn: document.getElementById('loadModelBtn'),
+            modelProgress: document.getElementById('modelProgress'),
+            modelProgressBar: document.getElementById('modelProgressBar'),
+            modelStatus: document.getElementById('modelStatus'),
+            voskModelLabel: document.getElementById('vosk-model-label'),
+            voskUrlLabel: document.getElementById('vosk-url-label'),
         };
 
-        // 多國語言翻譯內容 (保持不變)
         const translations = {
             en: {
                 pageTitle: "Multilingual Real-time Transcription Tool",
                 mainTitle: "Multilingual Real-time Transcription Tool",
+                engineLabel: "Engine:",
                 langLabel: "Recognition Language:",
                 startBtn: "Start Recognition",
                 stopBtn: "Stop Recognition",
                 exportBtn: "Export Transcript",
                 copyBtn: "Copy Transcript",
+                clearBtn: "Clear",
+                copyBtnSuccess: "Copied!",
                 toggleUiLangBtn: "切换到中文",
                 placeholder: "Click 'Start Recognition' and your transcript will appear here...",
                 micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
                 apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome.",
-                controlBtnTooltipStart: "Click to start voice recognition",
-                controlBtnTooltipStop: "Click to stop voice recognition",
+                controlBtnTooltipStart: "Click to start voice recognition (or press Space)",
+                controlBtnTooltipStop: "Click to stop voice recognition (or press Space)",
                 exportBtnTooltip: "Export the transcript as a .txt file",
-                exportBtnTooltipDisabled: "Stop recognition to enable export",
+                exportBtnTooltipDisabled: "No transcript to export",
                 copyBtnTooltip: "Copy the transcript to your clipboard",
-                copyBtnTooltipDisabled: "Stop recognition to enable copy",
+                copyBtnTooltipDisabled: "No transcript to copy",
+                clearBtnTooltip: "Clear the transcript",
                 languageSelectorTooltip: "Select the language to be recognized",
                 uiLangToggleTooltip: "Switch the user interface language",
-                warningText: "This tool uploads audio to Google. Use with caution.",
+                warningTextGoogle: "This tool uploads audio to Google. Use with caution.",
+                warningTextVosk: "Vosk offline mode — audio is processed locally, not uploaded.",
                 copiedSuccess: "Copied to clipboard!",
                 copiedError: "Copy failed. Please try again.",
                 privacySummary: "Usage Guide & Privacy Notice",
                 howItWorksText: "To convert speech to text, this tool uses the browser's built-in Web Speech API, which sends your voice data to Google's servers for processing. Please be aware of the following:",
                 suitableScenariosTitle: "Suitable Scenarios:",
                 suitableScenarios: ["Assisting in listening to public online lectures, webinars, or courses.", "Transcribing public content like videos or podcasts.", "Personal learning and language practice."],
-                riskScenariosTitle: "High-Risk Scenarios (DO NOT USE):",
+                riskScenariosTitle: "High-Risk Scenarios (DO NOT USE with Google mode):",
                 riskScenarios: ["Meetings involving <strong>business secrets</strong> or confidential information.", "Conversations involving <strong>personal privacy</strong> (e.g., with doctors, lawyers).", "Any content containing <strong>sensitive personal data</strong> (ID numbers, passwords, etc.)."],
-                privacyConclusion: "For sensitive content, it is strongly recommended to use offline tools like Whisper that process data entirely on your local machine."
+                privacyConclusion: "For sensitive content, switch to Vosk offline mode — all processing happens locally on your device.",
+                voskModelLabel: "Model:",
+                voskUrlLabel: "URL:",
+                voskModelPresetDefault: "-- Select a preset model --",
+                voskModelCustom: "Custom URL...",
+                loadModelBtn: "Load Model",
+                loadModelBtnLoading: "Loading...",
+                voskLoadingLib: "Loading Vosk library...",
+                voskLoadingModel: "Downloading model...",
+                voskModelReady: "Model loaded! Ready to use.",
+                voskModelError: "Failed to load model. Check the URL and CORS settings.",
+                voskLibError: "Failed to load Vosk library. Check your internet connection.",
+                voskSelectModel: "Please select and load a model first.",
+                voskCorsHint: "If loading fails, the model server may not allow cross-origin requests. Try hosting the model on your own server with CORS enabled.",
             },
             zh: {
                 pageTitle: "多國語言即時逐字稿工具",
                 mainTitle: "多國語言即時逐字稿工具",
+                engineLabel: "引擎:",
                 langLabel: "辨識語言:",
                 startBtn: "開始辨識",
                 stopBtn: "停止辨識",
                 exportBtn: "輸出逐字稿",
                 copyBtn: "複製內容",
+                clearBtn: "清空",
+                copyBtnSuccess: "已複製！",
                 toggleUiLangBtn: "Switch to English",
                 placeholder: "點擊「開始辨識」後,你的逐字稿將會顯示在這裡...",
                 micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。",
                 apiNotSupportedError: "您的瀏覽器不支援 Web Speech API,請使用最新版本的 Chrome 瀏覽器。",
-                controlBtnTooltipStart: "點擊以開始語音辨識",
-                controlBtnTooltipStop: "點擊以停止語音辨識",
+                controlBtnTooltipStart: "點擊以開始語音辨識（或按空白鍵）",
+                controlBtnTooltipStop: "點擊以停止語音辨識（或按空白鍵）",
                 exportBtnTooltip: "將逐字稿匯出為 .txt 檔案",
-                exportBtnTooltipDisabled: "停止辨識後才能匯出",
+                exportBtnTooltipDisabled: "尚無逐字稿可匯出",
                 copyBtnTooltip: "將逐字稿複製到剪貼簿",
-                copyBtnTooltipDisabled: "停止辨識後才能複製",
+                copyBtnTooltipDisabled: "尚無逐字稿可複製",
+                clearBtnTooltip: "清空逐字稿",
                 languageSelectorTooltip: "選擇要進行辨識的語言",
                 uiLangToggleTooltip: "切換使用者介面語言",
-                warningText: "本工具將把收到音檔上傳 Google 請謹慎使用",
+                warningTextGoogle: "本工具將把收到音檔上傳 Google 請謹慎使用",
+                warningTextVosk: "Vosk 離線模式 — 音訊在本機處理，不會上傳",
                 copiedSuccess: "已複製到剪貼簿！",
                 copiedError: "複製失敗，請重試。",
                 privacySummary: "使用須知 & 隱私聲明",
                 howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google 的伺服器進行處理。請務必了解以下事項：",
                 suitableScenariosTitle: "適合的使用場景：",
                 suitableScenarios: ["輔助聆聽公開的線上演講、課程。", "轉錄影片、Podcast 等公開內容。", "個人學習、語言練習。"],
-                riskScenariosTitle: "高風險場景 (絕對不要使用)：",
+                riskScenariosTitle: "高風險場景 (Google 模式下絕對不要使用)：",
                 riskScenarios: ["任何涉及<strong>商業機密</strong>或公司內部資訊的會議。", "任何涉及<strong>個人隱私</strong>的對話 (例如與醫生、律師的對話)。", "任何包含<strong>敏感個資</strong>的內容 (如身分證號、密碼等)。"],
-                privacyConclusion: "針對敏感內容,強烈建議使用像 Whisper 這樣完全在您本機離線運作的工具,以確保資料安全。"
+                privacyConclusion: "針對敏感內容，請切換到 Vosk 離線模式 — 所有處理都在您的裝置本機完成。",
+                voskModelLabel: "模型:",
+                voskUrlLabel: "URL:",
+                voskModelPresetDefault: "-- 選擇預設模型 --",
+                voskModelCustom: "自訂 URL...",
+                loadModelBtn: "載入模型",
+                loadModelBtnLoading: "載入中...",
+                voskLoadingLib: "正在載入 Vosk 函式庫...",
+                voskLoadingModel: "正在下載模型...",
+                voskModelReady: "模型已載入！可以開始使用。",
+                voskModelError: "模型載入失敗。請確認 URL 及 CORS 設定。",
+                voskLibError: "Vosk 函式庫載入失敗，請確認網路連線。",
+                voskSelectModel: "請先選擇並載入模型。",
+                voskCorsHint: "若載入失敗，可能是模型伺服器不允許跨域請求。請嘗試將模型放到自己的伺服器並啟用 CORS。",
             }
         };
 
-        // [優化] 集中管理應用程式狀態
+        const CONFIG = {
+            RESTART_DELAY_MOBILE: 200,
+            RESTART_DELAY_DESKTOP: 500,
+            AUDIO_METER_DELAY: 300,
+            SCROLL_THRESHOLD: 50,
+            VOLUME_MULTIPLIER: 10,
+            FEEDBACK_DURATION: 2000,
+            MIN_SEGMENTS_FOR_EXPORT: 2,
+            VOSK_SAMPLE_RATE: 16000,
+            VOSK_BUFFER_SIZE: 8192,
+        };
+
+        const ENGINE = { WEB_SPEECH: 'webspeech', VOSK: 'vosk' };
+
         const state = {
             currentUiLang: 'zh',
+            engine: ENGINE.WEB_SPEECH,
             startTime: null,
             endTime: null,
             transcriptSegments: [],
+            renderedSegmentCount: 0,
             isRecognizing: false,
             interimTranscript: '',
             isManualStop: false,
@@ -433,89 +596,324 @@
             restartTimeout: null,
             recognitionActive: false,
         };
-        
-        // 音量條的獨立狀態管理
+
+        const voskState = {
+            libLoaded: false,
+            libLoading: false,
+            model: null,
+            modelLoading: false,
+            modelReady: false,
+            recognizer: null,
+            audioContext: null,
+            stream: null,
+            processorNode: null,
+        };
+
         const audioState = {
             context: null,
             stream: null,
             analyser: null,
             animationFrameId: null,
+            dataArray: null,
         };
-        
-        /**
-         * 初始化應用程式
-         */
+
         function init() {
             loadPreferences();
             setupEventListeners();
             initSpeechRecognition();
             setUiLanguage(state.currentUiLang);
+            updateEngineUI();
         }
 
-        /**
-         * 統一設定所有事件監聽器
-         */
         function setupEventListeners() {
             UIElements.uiLangToggle.addEventListener('click', toggleUiLanguage);
             UIElements.controlBtn.addEventListener('click', toggleRecognition);
             UIElements.exportBtn.addEventListener('click', exportTranscript);
             UIElements.copyBtn.addEventListener('click', copyTranscript);
+            UIElements.clearBtn.addEventListener('click', clearTranscript);
             UIElements.languageSelector.addEventListener('change', () => {
                 if (state.recognition) {
                     state.recognition.lang = UIElements.languageSelector.value;
                 }
                 savePreferences();
             });
+            UIElements.engineSelector.addEventListener('change', () => {
+                state.engine = UIElements.engineSelector.value;
+                updateEngineUI();
+                savePreferences();
+            });
+            UIElements.voskModelPreset.addEventListener('change', () => {
+                const val = UIElements.voskModelPreset.value;
+                UIElements.customUrlRow.style.display = val === 'custom' ? 'flex' : 'none';
+                if (val && val !== 'custom') {
+                    UIElements.voskModelUrl.value = `${VOSK_MODEL_BASE}/${val}.zip`;
+                }
+            });
+            UIElements.loadModelBtn.addEventListener('click', loadVoskModel);
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && e.target === document.body) {
+                    e.preventDefault();
+                    toggleRecognition();
+                }
+            });
         }
 
-        /**
-         * 初始化 Web Speech API 辨識引擎
-         */
         function initSpeechRecognition() {
-            if (!('webkitSpeechRecognition' in window)) {
-                alert(translations.en.apiNotSupportedError);
-                UIElements.controlBtn.disabled = true;
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                if (state.engine === ENGINE.WEB_SPEECH) {
+                    UIElements.controlBtn.disabled = true;
+                }
                 return;
             }
-            state.recognition = new webkitSpeechRecognition();
+            state.recognition = new SpeechRecognition();
             state.recognition.continuous = !state.isMobile;
             state.recognition.interimResults = true;
             state.recognition.maxAlternatives = 1;
-            
+
             state.recognition.onstart = handleRecognitionStart;
             state.recognition.onerror = handleRecognitionError;
             state.recognition.onend = handleRecognitionEnd;
             state.recognition.onresult = handleRecognitionResult;
         }
 
-        /**
-         * 切換 UI 語言
-         */
+        function updateEngineUI() {
+            const isVosk = state.engine === ENGINE.VOSK;
+            UIElements.voskConfig.classList.toggle('visible', isVosk);
+            UIElements.languageSelector.parentElement && (UIElements.languageSelector.style.display = isVosk ? 'none' : '');
+            const langLabelEl = document.getElementById('lang-label');
+            if (langLabelEl) langLabelEl.style.display = isVosk ? 'none' : '';
+
+            const t = translations[state.currentUiLang];
+            UIElements.warningText.textContent = isVosk ? t.warningTextVosk : t.warningTextGoogle;
+            UIElements.warningText.classList.toggle('offline', isVosk);
+
+            if (isVosk) {
+                UIElements.controlBtn.disabled = !voskState.modelReady;
+            } else {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                UIElements.controlBtn.disabled = !SpeechRecognition;
+            }
+        }
+
+        // --- Vosk Engine ---
+
+        function loadVoskLibrary() {
+            return new Promise((resolve, reject) => {
+                if (voskState.libLoaded && window.Vosk) { resolve(); return; }
+                if (voskState.libLoading) { reject(new Error('Already loading')); return; }
+                voskState.libLoading = true;
+                const script = document.createElement('script');
+                script.src = VOSK_CDN;
+                script.onload = () => { voskState.libLoaded = true; voskState.libLoading = false; resolve(); };
+                script.onerror = () => { voskState.libLoading = false; reject(new Error('Script load failed')); };
+                document.head.appendChild(script);
+            });
+        }
+
+        async function loadVoskModel() {
+            const t = translations[state.currentUiLang];
+            const modelUrl = UIElements.voskModelUrl.value.trim();
+            const preset = UIElements.voskModelPreset.value;
+
+            if (!modelUrl && (!preset || preset === 'custom')) {
+                setModelStatus(t.voskSelectModel, 'error');
+                return;
+            }
+
+            const url = modelUrl || `${VOSK_MODEL_BASE}/${preset}.zip`;
+
+            UIElements.loadModelBtn.disabled = true;
+            UIElements.loadModelBtn.textContent = t.loadModelBtnLoading;
+            UIElements.modelProgress.classList.add('visible');
+            UIElements.modelProgressBar.style.width = '0%';
+            setModelStatus(t.voskLoadingLib, '');
+
+            try {
+                await loadVoskLibrary();
+            } catch (e) {
+                setModelStatus(t.voskLibError, 'error');
+                resetLoadBtn();
+                return;
+            }
+
+            setModelStatus(t.voskLoadingModel, '');
+
+            try {
+                if (voskState.model) {
+                    voskState.model.terminate();
+                    voskState.model = null;
+                }
+
+                voskState.modelLoading = true;
+                const model = await window.Vosk.createModel(url);
+                voskState.model = model;
+                voskState.modelReady = true;
+                voskState.modelLoading = false;
+
+                UIElements.modelProgressBar.style.width = '100%';
+                setModelStatus(t.voskModelReady, 'success');
+                UIElements.controlBtn.disabled = false;
+            } catch (e) {
+                console.error('Vosk model load error:', e);
+                voskState.modelLoading = false;
+                voskState.modelReady = false;
+                setModelStatus(t.voskModelError + '\n' + t.voskCorsHint, 'error');
+            }
+
+            resetLoadBtn();
+        }
+
+        function setModelStatus(text, type) {
+            UIElements.modelStatus.textContent = text;
+            UIElements.modelStatus.className = 'model-status' + (type ? ' ' + type : '');
+        }
+
+        function resetLoadBtn() {
+            const t = translations[state.currentUiLang];
+            UIElements.loadModelBtn.disabled = false;
+            UIElements.loadModelBtn.textContent = t.loadModelBtn;
+        }
+
+        function startVoskRecognition() {
+            const t = translations[state.currentUiLang];
+            if (!voskState.modelReady || !voskState.model) {
+                alert(t.voskSelectModel);
+                return;
+            }
+
+            state.isManualStop = false;
+            state.startTime = new Date();
+            state.transcriptSegments = [{ timestamp: state.startTime, text: '--- Recording Start / 錄音開始 ---' }];
+            state.renderedSegmentCount = 0;
+            state.interimTranscript = '';
+            UIElements.finalText.textContent = '';
+            updateTranscriptDisplay();
+
+            navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    channelCount: 1,
+                    sampleRate: CONFIG.VOSK_SAMPLE_RATE,
+                }
+            }).then(stream => {
+                voskState.stream = stream;
+                voskState.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: CONFIG.VOSK_SAMPLE_RATE });
+
+                voskState.recognizer = new voskState.model.KaldiRecognizer(CONFIG.VOSK_SAMPLE_RATE);
+                voskState.recognizer.setWords(false);
+
+                voskState.recognizer.on('result', (message) => {
+                    const text = message.result?.text;
+                    if (text) {
+                        state.transcriptSegments.push({ timestamp: new Date(), text: text });
+                        state.interimTranscript = '';
+                        updateTranscriptDisplay();
+                        updateButtonStates();
+                    }
+                });
+
+                voskState.recognizer.on('partialresult', (message) => {
+                    const partial = message.result?.partial;
+                    if (partial) {
+                        state.interimTranscript = partial;
+                        updateTranscriptDisplay();
+                    }
+                });
+
+                const source = voskState.audioContext.createMediaStreamSource(stream);
+
+                voskState.processorNode = voskState.audioContext.createScriptProcessor(CONFIG.VOSK_BUFFER_SIZE, 1, 1);
+                voskState.processorNode.onaudioprocess = (event) => {
+                    try {
+                        if (voskState.recognizer) {
+                            voskState.recognizer.acceptWaveform(event.inputBuffer);
+                        }
+                    } catch (e) {
+                        console.error('Vosk acceptWaveform error:', e);
+                    }
+                };
+
+                source.connect(voskState.processorNode);
+                voskState.processorNode.connect(voskState.audioContext.destination);
+
+                state.isRecognizing = true;
+                state.recognitionActive = true;
+                UIElements.languageSelector.disabled = true;
+                UIElements.engineSelector.disabled = true;
+                updateButtonStates();
+
+                setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), CONFIG.AUDIO_METER_DELAY);
+
+            }).catch(err => {
+                console.error('Microphone error:', err);
+                alert(t.micDeniedError);
+            });
+        }
+
+        function stopVoskRecognition() {
+            state.isManualStop = true;
+
+            if (voskState.processorNode) {
+                voskState.processorNode.disconnect();
+                voskState.processorNode = null;
+            }
+            if (voskState.stream) {
+                voskState.stream.getTracks().forEach(track => track.stop());
+                voskState.stream = null;
+            }
+            if (voskState.audioContext && voskState.audioContext.state !== 'closed') {
+                voskState.audioContext.close();
+                voskState.audioContext = null;
+            }
+            if (voskState.recognizer) {
+                voskState.recognizer.remove();
+                voskState.recognizer = null;
+            }
+
+            state.isRecognizing = false;
+            state.recognitionActive = false;
+            UIElements.languageSelector.disabled = false;
+            UIElements.engineSelector.disabled = false;
+            state.endTime = new Date();
+            state.interimTranscript = '';
+            updateTranscriptDisplay();
+            updateButtonStates();
+            stopAudioMeter();
+        }
+
+        // --- Web Speech API Engine ---
+
         function toggleUiLanguage() {
             const newLang = state.currentUiLang === 'zh' ? 'en' : 'zh';
             setUiLanguage(newLang);
             savePreferences();
         }
 
-        /**
-         * 根據指定語言更新所有 UI 文字
-         * @param {string} lang - 'en' 或 'zh'
-         */
         function setUiLanguage(lang) {
             state.currentUiLang = lang;
             const t = translations[lang];
-            
+
             UIElements.pageTitle.textContent = t.pageTitle;
             UIElements.mainTitle.textContent = t.mainTitle;
+            UIElements.engineLabel.textContent = t.engineLabel;
             UIElements.langLabel.textContent = t.langLabel;
             UIElements.exportBtn.textContent = t.exportBtn;
             UIElements.copyBtn.textContent = t.copyBtn;
+            UIElements.clearBtn.textContent = t.clearBtn;
+            UIElements.clearBtn.title = t.clearBtnTooltip;
             UIElements.uiLangToggle.textContent = t.toggleUiLangBtn;
             UIElements.placeholderText.textContent = t.placeholder;
             UIElements.uiLangToggle.title = t.uiLangToggleTooltip;
             UIElements.languageSelector.title = t.languageSelectorTooltip;
-            UIElements.warningText.textContent = t.warningText;
-            
+            UIElements.voskModelLabel.textContent = t.voskModelLabel;
+            UIElements.voskUrlLabel.textContent = t.voskUrlLabel;
+            UIElements.loadModelBtn.textContent = voskState.modelLoading ? t.loadModelBtnLoading : t.loadModelBtn;
+
+            const isVosk = state.engine === ENGINE.VOSK;
+            UIElements.warningText.textContent = isVosk ? t.warningTextVosk : t.warningTextGoogle;
+
             UIElements.privacySummary.textContent = t.privacySummary;
             UIElements.howItWorksText.textContent = t.howItWorksText;
             UIElements.suitableScenariosTitle.textContent = t.suitableScenariosTitle;
@@ -527,51 +925,44 @@
 
             updateButtonStates();
         }
-        
-        /**
-         * 更新所有按鈕的狀態 (文字、啟用/禁用、提示)
-         */
+
         function updateButtonStates() {
             const t = translations[state.currentUiLang];
             UIElements.controlBtn.textContent = state.isRecognizing ? t.stopBtn : t.startBtn;
             UIElements.controlBtn.title = state.isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
             UIElements.controlBtn.classList.toggle('listening', state.isRecognizing);
-            
-            const canExportOrCopy = !state.isRecognizing && state.transcriptSegments.length > 1;
+
+            const canExportOrCopy = state.transcriptSegments.length > CONFIG.MIN_SEGMENTS_FOR_EXPORT;
             UIElements.exportBtn.disabled = !canExportOrCopy;
             UIElements.copyBtn.disabled = !canExportOrCopy;
-            
+
             UIElements.exportBtn.title = canExportOrCopy ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
             UIElements.copyBtn.title = canExportOrCopy ? t.copyBtnTooltip : t.copyBtnTooltipDisabled;
         }
 
-        /**
-         * 開始或停止語音辨識
-         */
         function toggleRecognition() {
             if (state.isRecognizing) {
-                stopRecognition();
+                if (state.engine === ENGINE.VOSK) stopVoskRecognition();
+                else stopRecognition();
             } else {
-                startRecognition();
+                if (state.engine === ENGINE.VOSK) startVoskRecognition();
+                else startRecognition();
             }
         }
-        
-        /**
-         * 開始語音辨識
-         */
+
         function startRecognition() {
             state.isManualStop = false;
             state.recognition.lang = UIElements.languageSelector.value;
             state.startTime = new Date();
             state.transcriptSegments = [{ timestamp: state.startTime, text: '--- Recording Start / 錄音開始 ---' }];
+            state.renderedSegmentCount = 0;
             state.interimTranscript = '';
-            
+            UIElements.finalText.textContent = '';
+
             updateTranscriptDisplay();
-            
-            if (!state.isMobile) {
-                setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), 300);
-            }
-            
+
+            setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), CONFIG.AUDIO_METER_DELAY);
+
             try {
                 if (!state.recognitionActive) state.recognition.start();
             } catch (e) {
@@ -580,27 +971,21 @@
             }
         }
 
-        /**
-         * 手動停止語音辨識
-         */
         function stopRecognition() {
             state.isManualStop = true;
             if (state.recognitionActive) {
                 state.recognition.stop();
             } else {
-                // 如果辨識引擎已自行停止但狀態未更新，手動觸發結束流程
                 handleRecognitionEnd();
             }
         }
-
-        // --- SpeechRecognition 事件處理函式 ---
 
         function handleRecognitionStart() {
             state.recognitionActive = true;
             state.isRecognizing = true;
             UIElements.languageSelector.disabled = true;
+            UIElements.engineSelector.disabled = true;
             updateButtonStates();
-            console.log('✅ Recognition started successfully');
         }
 
         function handleRecognitionError(event) {
@@ -608,8 +993,6 @@
             state.recognitionActive = false;
             if (event.error === 'not-allowed') {
                 alert(translations[state.currentUiLang].micDeniedError);
-            } else if (event.error === 'no-speech') {
-                console.log('No speech detected, will retry...');
             } else if (event.error === 'network') {
                 alert('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
             }
@@ -620,20 +1003,16 @@
             clearTimeout(state.restartTimeout);
 
             if (!state.isManualStop && state.isRecognizing) {
-                const restartDelay = state.isMobile ? 200 : 500;
+                const restartDelay = state.isMobile ? CONFIG.RESTART_DELAY_MOBILE : CONFIG.RESTART_DELAY_DESKTOP;
                 state.restartTimeout = setTimeout(() => {
                     if (state.isRecognizing && !state.recognitionActive) {
-                        try {
-                            state.recognition.start();
-                            console.log('Auto-restarting recognition');
-                        } catch (e) {
-                            console.error('Failed to auto-restart:', e);
-                        }
+                        try { state.recognition.start(); } catch (e) { console.error('Failed to auto-restart:', e); }
                     }
                 }, restartDelay);
             } else {
                 state.isRecognizing = false;
                 UIElements.languageSelector.disabled = false;
+                UIElements.engineSelector.disabled = false;
                 state.endTime = new Date();
                 updateButtonStates();
                 stopAudioMeter();
@@ -642,30 +1021,49 @@
 
         function handleRecognitionResult(event) {
             state.interimTranscript = '';
-            let final_transcript_this_turn = '';
+            let finalTranscriptThisTurn = '';
 
             for (let i = event.resultIndex; i < event.results.length; ++i) {
                 const transcript = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
-                    final_transcript_this_turn += transcript.trim() + ' ';
+                    finalTranscriptThisTurn += transcript.trim() + ' ';
                 } else {
                     state.interimTranscript += transcript;
                 }
             }
 
-            if (final_transcript_this_turn) {
-                state.transcriptSegments.push({ timestamp: new Date(), text: final_transcript_this_turn.trim() });
+            if (finalTranscriptThisTurn) {
+                state.transcriptSegments.push({ timestamp: new Date(), text: finalTranscriptThisTurn.trim() });
             }
 
             updateTranscriptDisplay();
+            updateButtonStates();
         }
-        
-        // --- 逐字稿顯示與檔案處理 ---
+
+        // --- Shared Functions ---
 
         function updateTranscriptDisplay() {
-            const finalContent = state.transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
-            UIElements.transcript.innerHTML = `<span class="placeholder" id="placeholder-text" style="display:none;"></span>${finalContent}\n<span class="interim">${state.interimTranscript}</span>`;
-            UIElements.transcriptContainer.scrollTop = UIElements.transcriptContainer.scrollHeight;
+            if (state.transcriptSegments.length > 0 || state.interimTranscript) {
+                UIElements.placeholderText.style.display = 'none';
+            } else {
+                UIElements.placeholderText.style.display = 'inline';
+            }
+
+            if (state.renderedSegmentCount < state.transcriptSegments.length) {
+                const newSegments = state.transcriptSegments.slice(state.renderedSegmentCount);
+                const newText = newSegments.map(s => `${formatTime(s.timestamp)} ${s.text}`).join('\n');
+                const prefix = state.renderedSegmentCount > 0 ? '\n' : '';
+                UIElements.finalText.textContent += prefix + newText;
+                state.renderedSegmentCount = state.transcriptSegments.length;
+            }
+
+            UIElements.interimText.textContent = state.interimTranscript ? '\n' + state.interimTranscript : '';
+
+            const container = UIElements.transcriptContainer;
+            const isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + CONFIG.SCROLL_THRESHOLD;
+            if (isScrolledToBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
         }
 
         function getFullTranscriptText() {
@@ -673,11 +1071,11 @@
         }
 
         function exportTranscript() {
-            if (!state.startTime || !state.endTime) return;
+            if (!state.startTime) return;
             const textToSave = getFullTranscriptText().replace(/\n/g, '\r\n');
-            const fileName = createFileName(state.startTime, state.endTime);
+            const fileName = createFileName(state.startTime, state.endTime || new Date());
             const blob = new Blob([textToSave], { type: 'text/plain;charset=utf-8' });
-            
+
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
             a.download = fileName;
@@ -688,60 +1086,91 @@
         }
 
         function copyTranscript() {
-            if (state.transcriptSegments.length <= 1) return;
+            if (state.transcriptSegments.length <= 1 && !state.interimTranscript) return;
 
             const textToCopy = getFullTranscriptText();
             navigator.clipboard.writeText(textToCopy).then(() => {
-                alert(translations[state.currentUiLang].copiedSuccess);
+                const originalText = UIElements.copyBtn.textContent;
+                UIElements.copyBtn.textContent = translations[state.currentUiLang].copyBtnSuccess;
+                setTimeout(() => {
+                    UIElements.copyBtn.textContent = originalText;
+                }, CONFIG.FEEDBACK_DURATION);
             }, (err) => {
                 console.error('Could not copy text: ', err);
                 alert(translations[state.currentUiLang].copiedError);
             });
         }
-        
-        // --- 使用者偏好設定 (localStorage) ---
+
+        function clearTranscript() {
+            state.transcriptSegments = [];
+            state.renderedSegmentCount = 0;
+            state.interimTranscript = '';
+            state.startTime = null;
+            state.endTime = null;
+            UIElements.finalText.textContent = '';
+            UIElements.interimText.textContent = '';
+            UIElements.placeholderText.style.display = 'inline';
+            updateButtonStates();
+        }
+
         function savePreferences() {
-            localStorage.setItem('stt_ui_lang', state.currentUiLang);
-            localStorage.setItem('stt_rec_lang', UIElements.languageSelector.value);
+            try {
+                localStorage.setItem('stt_ui_lang', state.currentUiLang);
+                localStorage.setItem('stt_rec_lang', UIElements.languageSelector.value);
+                localStorage.setItem('stt_engine', state.engine);
+            } catch (e) {}
         }
 
         function loadPreferences() {
-            const savedUiLang = localStorage.getItem('stt_ui_lang');
-            const savedRecLang = localStorage.getItem('stt_rec_lang');
-            const browserLang = navigator.language || navigator.userLanguage;
-            
-            // 優先載入儲存的設定，若無則根據瀏覽器語言判斷
-            state.currentUiLang = savedUiLang || (browserLang.startsWith('zh') ? 'zh' : 'en');
-            
-            if (savedRecLang) {
-                UIElements.languageSelector.value = savedRecLang;
-            }
+            try {
+                const savedUiLang = localStorage.getItem('stt_ui_lang');
+                const savedRecLang = localStorage.getItem('stt_rec_lang');
+                const savedEngine = localStorage.getItem('stt_engine');
+                const browserLang = navigator.language || navigator.userLanguage;
+
+                state.currentUiLang = savedUiLang || (browserLang.startsWith('zh') ? 'zh' : 'en');
+                if (savedRecLang) UIElements.languageSelector.value = savedRecLang;
+                if (savedEngine && (savedEngine === ENGINE.WEB_SPEECH || savedEngine === ENGINE.VOSK)) {
+                    state.engine = savedEngine;
+                    UIElements.engineSelector.value = savedEngine;
+                }
+            } catch (e) {}
         }
 
-        // --- 音量條相關函式 ---
         async function startAudioMeter() {
             if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported');
-            if(audioState.context) return; // 避免重複啟動
-            
-            audioState.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            if (audioState.context) return;
+
+            if (state.engine === ENGINE.VOSK && voskState.stream) {
+                audioState.stream = voskState.stream;
+            } else {
+                audioState.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            }
+
             audioState.context = new (window.AudioContext || window.webkitAudioContext)();
             audioState.analyser = audioState.context.createAnalyser();
             const source = audioState.context.createMediaStreamSource(audioState.stream);
             source.connect(audioState.analyser);
+            audioState.dataArray = new Uint8Array(audioState.analyser.frequencyBinCount);
             drawVolume();
         }
 
         function stopAudioMeter() {
             if (audioState.animationFrameId) cancelAnimationFrame(audioState.animationFrameId);
-            audioState.stream?.getTracks().forEach(track => track.stop());
-            if (audioState.context?.state !== 'closed') {
-                audioState.context.close().then(() => audioState.context = null);
+            if (state.engine !== ENGINE.VOSK && audioState.stream) {
+                audioState.stream.getTracks().forEach(track => track.stop());
             }
-            UIElements.volumeLevel.style.width = '0%';
+            audioState.stream = null;
+            if (audioState.context?.state !== 'closed') {
+                audioState.context?.close().then(() => { audioState.context = null; });
+            } else {
+                audioState.context = null;
+            }
+            UIElements.volumeLevel.style.transform = 'scaleX(0)';
         }
 
         function drawVolume() {
-            const dataArray = new Uint8Array(audioState.analyser.frequencyBinCount);
+            const dataArray = audioState.dataArray;
             audioState.analyser.getByteTimeDomainData(dataArray);
             let sumSquares = 0.0;
             for (const amplitude of dataArray) {
@@ -749,12 +1178,13 @@
                 sumSquares += a * a;
             }
             const rms = Math.sqrt(sumSquares / dataArray.length);
-            const volume = Math.min(100, rms * 100 * 10);
-            UIElements.volumeLevel.style.width = volume + '%';
+            const volume = Math.min(100, rms * 100 * CONFIG.VOLUME_MULTIPLIER);
+
+            UIElements.volumeLevel.style.transform = `scaleX(${volume / 100})`;
+
             audioState.animationFrameId = requestAnimationFrame(drawVolume);
         }
 
-        // --- 工具函式 ---
         function formatTime(date) {
             const h = formatTwoDigits(date.getHours());
             const m = formatTwoDigits(date.getMinutes());
@@ -773,7 +1203,6 @@
             return `transcript_${date}_${startTimeStr}_to_${endTimeStr}.txt`;
         }
 
-        // 應用程式進入點
         document.addEventListener('DOMContentLoaded', init);
     })();
     </script>
