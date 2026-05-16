@@ -373,17 +373,22 @@
     <div class="vosk-config" id="voskConfig">
         <div class="row">
             <label id="vosk-model-label">模型:</label>
-            <select id="voskModelPreset">
-                <option value="">-- 選擇預設模型 --</option>
-                <option value="vosk-model-small-en-us-0.15">English (small, ~40MB)</option>
-                <option value="vosk-model-small-cn-0.22">中文 (small, ~42MB)</option>
-                <option value="vosk-model-small-ja-0.22">日本語 (small, ~48MB)</option>
-                <option value="vosk-model-small-ko-0.22">한국어 (small, ~42MB)</option>
-                <option value="vosk-model-small-fr-0.22">Français (small, ~40MB)</option>
-                <option value="vosk-model-small-de-0.15">Deutsch (small, ~45MB)</option>
-                <option value="vosk-model-small-es-0.42">Español (small, ~39MB)</option>
-                <option value="custom">自訂 URL...</option>
+            <select id="voskModelSource">
+                <option value="builtin" id="vosk-source-builtin">內建模型</option>
+                <option value="file" id="vosk-source-file">本機檔案上傳</option>
+                <option value="url" id="vosk-source-url">自訂 URL</option>
             </select>
+        </div>
+        <div class="row" id="builtinRow">
+            <label id="vosk-lang-label">語言:</label>
+            <select id="voskBuiltinLang">
+                <option value="cn">中文 (small, ~44MB)</option>
+                <option value="en">English (small, ~41MB)</option>
+            </select>
+        </div>
+        <div class="row" id="fileUploadRow" style="display:none;">
+            <label id="vosk-file-label">檔案:</label>
+            <input type="file" id="voskModelFile" accept=".zip,.tar.gz,.tar,.gz" style="flex:1; color:white; font-size:14px;">
         </div>
         <div class="row" id="customUrlRow" style="display:none;">
             <label id="vosk-url-label">URL:</label>
@@ -427,7 +432,10 @@
     <script>
     (function() {
         const VOSK_CDN = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
-        const VOSK_MODEL_BASE = 'https://alphacephei.com/vosk/models';
+        const VOSK_BUILTIN_MODELS = {
+            cn: 'models/vosk-model-small-cn-0.22.zip',
+            en: 'models/vosk-model-small-en-us-0.15.zip',
+        };
 
         const UIElements = {
             pageTitle: document.getElementById('pageTitle'),
@@ -455,7 +463,11 @@
             riskScenariosList: document.getElementById('risk-scenarios-list'),
             privacyConclusion: document.getElementById('privacy-conclusion'),
             voskConfig: document.getElementById('voskConfig'),
-            voskModelPreset: document.getElementById('voskModelPreset'),
+            voskModelSource: document.getElementById('voskModelSource'),
+            voskBuiltinLang: document.getElementById('voskBuiltinLang'),
+            builtinRow: document.getElementById('builtinRow'),
+            voskModelFile: document.getElementById('voskModelFile'),
+            fileUploadRow: document.getElementById('fileUploadRow'),
             voskModelUrl: document.getElementById('voskModelUrl'),
             customUrlRow: document.getElementById('customUrlRow'),
             loadModelBtn: document.getElementById('loadModelBtn'),
@@ -504,17 +516,20 @@
                 privacyConclusion: "For sensitive content, switch to Vosk offline mode — all processing happens locally on your device.",
                 voskModelLabel: "Model:",
                 voskUrlLabel: "URL:",
-                voskModelPresetDefault: "-- Select a preset model --",
-                voskModelCustom: "Custom URL...",
+                voskFileLabel: "File:",
+                voskSourceBuiltin: "Built-in models",
+                voskSourceFile: "Upload local file",
+                voskSourceUrl: "Custom URL",
+                voskLangLabel: "Language:",
                 loadModelBtn: "Load Model",
                 loadModelBtnLoading: "Loading...",
                 voskLoadingLib: "Loading Vosk library...",
-                voskLoadingModel: "Downloading model...",
+                voskLoadingModel: "Loading model...",
                 voskModelReady: "Model loaded! Ready to use.",
-                voskModelError: "Failed to load model. Check the URL and CORS settings.",
+                voskModelError: "Failed to load model.",
                 voskLibError: "Failed to load Vosk library. Check your internet connection.",
-                voskSelectModel: "Please select and load a model first.",
-                voskCorsHint: "If loading fails, the model server may not allow cross-origin requests. Try hosting the model on your own server with CORS enabled.",
+                voskSelectModel: "Please select a model file or enter a URL first.",
+                voskFileHint: "Download a model from the link below, then upload the .zip file here.",
             },
             zh: {
                 pageTitle: "多國語言即時逐字稿工具",
@@ -553,17 +568,20 @@
                 privacyConclusion: "針對敏感內容，請切換到 Vosk 離線模式 — 所有處理都在您的裝置本機完成。",
                 voskModelLabel: "模型:",
                 voskUrlLabel: "URL:",
-                voskModelPresetDefault: "-- 選擇預設模型 --",
-                voskModelCustom: "自訂 URL...",
+                voskFileLabel: "檔案:",
+                voskSourceBuiltin: "內建模型",
+                voskSourceFile: "本機檔案上傳",
+                voskSourceUrl: "自訂 URL",
+                voskLangLabel: "語言:",
                 loadModelBtn: "載入模型",
                 loadModelBtnLoading: "載入中...",
                 voskLoadingLib: "正在載入 Vosk 函式庫...",
-                voskLoadingModel: "正在下載模型...",
+                voskLoadingModel: "正在載入模型...",
                 voskModelReady: "模型已載入！可以開始使用。",
-                voskModelError: "模型載入失敗。請確認 URL 及 CORS 設定。",
+                voskModelError: "模型載入失敗。",
                 voskLibError: "Vosk 函式庫載入失敗，請確認網路連線。",
-                voskSelectModel: "請先選擇並載入模型。",
-                voskCorsHint: "若載入失敗，可能是模型伺服器不允許跨域請求。請嘗試將模型放到自己的伺服器並啟用 CORS。",
+                voskSelectModel: "請先選擇模型檔案或輸入 URL。",
+                voskFileHint: "請先從下方連結下載模型，再上傳 .zip 檔案。",
             }
         };
 
@@ -642,12 +660,11 @@
                 updateEngineUI();
                 savePreferences();
             });
-            UIElements.voskModelPreset.addEventListener('change', () => {
-                const val = UIElements.voskModelPreset.value;
-                UIElements.customUrlRow.style.display = val === 'custom' ? 'flex' : 'none';
-                if (val && val !== 'custom') {
-                    UIElements.voskModelUrl.value = `${VOSK_MODEL_BASE}/${val}.zip`;
-                }
+            UIElements.voskModelSource.addEventListener('change', () => {
+                const val = UIElements.voskModelSource.value;
+                UIElements.builtinRow.style.display = val === 'builtin' ? 'flex' : 'none';
+                UIElements.fileUploadRow.style.display = val === 'file' ? 'flex' : 'none';
+                UIElements.customUrlRow.style.display = val === 'url' ? 'flex' : 'none';
             });
             UIElements.loadModelBtn.addEventListener('click', loadVoskModel);
             document.addEventListener('keydown', (e) => {
@@ -713,15 +730,33 @@
 
         async function loadVoskModel() {
             const t = translations[state.currentUiLang];
-            const modelUrl = UIElements.voskModelUrl.value.trim();
-            const preset = UIElements.voskModelPreset.value;
+            const source = UIElements.voskModelSource.value;
+            let modelPath;
+            let isBlobUrl = false;
 
-            if (!modelUrl && (!preset || preset === 'custom')) {
-                setModelStatus(t.voskSelectModel, 'error');
-                return;
+            if (source === 'builtin') {
+                const lang = UIElements.voskBuiltinLang.value;
+                modelPath = VOSK_BUILTIN_MODELS[lang];
+                if (!modelPath) {
+                    setModelStatus(t.voskSelectModel, 'error');
+                    return;
+                }
+            } else if (source === 'file') {
+                const file = UIElements.voskModelFile.files[0];
+                if (!file) {
+                    setModelStatus(t.voskSelectModel, 'error');
+                    return;
+                }
+                modelPath = URL.createObjectURL(file);
+                isBlobUrl = true;
+            } else {
+                const url = UIElements.voskModelUrl.value.trim();
+                if (!url) {
+                    setModelStatus(t.voskSelectModel, 'error');
+                    return;
+                }
+                modelPath = url;
             }
-
-            const url = modelUrl || `${VOSK_MODEL_BASE}/${preset}.zip`;
 
             UIElements.loadModelBtn.disabled = true;
             UIElements.loadModelBtn.textContent = t.loadModelBtnLoading;
@@ -738,6 +773,7 @@
             }
 
             setModelStatus(t.voskLoadingModel, '');
+            UIElements.modelProgressBar.style.width = '30%';
 
             try {
                 if (voskState.model) {
@@ -746,7 +782,7 @@
                 }
 
                 voskState.modelLoading = true;
-                const model = await window.Vosk.createModel(url);
+                const model = await window.Vosk.createModel(modelPath);
                 voskState.model = model;
                 voskState.modelReady = true;
                 voskState.modelLoading = false;
@@ -758,7 +794,11 @@
                 console.error('Vosk model load error:', e);
                 voskState.modelLoading = false;
                 voskState.modelReady = false;
-                setModelStatus(t.voskModelError + '\n' + t.voskCorsHint, 'error');
+                setModelStatus(t.voskModelError, 'error');
+            } finally {
+                if (isBlobUrl && modelPath) {
+                    URL.revokeObjectURL(modelPath);
+                }
             }
 
             resetLoadBtn();
@@ -910,6 +950,13 @@
             UIElements.voskModelLabel.textContent = t.voskModelLabel;
             UIElements.voskUrlLabel.textContent = t.voskUrlLabel;
             UIElements.loadModelBtn.textContent = voskState.modelLoading ? t.loadModelBtnLoading : t.loadModelBtn;
+            document.getElementById('vosk-source-builtin').textContent = t.voskSourceBuiltin;
+            document.getElementById('vosk-source-file').textContent = t.voskSourceFile;
+            document.getElementById('vosk-source-url').textContent = t.voskSourceUrl;
+            const langLabelVosk = document.getElementById('vosk-lang-label');
+            if (langLabelVosk) langLabelVosk.textContent = t.voskLangLabel;
+            const fileLabelEl = document.getElementById('vosk-file-label');
+            if (fileLabelEl) fileLabelEl.textContent = t.voskFileLabel;
 
             const isVosk = state.engine === ENGINE.VOSK;
             UIElements.warningText.textContent = isVosk ? t.warningTextVosk : t.warningTextGoogle;
