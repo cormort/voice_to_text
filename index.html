@@ -498,6 +498,7 @@
         </details>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js"></script>
     <script>
     (function() {
         const VOSK_CDN = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
@@ -705,6 +706,34 @@
         };
 
         const ENGINE = { WEB_SPEECH: 'webspeech', VOSK: 'vosk', WHISPER: 'whisper' };
+
+        // --- 簡體 → 繁體轉換 (opencc-js) ---
+        // Vosk 中文模型與 Whisper 預設輸出簡體中文；依辨識語言轉成對應繁體
+        // （zh-TW/zh-CN → 台灣用語 twp；zh-HK → 香港用語 hk；非中文語言不轉換）
+        const openccConverters = {};
+
+        function getOpenccConverter(variant) {
+            if (!window.OpenCC) return null;
+            if (!openccConverters[variant]) {
+                openccConverters[variant] = window.OpenCC.Converter({ from: 'cn', to: variant });
+            }
+            return openccConverters[variant];
+        }
+
+        function toTraditional(text) {
+            if (!text) return text;
+            let lang = UIElements.languageSelector ? UIElements.languageSelector.value : 'zh-TW';
+            // Vosk 模式語言下拉是隱藏的：內建 cn 模型必定輸出簡中，直接視為繁體中文需求
+            if (state.engine === ENGINE.VOSK &&
+                UIElements.voskModelSource && UIElements.voskModelSource.value === 'builtin' &&
+                UIElements.voskBuiltinLang && UIElements.voskBuiltinLang.value === 'cn') {
+                lang = 'zh-TW';
+            }
+            if (!lang.startsWith('zh')) return text;
+            const variant = lang === 'zh-HK' ? 'hk' : 'twp';
+            const converter = getOpenccConverter(variant);
+            return converter ? converter(text) : text;
+        }
 
         const state = {
             currentUiLang: 'zh',
@@ -996,7 +1025,7 @@
                 voskState.recognizer.setWords(false);
 
                 voskState.recognizer.on('result', (message) => {
-                    const text = message.result?.text;
+                    const text = toTraditional(message.result?.text);
                     if (text) {
                         state.transcriptSegments.push({ timestamp: new Date(), text: text });
                         state.interimTranscript = '';
@@ -1008,7 +1037,7 @@
                 voskState.recognizer.on('partialresult', (message) => {
                     const partial = message.result?.partial;
                     if (partial) {
-                        state.interimTranscript = partial;
+                        state.interimTranscript = toTraditional(partial);
                         updateTranscriptDisplay();
                     }
                 });
@@ -1167,7 +1196,7 @@
                 chunk_length_s: 30,
                 stride_length_s: 5,
             });
-            return (out && out.text ? out.text : '').trim();
+            return toTraditional((out && out.text ? out.text : '').trim());
         }
 
         function commitWhisperDelta(newText) {
@@ -1501,7 +1530,7 @@
             let finalTranscriptThisTurn = '';
 
             for (let i = event.resultIndex; i < event.results.length; ++i) {
-                const transcript = event.results[i][0].transcript;
+                const transcript = toTraditional(event.results[i][0].transcript);
                 if (event.results[i].isFinal) {
                     finalTranscriptThisTurn += transcript.trim() + ' ';
                 } else {
