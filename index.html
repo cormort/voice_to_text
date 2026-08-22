@@ -194,6 +194,38 @@
         .model-status.error { color: #ff6b6b; }
         .model-status.success { color: #8BC34A; }
 
+        .vosk-hint {
+            flex-basis: 100%;
+            color: #FFE082;
+            font-size: 13px;
+            margin: 6px 0 0;
+            line-height: 1.5;
+        }
+        .vosk-hint a {
+            color: #FFD54F;
+            font-weight: 600;
+        }
+
+        #toast {
+            position: fixed;
+            left: 50%;
+            bottom: 32px;
+            transform: translateX(-50%) translateY(16px);
+            background: rgba(30, 30, 46, 0.92);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            z-index: 1000;
+            max-width: 90vw;
+            text-align: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
         .controls {
             display: flex;
             flex-direction: column;
@@ -389,6 +421,7 @@
         <div class="row" id="fileUploadRow" style="display:none;">
             <label id="vosk-file-label">檔案:</label>
             <input type="file" id="voskModelFile" accept=".zip,.tar.gz,.tar,.gz" style="flex:1; color:white; font-size:14px;">
+            <p class="vosk-hint"><span id="voskFileHintText"></span> <a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a></p>
         </div>
         <div class="row" id="customUrlRow" style="display:none;">
             <label id="vosk-url-label">URL:</label>
@@ -433,8 +466,8 @@
     (function() {
         const VOSK_CDN = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
         const VOSK_BUILTIN_MODELS = {
-            cn: 'models/vosk-model-small-cn-0.22.zip',
-            en: 'models/vosk-model-small-en-us-0.15.zip',
+            cn: new URL('models/vosk-model-small-cn-0.22.zip', document.baseURI).href,
+            en: new URL('models/vosk-model-small-en-us-0.15.zip', document.baseURI).href,
         };
 
         const UIElements = {
@@ -467,6 +500,7 @@
             voskBuiltinLang: document.getElementById('voskBuiltinLang'),
             builtinRow: document.getElementById('builtinRow'),
             voskModelFile: document.getElementById('voskModelFile'),
+            voskFileHintText: document.getElementById('voskFileHintText'),
             fileUploadRow: document.getElementById('fileUploadRow'),
             voskModelUrl: document.getElementById('voskModelUrl'),
             customUrlRow: document.getElementById('customUrlRow'),
@@ -615,6 +649,8 @@
             recognitionActive: false,
         };
 
+        let basePageTitle = '多國語言即時逐字稿工具';
+
         const voskState = {
             libLoaded: false,
             libLoading: false,
@@ -667,8 +703,12 @@
                 UIElements.customUrlRow.style.display = val === 'url' ? 'flex' : 'none';
             });
             UIElements.loadModelBtn.addEventListener('click', loadVoskModel);
+            UIElements.voskModelFile.addEventListener('change', () => {
+                const f = UIElements.voskModelFile.files[0];
+                UIElements.voskFileHintText.textContent = (f ? f.name + ' — ' : '') + translations[state.currentUiLang].voskFileHint;
+            });
             document.addEventListener('keydown', (e) => {
-                if (e.code === 'Space' && e.target === document.body) {
+                if (e.code === 'Space' && e.target === document.body && !UIElements.controlBtn.disabled) {
                     e.preventDefault();
                     toggleRecognition();
                 }
@@ -697,9 +737,8 @@
         function updateEngineUI() {
             const isVosk = state.engine === ENGINE.VOSK;
             UIElements.voskConfig.classList.toggle('visible', isVosk);
-            UIElements.languageSelector.parentElement && (UIElements.languageSelector.style.display = isVosk ? 'none' : '');
-            const langLabelEl = document.getElementById('lang-label');
-            if (langLabelEl) langLabelEl.style.display = isVosk ? 'none' : '';
+            UIElements.languageSelector.style.display = isVosk ? 'none' : '';
+            UIElements.langLabel.style.display = isVosk ? 'none' : '';
 
             const t = translations[state.currentUiLang];
             UIElements.warningText.textContent = isVosk ? t.warningTextVosk : t.warningTextGoogle;
@@ -711,6 +750,23 @@
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 UIElements.controlBtn.disabled = !SpeechRecognition;
             }
+        }
+
+        // --- Toast ---
+
+        let toastTimer = null;
+
+        function showToast(message) {
+            let toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove('show'), CONFIG.FEEDBACK_DURATION);
         }
 
         // --- Vosk Engine ---
@@ -818,17 +874,13 @@
         function startVoskRecognition() {
             const t = translations[state.currentUiLang];
             if (!voskState.modelReady || !voskState.model) {
-                alert(t.voskSelectModel);
+                showToast(t.voskSelectModel);
                 return;
             }
 
-            state.isManualStop = false;
-            state.startTime = new Date();
-            state.transcriptSegments = [{ timestamp: state.startTime, text: '--- Recording Start / 錄音開始 ---' }];
-            state.renderedSegmentCount = 0;
-            state.interimTranscript = '';
-            UIElements.finalText.textContent = '';
-            updateTranscriptDisplay();
+            beginNewRecording();
+            state.isRecognizing = true;
+            updateButtonStates();
 
             navigator.mediaDevices.getUserMedia({
                 audio: {
@@ -838,6 +890,10 @@
                     sampleRate: CONFIG.VOSK_SAMPLE_RATE,
                 }
             }).then(stream => {
+                if (!state.isRecognizing) {
+                    stream.getTracks().forEach(track => track.stop());
+                    return;
+                }
                 voskState.stream = stream;
                 voskState.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: CONFIG.VOSK_SAMPLE_RATE });
 
@@ -888,7 +944,9 @@
 
             }).catch(err => {
                 console.error('Microphone error:', err);
-                alert(t.micDeniedError);
+                state.isRecognizing = false;
+                updateButtonStates();
+                showToast(t.micDeniedError);
             });
         }
 
@@ -925,6 +983,16 @@
 
         // --- Web Speech API Engine ---
 
+        function beginNewRecording() {
+            state.isManualStop = false;
+            state.startTime = new Date();
+            state.transcriptSegments = [{ timestamp: state.startTime, text: '--- Recording Start / 錄音開始 ---' }];
+            state.renderedSegmentCount = 0;
+            state.interimTranscript = '';
+            UIElements.finalText.textContent = '';
+            updateTranscriptDisplay();
+        }
+
         function toggleUiLanguage() {
             const newLang = state.currentUiLang === 'zh' ? 'en' : 'zh';
             setUiLanguage(newLang);
@@ -934,6 +1002,7 @@
         function setUiLanguage(lang) {
             state.currentUiLang = lang;
             const t = translations[lang];
+            basePageTitle = t.pageTitle;
 
             UIElements.pageTitle.textContent = t.pageTitle;
             UIElements.mainTitle.textContent = t.mainTitle;
@@ -957,6 +1026,7 @@
             if (langLabelVosk) langLabelVosk.textContent = t.voskLangLabel;
             const fileLabelEl = document.getElementById('vosk-file-label');
             if (fileLabelEl) fileLabelEl.textContent = t.voskFileLabel;
+            UIElements.voskFileHintText.textContent = t.voskFileHint;
 
             const isVosk = state.engine === ENGINE.VOSK;
             UIElements.warningText.textContent = isVosk ? t.warningTextVosk : t.warningTextGoogle;
@@ -965,7 +1035,7 @@
             UIElements.howItWorksText.textContent = t.howItWorksText;
             UIElements.suitableScenariosTitle.textContent = t.suitableScenariosTitle;
             UIElements.riskScenariosTitle.textContent = t.riskScenariosTitle;
-            UIElements.privacyConclusion.innerHTML = t.privacyConclusion;
+            UIElements.privacyConclusion.textContent = t.privacyConclusion;
 
             UIElements.suitableScenariosList.innerHTML = t.suitableScenarios.map(item => `<li class="safe">${item}</li>`).join('');
             UIElements.riskScenariosList.innerHTML = t.riskScenarios.map(item => `<li class="unsafe">${item}</li>`).join('');
@@ -978,6 +1048,8 @@
             UIElements.controlBtn.textContent = state.isRecognizing ? t.stopBtn : t.startBtn;
             UIElements.controlBtn.title = state.isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
             UIElements.controlBtn.classList.toggle('listening', state.isRecognizing);
+
+            document.title = state.isRecognizing ? '● ' + basePageTitle : basePageTitle;
 
             const canExportOrCopy = state.transcriptSegments.length > CONFIG.MIN_SEGMENTS_FOR_EXPORT;
             UIElements.exportBtn.disabled = !canExportOrCopy;
@@ -998,15 +1070,14 @@
         }
 
         function startRecognition() {
-            state.isManualStop = false;
+            if (!state.recognition) {
+                showToast(translations[state.currentUiLang].apiNotSupportedError);
+                return;
+            }
             state.recognition.lang = UIElements.languageSelector.value;
-            state.startTime = new Date();
-            state.transcriptSegments = [{ timestamp: state.startTime, text: '--- Recording Start / 錄音開始 ---' }];
-            state.renderedSegmentCount = 0;
-            state.interimTranscript = '';
-            UIElements.finalText.textContent = '';
-
-            updateTranscriptDisplay();
+            beginNewRecording();
+            state.isRecognizing = true;
+            updateButtonStates();
 
             setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), CONFIG.AUDIO_METER_DELAY);
 
@@ -1014,7 +1085,9 @@
                 if (!state.recognitionActive) state.recognition.start();
             } catch (e) {
                 console.error("Error starting recognition:", e);
-                alert("無法啟動語音辨識，請重新整理頁面再試。\nFailed to start recognition, please refresh and try again.");
+                state.isRecognizing = false;
+                updateButtonStates();
+                showToast("無法啟動語音辨識，請重新整理頁面再試。\nFailed to start recognition, please refresh and try again.");
             }
         }
 
@@ -1028,6 +1101,10 @@
         }
 
         function handleRecognitionStart() {
+            if (state.isManualStop) {
+                state.recognition.stop();
+                return;
+            }
             state.recognitionActive = true;
             state.isRecognizing = true;
             UIElements.languageSelector.disabled = true;
@@ -1038,10 +1115,13 @@
         function handleRecognitionError(event) {
             console.error('Speech Recognition Error:', event.error, event);
             state.recognitionActive = false;
-            if (event.error === 'not-allowed') {
-                alert(translations[state.currentUiLang].micDeniedError);
+            const t = translations[state.currentUiLang];
+            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                state.isManualStop = true;
+                showToast(t.micDeniedError);
             } else if (event.error === 'network') {
-                alert('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
+                state.isManualStop = true;
+                showToast('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
             }
         }
 
@@ -1133,7 +1213,7 @@
         }
 
         function copyTranscript() {
-            if (state.transcriptSegments.length <= 1 && !state.interimTranscript) return;
+            if (state.transcriptSegments.length <= CONFIG.MIN_SEGMENTS_FOR_EXPORT && !state.interimTranscript) return;
 
             const textToCopy = getFullTranscriptText();
             navigator.clipboard.writeText(textToCopy).then(() => {
@@ -1144,7 +1224,7 @@
                 }, CONFIG.FEEDBACK_DURATION);
             }, (err) => {
                 console.error('Could not copy text: ', err);
-                alert(translations[state.currentUiLang].copiedError);
+                showToast(translations[state.currentUiLang].copiedError);
             });
         }
 
@@ -1187,14 +1267,18 @@
         async function startAudioMeter() {
             if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported');
             if (audioState.context) return;
+            if (!state.isRecognizing) return;
 
             if (state.engine === ENGINE.VOSK && voskState.stream) {
                 audioState.stream = voskState.stream;
+                if (voskState.audioContext) audioState.context = voskState.audioContext;
             } else {
                 audioState.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             }
 
-            audioState.context = new (window.AudioContext || window.webkitAudioContext)();
+            if (!audioState.context) {
+                audioState.context = new (window.AudioContext || window.webkitAudioContext)();
+            }
             audioState.analyser = audioState.context.createAnalyser();
             const source = audioState.context.createMediaStreamSource(audioState.stream);
             source.connect(audioState.analyser);
@@ -1208,8 +1292,8 @@
                 audioState.stream.getTracks().forEach(track => track.stop());
             }
             audioState.stream = null;
-            if (audioState.context?.state !== 'closed') {
-                audioState.context?.close().then(() => { audioState.context = null; });
+            if (state.engine !== ENGINE.VOSK && audioState.context) {
+                audioState.context.close().then(() => { audioState.context = null; }).catch(() => { audioState.context = null; });
             } else {
                 audioState.context = null;
             }
