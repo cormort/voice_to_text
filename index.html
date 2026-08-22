@@ -124,7 +124,7 @@
             border-color: rgba(255, 255, 255, 0.5);
         }
 
-        .vosk-config {
+        .vosk-config, .engine-config {
             width: 90%;
             max-width: 900px;
             margin-bottom: 20px;
@@ -135,16 +135,16 @@
             border: 2px solid rgba(255, 255, 255, 0.2);
             display: none;
         }
-        .vosk-config.visible { display: block; }
-        .vosk-config .row {
+        .vosk-config.visible, .engine-config.visible { display: block; }
+        .vosk-config .row, .engine-config .row {
             display: flex;
             align-items: center;
             gap: 10px;
             margin-bottom: 10px;
             flex-wrap: wrap;
         }
-        .vosk-config label { color: white; font-weight: 600; font-size: 14px; min-width: 80px; }
-        .vosk-config select, .vosk-config input[type="url"] {
+        .vosk-config label, .engine-config label { color: white; font-weight: 600; font-size: 14px; min-width: 80px; }
+        .vosk-config select, .vosk-config input[type="url"], .engine-config select, .engine-config input[type="url"] {
             flex: 1;
             min-width: 200px;
             padding: 8px 12px;
@@ -153,7 +153,7 @@
             border-radius: 8px;
             background: rgba(255, 255, 255, 0.9);
         }
-        #loadModelBtn {
+        #loadModelBtn, #loadWhisperBtn {
             padding: 8px 20px;
             font-size: 14px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -164,11 +164,11 @@
             font-weight: 600;
             transition: all 0.3s ease;
         }
-        #loadModelBtn:hover:not(:disabled) {
+        #loadModelBtn:hover:not(:disabled), #loadWhisperBtn:hover:not(:disabled) {
             box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
             transform: translateY(-1px);
         }
-        #loadModelBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+        #loadModelBtn:disabled, #loadWhisperBtn:disabled { opacity: 0.6; cursor: not-allowed; }
         .model-progress {
             width: 100%;
             height: 8px;
@@ -184,6 +184,14 @@
             background: linear-gradient(90deg, #4CAF50, #8BC34A);
             border-radius: 4px;
             transition: width 0.3s ease;
+        }
+        .model-progress-bar.indeterminate {
+            width: 30% !important;
+            animation: indeterminate 1.4s ease-in-out infinite;
+        }
+        @keyframes indeterminate {
+            0% { margin-left: -30%; }
+            100% { margin-left: 100%; }
         }
         .model-status {
             color: white;
@@ -364,7 +372,7 @@
             .button-row { flex-direction: column; width: 100%; }
             button { width: 100%; }
             .settings { flex-direction: column; width: 90%; }
-            .vosk-config .row { flex-direction: column; align-items: stretch; }
+            .vosk-config .row, .engine-config .row { flex-direction: column; align-items: stretch; }
         }
     </style>
 <!-- Google tag (gtag.js) -->
@@ -395,6 +403,7 @@
         <select id="engineSelector">
             <option value="webspeech">Web Speech API (Google)</option>
             <option value="vosk">Vosk (離線)</option>
+            <option value="whisper">Whisper (本機 WebGPU)</option>
         </select>
         <label for="languageSelector" id="lang-label">辨識語言:</label>
         <select id="languageSelector" title="選擇要進行辨識的語言">
@@ -445,6 +454,24 @@
         <div class="model-status" id="modelStatus"></div>
     </div>
 
+    <div class="engine-config" id="whisperConfig">
+        <div class="row">
+            <label id="whisper-model-label">模型:</label>
+            <select id="whisperModelSelect">
+                <option value="tiny">Whisper tiny (~40MB)</option>
+                <option value="base" selected>Whisper base (~74MB)</option>
+                <option value="small">Whisper small (~240MB)</option>
+            </select>
+        </div>
+        <div class="row" style="justify-content: center;">
+            <button id="loadWhisperBtn">載入模型</button>
+        </div>
+        <div class="model-progress" id="whisperProgress">
+            <div class="model-progress-bar" id="whisperProgressBar"></div>
+        </div>
+        <div class="model-status" id="whisperStatus"></div>
+    </div>
+
     <div class="controls">
         <div class="button-row">
             <button id="controlBtn" title="點擊以開始語音辨識">開始辨識</button>
@@ -477,6 +504,15 @@
         const VOSK_BUILTIN_MODELS = {
             cn: new URL('models/vosk-model-small-cn-0.22.zip', document.baseURI).href,
             en: new URL('models/vosk-model-small-en-us-0.15.zip', document.baseURI).href,
+        };
+        const WHISPER_MODELS = {
+            tiny: 'Xenova/whisper-tiny',
+            base: 'Xenova/whisper-base',
+            small: 'Xenova/whisper-small',
+        };
+        const WHISPER_LANG_MAP = {
+            'en-US': 'en', 'en-GB': 'en', 'zh-TW': 'zh', 'zh-CN': 'zh', 'zh-HK': 'yue',
+            'ja-JP': 'ja', 'ko-KR': 'ko', 'es-ES': 'es', 'fr-FR': 'fr', 'de-DE': 'de',
         };
 
         const UIElements = {
@@ -519,6 +555,13 @@
             modelStatus: document.getElementById('modelStatus'),
             voskModelLabel: document.getElementById('vosk-model-label'),
             voskUrlLabel: document.getElementById('vosk-url-label'),
+            whisperConfig: document.getElementById('whisperConfig'),
+            whisperModelSelect: document.getElementById('whisperModelSelect'),
+            whisperModelLabel: document.getElementById('whisper-model-label'),
+            loadWhisperBtn: document.getElementById('loadWhisperBtn'),
+            whisperProgress: document.getElementById('whisperProgress'),
+            whisperProgressBar: document.getElementById('whisperProgressBar'),
+            whisperStatus: document.getElementById('whisperStatus'),
         };
 
         const translations = {
@@ -573,6 +616,14 @@
                 voskLibError: "Failed to load Vosk library. Check your internet connection.",
                 voskSelectModel: "Please select a model file or enter a URL first.",
                 voskFileHint: "Download a model from the link below, then upload the .zip file here.",
+                whisperModelLabel: "Model:",
+                whisperLoadingLib: "Loading Whisper engine...",
+                whisperLoadingModel: "Downloading model (first time ~40–240MB, then cached in browser)...",
+                whisperModelReady: "Whisper model loaded! Ready to use.",
+                whisperModelError: "Failed to load Whisper model.",
+                whisperLibError: "Failed to load Whisper engine. Check your internet connection.",
+                whisperSelectModel: "Please load the Whisper model first.",
+                warningTextWhisper: "Whisper offline mode — audio is processed locally on your GPU, not uploaded.",
             },
             zh: {
                 pageTitle: "多國語言即時逐字稿工具",
@@ -625,6 +676,14 @@
                 voskLibError: "Vosk 函式庫載入失敗，請確認網路連線。",
                 voskSelectModel: "請先選擇模型檔案或輸入 URL。",
                 voskFileHint: "請先從下方連結下載模型，再上傳 .zip 檔案。",
+                whisperModelLabel: "模型:",
+                whisperLoadingLib: "正在載入 Whisper 引擎...",
+                whisperLoadingModel: "正在下載模型（首次約 40–240MB，之後快取於瀏覽器）...",
+                whisperModelReady: "Whisper 模型已載入！可以開始使用。",
+                whisperModelError: "Whisper 模型載入失敗。",
+                whisperLibError: "Whisper 引擎載入失敗，請確認網路連線。",
+                whisperSelectModel: "請先載入 Whisper 模型。",
+                warningTextWhisper: "Whisper 離線模式 — 音訊在本機 GPU 處理，不會上傳",
             }
         };
 
@@ -638,9 +697,14 @@
             MIN_SEGMENTS_FOR_EXPORT: 2,
             VOSK_SAMPLE_RATE: 16000,
             VOSK_BUFFER_SIZE: 8192,
+            WHISPER_CDN: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/+esm',
+            WHISPER_WINDOW_SEC: 6,
+            WHISPER_INTERVAL_MS: 2600,
+            WHISPER_MIN_NEW_SEC: 1.2,
+            WHISPER_BUFFER_CAP_SEC: 8,
         };
 
-        const ENGINE = { WEB_SPEECH: 'webspeech', VOSK: 'vosk' };
+        const ENGINE = { WEB_SPEECH: 'webspeech', VOSK: 'vosk', WHISPER: 'whisper' };
 
         const state = {
             currentUiLang: 'zh',
@@ -680,6 +744,23 @@
             dataArray: null,
         };
 
+        const whisperState = {
+            pipeline: null,
+            modelName: null,
+            libLoading: false,
+            ready: false,
+            audioContext: null,
+            stream: null,
+            processorNode: null,
+            buffer: [],
+            bufferSamples: 0,
+            totalSamples: 0,
+            lastProcessedSamples: 0,
+            lastFullText: '',
+            transcribing: false,
+            intervalId: null,
+        };
+
         function init() {
             loadPreferences();
             setupEventListeners();
@@ -712,6 +793,7 @@
                 UIElements.customUrlRow.style.display = val === 'url' ? 'flex' : 'none';
             });
             UIElements.loadModelBtn.addEventListener('click', loadVoskModel);
+            UIElements.loadWhisperBtn.addEventListener('click', loadWhisperModel);
             UIElements.voskModelFile.addEventListener('change', () => {
                 const f = UIElements.voskModelFile.files[0];
                 UIElements.voskFileHintText.textContent = (f ? f.name + ' — ' : '') + translations[state.currentUiLang].voskFileHint;
@@ -745,16 +827,20 @@
 
         function updateEngineUI() {
             const isVosk = state.engine === ENGINE.VOSK;
+            const isWhisper = state.engine === ENGINE.WHISPER;
             UIElements.voskConfig.classList.toggle('visible', isVosk);
+            UIElements.whisperConfig.classList.toggle('visible', isWhisper);
             UIElements.languageSelector.style.display = isVosk ? 'none' : '';
             UIElements.langLabel.style.display = isVosk ? 'none' : '';
 
             const t = translations[state.currentUiLang];
-            UIElements.warningText.textContent = isVosk ? t.warningTextVosk : t.warningTextGoogle;
-            UIElements.warningText.classList.toggle('offline', isVosk);
+            UIElements.warningText.textContent = isVosk ? t.warningTextVosk : (isWhisper ? t.warningTextWhisper : t.warningTextGoogle);
+            UIElements.warningText.classList.toggle('offline', isVosk || isWhisper);
 
             if (isVosk) {
                 UIElements.controlBtn.disabled = !voskState.modelReady;
+            } else if (isWhisper) {
+                UIElements.controlBtn.disabled = !whisperState.ready;
             } else {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 UIElements.controlBtn.disabled = !SpeechRecognition;
@@ -990,6 +1076,256 @@
             stopAudioMeter();
         }
 
+        // --- Whisper Engine (transformers.js + WebGPU / WASM) ---
+
+        async function loadWhisperLibrary() {
+            if (whisperState.pipeline) return;
+            if (whisperState.libLoading) throw new Error('Already loading');
+            whisperState.libLoading = true;
+            try {
+                const mod = await import(CONFIG.WHISPER_CDN);
+                window.whisperTransformers = mod;
+                if (mod.env) {
+                    mod.env.allowLocalModels = false;
+                    mod.env.useBrowserCache = true;
+                }
+            } finally {
+                whisperState.libLoading = false;
+            }
+        }
+
+        async function loadWhisperModel() {
+            const t = translations[state.currentUiLang];
+            const modelName = WHISPER_MODELS[UIElements.whisperModelSelect.value];
+            UIElements.loadWhisperBtn.disabled = true;
+            UIElements.loadWhisperBtn.textContent = t.loadModelBtnLoading;
+            UIElements.whisperProgress.classList.add('visible');
+            UIElements.whisperProgressBar.style.width = '0%';
+            setWhisperStatus(t.whisperLoadingLib, '');
+
+            try {
+                await loadWhisperLibrary();
+            } catch (e) {
+                console.error('Whisper lib load error:', e);
+                setWhisperStatus(t.whisperLibError, 'error');
+                resetWhisperBtn();
+                return;
+            }
+
+            setWhisperStatus(t.whisperLoadingModel, '');
+            UIElements.whisperProgressBar.classList.add('indeterminate');
+
+            try {
+                if (!(whisperState.pipeline && whisperState.modelName === modelName)) {
+                    const { pipeline } = window.whisperTransformers;
+                    let pipe = null;
+                    const hasGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+                    if (hasGPU) {
+                        try {
+                            pipe = await pipeline('automatic-speech-recognition', modelName, { device: 'webgpu', dtype: 'q8' });
+                        } catch (e) {
+                            console.warn('WebGPU pipeline failed, falling back to WASM:', e);
+                        }
+                    }
+                    if (!pipe) {
+                        pipe = await pipeline('automatic-speech-recognition', modelName, { device: 'wasm', dtype: 'q8' });
+                    }
+                    whisperState.pipeline = pipe;
+                    whisperState.modelName = modelName;
+                }
+                whisperState.ready = true;
+                UIElements.whisperProgressBar.classList.remove('indeterminate');
+                UIElements.whisperProgressBar.style.width = '100%';
+                setWhisperStatus(t.whisperModelReady, 'success');
+                UIElements.controlBtn.disabled = false;
+            } catch (e) {
+                console.error('Whisper model load error:', e);
+                UIElements.whisperProgressBar.classList.remove('indeterminate');
+                whisperState.ready = false;
+                setWhisperStatus(t.whisperModelError, 'error');
+            }
+            resetWhisperBtn();
+        }
+
+        function setWhisperStatus(text, type) {
+            UIElements.whisperStatus.textContent = text;
+            UIElements.whisperStatus.className = 'model-status' + (type ? ' ' + type : '');
+        }
+
+        function resetWhisperBtn() {
+            const t = translations[state.currentUiLang];
+            UIElements.loadWhisperBtn.disabled = false;
+            UIElements.loadWhisperBtn.textContent = t.loadModelBtn;
+        }
+
+        async function whisperTranscribe(audio) {
+            if (!whisperState.pipeline) return '';
+            const lang = WHISPER_LANG_MAP[UIElements.languageSelector.value] || null;
+            const out = await whisperState.pipeline(audio, {
+                language: lang,
+                task: 'transcribe',
+                chunk_length_s: 30,
+                stride_length_s: 5,
+            });
+            return (out && out.text ? out.text : '').trim();
+        }
+
+        function commitWhisperDelta(newText) {
+            if (!newText) {
+                state.interimTranscript = '';
+                return false;
+            }
+            const prev = whisperState.lastFullText;
+            if (prev && newText === prev) {
+                state.interimTranscript = '';
+                return false;
+            }
+            let delta = newText;
+            if (prev) {
+                const minLen = Math.min(prev.length, newText.length);
+                let i = 0;
+                while (i < minLen && prev[i] === newText[i]) i++;
+                delta = newText.slice(i).trim();
+            }
+            if (delta) {
+                state.transcriptSegments.push({ timestamp: new Date(), text: delta });
+                state.interimTranscript = '';
+            } else {
+                state.interimTranscript = newText.slice(0, 120) + '…';
+            }
+            whisperState.lastFullText = newText;
+            return !!delta;
+        }
+
+        function concatLastN(chunks, totalLen, n) {
+            const out = new Float32Array(n);
+            let need = n;
+            let writePos = n;
+            for (let i = chunks.length - 1; i >= 0 && need > 0; i--) {
+                const c = chunks[i];
+                const take = Math.min(need, c.length);
+                writePos -= take;
+                out.set(c.subarray(c.length - take), writePos);
+                need -= take;
+            }
+            return out;
+        }
+
+        function startWhisperRecognition() {
+            const t = translations[state.currentUiLang];
+            if (!whisperState.ready || !whisperState.pipeline) {
+                showToast(t.whisperSelectModel);
+                return;
+            }
+
+            beginNewRecording();
+            state.isRecognizing = true;
+            updateButtonStates();
+
+            navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    channelCount: 1,
+                    sampleRate: CONFIG.VOSK_SAMPLE_RATE,
+                }
+            }).then(stream => {
+                if (!state.isRecognizing) {
+                    stream.getTracks().forEach(track => track.stop());
+                    return;
+                }
+                whisperState.stream = stream;
+                whisperState.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: CONFIG.VOSK_SAMPLE_RATE });
+                whisperState.processorNode = whisperState.audioContext.createScriptProcessor(CONFIG.VOSK_BUFFER_SIZE, 1, 1);
+                whisperState.buffer = [];
+                whisperState.bufferSamples = 0;
+                whisperState.totalSamples = 0;
+                whisperState.lastProcessedSamples = 0;
+                whisperState.lastFullText = '';
+
+                whisperState.processorNode.onaudioprocess = (event) => {
+                    const data = event.inputBuffer.getChannelData(0);
+                    whisperState.buffer.push(new Float32Array(data));
+                    whisperState.bufferSamples += data.length;
+                    whisperState.totalSamples += data.length;
+                    const cap = CONFIG.VOSK_SAMPLE_RATE * CONFIG.WHISPER_BUFFER_CAP_SEC;
+                    while (whisperState.bufferSamples > cap) {
+                        whisperState.bufferSamples -= whisperState.buffer[0].length;
+                        whisperState.buffer.shift();
+                    }
+                };
+
+                const source = whisperState.audioContext.createMediaStreamSource(stream);
+                source.connect(whisperState.processorNode);
+                whisperState.processorNode.connect(whisperState.audioContext.destination);
+
+                UIElements.languageSelector.disabled = true;
+                UIElements.engineSelector.disabled = true;
+                whisperState.intervalId = setInterval(runWhisperCycle, CONFIG.WHISPER_INTERVAL_MS);
+
+                setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), CONFIG.AUDIO_METER_DELAY);
+            }).catch(err => {
+                console.error('Microphone error:', err);
+                state.isRecognizing = false;
+                updateButtonStates();
+                showToast(t.micDeniedError);
+            });
+        }
+
+        async function runWhisperCycle() {
+            if (!state.isRecognizing || whisperState.transcribing) return;
+            const newSamples = whisperState.totalSamples - whisperState.lastProcessedSamples;
+            if (newSamples < CONFIG.VOSK_SAMPLE_RATE * CONFIG.WHISPER_MIN_NEW_SEC) return;
+            const windowLen = Math.min(CONFIG.VOSK_SAMPLE_RATE * CONFIG.WHISPER_WINDOW_SEC, whisperState.bufferSamples);
+            if (windowLen < CONFIG.VOSK_SAMPLE_RATE) return;
+            const audio = concatLastN(whisperState.buffer, whisperState.bufferSamples, windowLen);
+            whisperState.transcribing = true;
+            try {
+                const text = await whisperTranscribe(audio);
+                commitWhisperDelta(text);
+                whisperState.lastProcessedSamples = whisperState.totalSamples;
+                updateTranscriptDisplay();
+                updateButtonStates();
+            } catch (e) {
+                console.error('Whisper cycle error:', e);
+            } finally {
+                whisperState.transcribing = false;
+            }
+        }
+
+        function stopWhisperRecognition() {
+            state.isManualStop = true;
+            if (whisperState.intervalId) {
+                clearInterval(whisperState.intervalId);
+                whisperState.intervalId = null;
+            }
+            if (whisperState.processorNode) {
+                whisperState.processorNode.disconnect();
+                whisperState.processorNode = null;
+            }
+            if (whisperState.stream) {
+                whisperState.stream.getTracks().forEach(track => track.stop());
+                whisperState.stream = null;
+            }
+            if (whisperState.audioContext && whisperState.audioContext.state !== 'closed') {
+                whisperState.audioContext.close();
+            }
+            whisperState.audioContext = null;
+            whisperState.buffer = [];
+            whisperState.bufferSamples = 0;
+            whisperState.lastFullText = '';
+
+            state.isRecognizing = false;
+            state.recognitionActive = false;
+            UIElements.languageSelector.disabled = false;
+            UIElements.engineSelector.disabled = false;
+            state.endTime = new Date();
+            state.interimTranscript = '';
+            updateTranscriptDisplay();
+            updateButtonStates();
+            stopAudioMeter();
+        }
+
         // --- Web Speech API Engine ---
 
         function beginNewRecording() {
@@ -1036,9 +1372,12 @@
             const fileLabelEl = document.getElementById('vosk-file-label');
             if (fileLabelEl) fileLabelEl.textContent = t.voskFileLabel;
             UIElements.voskFileHintText.textContent = t.voskFileHint;
+            UIElements.whisperModelLabel.textContent = t.whisperModelLabel;
+            UIElements.loadWhisperBtn.textContent = t.loadModelBtn;
 
             const isVosk = state.engine === ENGINE.VOSK;
-            UIElements.warningText.textContent = isVosk ? t.warningTextVosk : t.warningTextGoogle;
+            const isWhisper = state.engine === ENGINE.WHISPER;
+            UIElements.warningText.textContent = isVosk ? t.warningTextVosk : (isWhisper ? t.warningTextWhisper : t.warningTextGoogle);
 
             UIElements.privacySummary.textContent = t.privacySummary;
             UIElements.howItWorksText.textContent = t.howItWorksText;
@@ -1071,9 +1410,11 @@
         function toggleRecognition() {
             if (state.isRecognizing) {
                 if (state.engine === ENGINE.VOSK) stopVoskRecognition();
+                else if (state.engine === ENGINE.WHISPER) stopWhisperRecognition();
                 else stopRecognition();
             } else {
                 if (state.engine === ENGINE.VOSK) startVoskRecognition();
+                else if (state.engine === ENGINE.WHISPER) startWhisperRecognition();
                 else startRecognition();
             }
         }
@@ -1265,8 +1606,12 @@
                 const browserLang = navigator.language || navigator.userLanguage;
 
                 state.currentUiLang = savedUiLang || (browserLang.startsWith('zh') ? 'zh' : 'en');
-                if (savedRecLang) UIElements.languageSelector.value = savedRecLang;
-                if (savedEngine && (savedEngine === ENGINE.WEB_SPEECH || savedEngine === ENGINE.VOSK)) {
+                if (savedRecLang) {
+                    UIElements.languageSelector.value = savedRecLang;
+                } else if (browserLang.startsWith('zh')) {
+                    UIElements.languageSelector.value = browserLang.includes('TW') || browserLang.includes('HK') ? 'zh-TW' : 'zh-CN';
+                }
+                if (savedEngine && (savedEngine === ENGINE.WEB_SPEECH || savedEngine === ENGINE.VOSK || savedEngine === ENGINE.WHISPER)) {
                     state.engine = savedEngine;
                     UIElements.engineSelector.value = savedEngine;
                 }
@@ -1281,6 +1626,9 @@
             if (state.engine === ENGINE.VOSK && voskState.stream) {
                 audioState.stream = voskState.stream;
                 if (voskState.audioContext) audioState.context = voskState.audioContext;
+            } else if (state.engine === ENGINE.WHISPER && whisperState.stream) {
+                audioState.stream = whisperState.stream;
+                if (whisperState.audioContext) audioState.context = whisperState.audioContext;
             } else {
                 audioState.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             }
@@ -1297,11 +1645,11 @@
 
         function stopAudioMeter() {
             if (audioState.animationFrameId) cancelAnimationFrame(audioState.animationFrameId);
-            if (state.engine !== ENGINE.VOSK && audioState.stream) {
+            if (state.engine === ENGINE.WEB_SPEECH && audioState.stream) {
                 audioState.stream.getTracks().forEach(track => track.stop());
             }
             audioState.stream = null;
-            if (state.engine !== ENGINE.VOSK && audioState.context) {
+            if (state.engine === ENGINE.WEB_SPEECH && audioState.context) {
                 audioState.context.close().then(() => { audioState.context = null; }).catch(() => { audioState.context = null; });
             } else {
                 audioState.context = null;

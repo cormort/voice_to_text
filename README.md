@@ -77,3 +77,13 @@
 7. **效能**：Vosk 模式音量表不再建立第二個 AudioContext，與辨識共用同一個
 
 8. **程式碼品質**：抽出 `beginNewRecording()` 共用開始錄音邏輯；`updateEngineUI` 改用 `UIElements.langLabel`；`copyTranscript` 判斷與 `MIN_SEGMENTS_FOR_EXPORT` 常數對齊
+
+## 本次新增 (2026-08-23) — Whisper (WebGPU) 離線引擎
+
+新增第三個辨識引擎：**Whisper**（transformers.js + WebGPU / WASM fallback），完全在瀏覽器本機 GPU 執行，音訊不出裝置，不受 Google 不穩／延遲影響。
+
+- 三種模型可選：tiny (~40MB) / base (~74MB，預設) / small (~240MB)，首次下載後快取於瀏覽器
+- 滾動視窗轉錄：每 ~2.6 秒對最近 6 秒音訊重新轉錄，以最長共同前綴比對輸出增量，避免重複文字
+- 支援語言與 Web Speech 相同（中文／粵語／英日韓西法德），zh-HK 自動映射為粵語 (yue)
+- 硬體偵測：有 WebGPU 用 GPU（快），沒有自動退回 WASM（較慢但可用）
+- 技術：`@huggingface/transformers@4.2.0` + `Xenova/whisper-*` 量化模型（dtype q8）
