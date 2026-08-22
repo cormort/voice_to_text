@@ -459,8 +459,8 @@
             <label id="whisper-model-label">模型:</label>
             <select id="whisperModelSelect">
                 <option value="tiny">Whisper tiny (~40MB)</option>
-                <option value="base" selected>Whisper base (~74MB)</option>
-                <option value="small">Whisper small (~240MB)</option>
+                <option value="base">Whisper base (~74MB)</option>
+                <option value="small" selected>Whisper small (~240MB)</option>
             </select>
         </div>
         <div class="row" style="justify-content: center;">
@@ -1157,7 +1157,10 @@
                         }
                     }
                     if (!pipe) {
-                        pipe = await pipeline('automatic-speech-recognition', modelName, { device: 'wasm', dtype: 'q8' });
+                        // wasm 上 q8 的 decoder 量化在 transformers.js 4.2.0 會崩
+                        // （Missing required scale），且失敗載入會毒化瀏覽器模型快取；
+                        // 退回路徑改用 q4
+                        pipe = await pipeline('automatic-speech-recognition', modelName, { device: 'wasm', dtype: 'q4' });
                     }
                     whisperState.pipeline = pipe;
                     whisperState.modelName = modelName;

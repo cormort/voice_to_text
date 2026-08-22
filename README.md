@@ -82,10 +82,13 @@
 
 新增第三個辨識引擎：**Whisper**（transformers.js + WebGPU / WASM fallback），完全在瀏覽器本機 GPU 執行，音訊不出裝置，不受 Google 不穩／延遲影響。
 
-- 三種模型可選：tiny (~40MB) / base (~74MB，預設) / small (~240MB)，首次下載後快取於瀏覽器
+- 三種模型可選：tiny (~40MB) / base (~74MB) / small (~240MB，預設)，首次下載後快取於瀏覽器
+- 預設 small 是為了中英混雜語音的正確率：實測同一段「我用 React 寫前端，遇到 API 的問題」，
+  base 會把「前端」聽成「前段」、「JavaScript」聽成「漢字」，small 則 100% 正確
 - 滾動視窗轉錄：每 ~2.6 秒對最近 6 秒音訊重新轉錄，以最長共同前綴比對輸出增量，避免重複文字
 - 支援語言與 Web Speech 相同（中文／粵語／英日韓西法德），zh-HK 自動映射為粵語 (yue)
-- 硬體偵測：有 WebGPU 用 GPU（快），沒有自動退回 WASM（較慢但可用）
+- 硬體偵測：有 WebGPU 用 GPU（快），沒有自動退回 WASM（較慢但可用；WASM 用 q4 量化，
+  transformers.js 4.2.0 的 WASM+q8 會因 decoder 量化錯誤崩潰，且失敗載入會毒化模型快取）
 - 技術：`@huggingface/transformers@4.2.0` + `Xenova/whisper-*` 量化模型（dtype q8）
 
 ## 本次新增 (2026-08-23) — 繁體中文輸出
