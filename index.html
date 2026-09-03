@@ -1,1730 +1,1586 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="data:,">
-    <title id="pageTitle">多國語言即時逐字稿工具</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            position: relative;
-            padding: 20px;
-        }
-        #uiLangToggle {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            padding: 10px 20px;
-            background-color: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            backdrop-filter: blur(10px);
-            transition: all 0.3s ease;
-        }
-        #uiLangToggle:hover {
-            background-color: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
-        }
-        h1 {
-            color: white;
-            margin: 60px 0 30px 0;
-            font-size: 28px;
-            font-weight: 700;
-            text-align: center;
-            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        }
-        .transcript-container {
-            width: 90%;
-            max-width: 900px;
-            height: 45vh;
-            margin-bottom: 20px;
-            border: none;
-            border-radius: 16px;
-            background-color: #fff;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            overflow-y: auto;
-            padding: 20px;
-            scroll-behavior: smooth;
-        }
-        #transcript {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            font-size: 16px;
-            line-height: 1.8;
-            margin: 0;
-            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-            color: #333;
-        }
-        .interim { color: #888; font-style: italic; }
-        .placeholder { color: #999; }
-
-        .volume-meter {
-            width: 90%;
-            max-width: 900px;
-            height: 24px;
-            background-color: rgba(255, 255, 255, 0.2);
-            border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 20px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            backdrop-filter: blur(10px);
-        }
-        .volume-level {
-            height: 100%;
-            width: 100%;
-            background: linear-gradient(90deg, #4CAF50, #8BC34A);
-            transform: scaleX(0);
-            transform-origin: left;
-            transition: transform 0.1s ease-out;
-            will-change: transform;
-            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
-        }
-
-        .settings {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 20px;
-            background: rgba(255, 255, 255, 0.15);
-            padding: 15px 25px;
-            border-radius: 12px;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        .settings label { color: white; font-weight: 600; font-size: 15px; }
-        .settings select, .settings input[type="url"] {
-            padding: 10px 15px;
-            font-size: 15px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.9);
-            cursor: pointer;
-            font-weight: 500;
-            transition: all 0.3s ease;
-        }
-        .settings select:hover, .settings input[type="url"]:hover {
-            background: white;
-            border-color: rgba(255, 255, 255, 0.5);
-        }
-
-        .vosk-config, .engine-config {
-            width: 90%;
-            max-width: 900px;
-            margin-bottom: 20px;
-            background: rgba(255, 255, 255, 0.15);
-            padding: 15px 25px;
-            border-radius: 12px;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            display: none;
-        }
-        .vosk-config.visible, .engine-config.visible { display: block; }
-        .vosk-config .row, .engine-config .row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-            flex-wrap: wrap;
-        }
-        .vosk-config label, .engine-config label { color: white; font-weight: 600; font-size: 14px; min-width: 80px; }
-        .vosk-config select, .vosk-config input[type="url"], .engine-config select, .engine-config input[type="url"] {
-            flex: 1;
-            min-width: 200px;
-            padding: 8px 12px;
-            font-size: 14px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.9);
-        }
-        #loadModelBtn, #loadWhisperBtn {
-            padding: 8px 20px;
-            font-size: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-        #loadModelBtn:hover:not(:disabled), #loadWhisperBtn:hover:not(:disabled) {
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-            transform: translateY(-1px);
-        }
-        #loadModelBtn:disabled, #loadWhisperBtn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .model-progress {
-            width: 100%;
-            height: 8px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 4px;
-            overflow: hidden;
-            display: none;
-        }
-        .model-progress.visible { display: block; }
-        .model-progress-bar {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #4CAF50, #8BC34A);
-            border-radius: 4px;
-            transition: width 0.3s ease;
-        }
-        .model-progress-bar.indeterminate {
-            width: 30% !important;
-            animation: indeterminate 1.4s ease-in-out infinite;
-        }
-        @keyframes indeterminate {
-            0% { margin-left: -30%; }
-            100% { margin-left: 100%; }
-        }
-        .model-status {
-            color: white;
-            font-size: 13px;
-            margin-top: 8px;
-            text-align: center;
-        }
-        .model-status.error { color: #ff6b6b; }
-        .model-status.success { color: #8BC34A; }
-
-        .vosk-hint {
-            flex-basis: 100%;
-            color: #FFE082;
-            font-size: 13px;
-            margin: 6px 0 0;
-            line-height: 1.5;
-        }
-        .vosk-hint a {
-            color: #FFD54F;
-            font-weight: 600;
-        }
-
-        #toast {
-            position: fixed;
-            left: 50%;
-            bottom: 32px;
-            transform: translateX(-50%) translateY(16px);
-            background: rgba(30, 30, 46, 0.92);
-            color: #fff;
-            padding: 12px 24px;
-            border-radius: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            z-index: 1000;
-            max-width: 90vw;
-            text-align: center;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease, transform 0.3s ease;
-        }
-        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-
-        .controls {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            margin-bottom: 20px;
-            align-items: center;
-        }
-        .button-row { display: flex; gap: 15px; }
-        button {
-            padding: 14px 30px;
-            font-size: 16px;
-            cursor: pointer;
-            border: none;
-            border-radius: 12px;
-            color: white;
-            transition: all 0.3s ease;
-            font-weight: 600;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-        button:active { transform: translateY(2px); }
-        button:disabled {
-            background: linear-gradient(135deg, #9E9E9E 0%, #BDBDBD 100%);
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
-        #controlBtn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            position: relative;
-            min-width: 160px;
-        }
-        #controlBtn:hover:not(:disabled) {
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-            transform: translateY(-2px);
-        }
-        #controlBtn.listening::after {
-            content: '●';
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #ff4444;
-            font-size: 20px;
-            animation: pulse 1.5s ease-in-out infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-        #exportBtn {
-            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-            border: 2px solid rgba(255, 255, 255, 0.3);
-        }
-        #exportBtn:hover:not(:disabled) {
-            box-shadow: 0 6px 20px rgba(17, 153, 142, 0.4);
-            transform: translateY(-2px);
-        }
-        #copyBtn {
-            background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            min-width: 130px;
-        }
-        #clearBtn {
-            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
-            border: 2px solid rgba(255, 255, 255, 0.3);
-        }
-        #clearBtn:hover:not(:disabled) {
-            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
-            transform: translateY(-2px);
-        }
-        #copyBtn:hover:not(:disabled) {
-            box-shadow: 0 6px 20px rgba(253, 160, 133, 0.4);
-            transform: translateY(-2px);
-        }
-
-        .warning-notice {
-            background: rgba(255, 193, 7, 0.95);
-            color: #000;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            text-align: center;
-            max-width: 600px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            border: 2px solid rgba(255, 152, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-        .warning-notice::before { content: '⚠️'; font-size: 18px; }
-        .warning-notice.offline {
-            background: rgba(76, 175, 80, 0.95);
-            border-color: rgba(56, 142, 60, 0.5);
-        }
-        .warning-notice.offline::before { content: '🔒'; }
-
-        .privacy-notice {
-            width: 90%;
-            max-width: 900px;
-            font-size: 14px;
-            margin-top: auto;
-            margin-bottom: 20px;
-        }
-        .privacy-notice details {
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(10px);
-        }
-        .privacy-notice summary {
-            padding: 15px 20px;
-            font-weight: bold;
-            cursor: pointer;
-            outline: none;
-            color: white;
-            font-size: 15px;
-        }
-        .privacy-notice summary:hover { background: rgba(255, 255, 255, 0.1); }
-        .privacy-notice .content {
-            padding: 0 20px 20px 20px;
-            line-height: 1.6;
-            color: white;
-        }
-        .privacy-notice h3 { margin-top: 15px; margin-bottom: 8px; color: #FFD54F; }
-        .privacy-notice ul { padding-left: 20px; margin: 0; }
-        .privacy-notice ul li { margin-bottom: 8px; }
-        .privacy-notice ul li.safe::before { content: '✅ '; }
-        .privacy-notice ul li.unsafe::before { content: '❌ '; }
-        .privacy-notice strong { color: #FF6B6B; font-weight: 700; }
-
-        @media (max-width: 768px) {
-            h1 { font-size: 22px; margin: 50px 20px 20px 20px; }
-            .transcript-container { height: 40vh; }
-            .button-row { flex-direction: column; width: 100%; }
-            button { width: 100%; }
-            .settings { flex-direction: column; width: 90%; }
-            .vosk-config .row, .engine-config .row { flex-direction: column; align-items: stretch; }
-        }
-    </style>
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-GHGBM401HN');
-</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:,">
+  <title id="pageTitle">多國語言即時逐字稿工具</title>
+  <style>
+    :root {
+      --primary: #5668d8;
+      --secondary: #7046a0;
+      --success: #16856f;
+      --danger: #d94f4f;
+      --warning: #f4c542;
+      --panel: rgba(255, 255, 255, .16);
+      --border: rgba(255, 255, 255, .30);
+      --shadow: 0 12px 36px rgba(20, 18, 60, .24);
+    }
+    * { box-sizing: border-box }
+    html { scroll-behavior: smooth }
+    body {
+      margin: 0; min-height: 100vh; padding: 20px;
+      display: flex; flex-direction: column; align-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea, #764ba2); color: #fff;
+    }
+    button, select, input { font: inherit }
+    button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible {
+      outline: 3px solid #ffe16b; outline-offset: 3px;
+    }
+    .topbar { width: min(100%, 960px); display: flex; justify-content: flex-end }
+    #uiLangToggle {
+      padding: 9px 16px; border: 1px solid var(--border); border-radius: 999px;
+      background: var(--panel); color: #fff; cursor: pointer; font-weight: 700;
+      backdrop-filter: blur(10px);
+    }
+    h1 {
+      margin: 22px 0 20px; text-align: center;
+      font-size: clamp(24px, 4vw, 34px); text-shadow: 0 2px 12px #0004;
+    }
+    .app { width: min(100%, 960px) }
+    .status-grid {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px; margin-bottom: 14px;
+    }
+    .status-card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 10px 12px; backdrop-filter: blur(10px);
+    }
+    .status-label { font-size: 12px; opacity: .82 }
+    .status-value {
+      font-weight: 750; margin-top: 3px; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .transcript-container {
+      height: 44vh; min-height: 260px; background: #fff; color: #252525;
+      border-radius: 16px; padding: 18px; overflow: auto;
+      box-shadow: var(--shadow); scroll-behavior: smooth;
+    }
+    #transcript {
+      margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+      font: 16px/1.8 "Noto Sans TC", "Segoe UI", sans-serif;
+    }
+    .placeholder { color: #888 }
+    .interim { color: #777; font-style: italic }
+    .meter {
+      height: 20px; margin: 14px 0; background: #ffffff30;
+      border: 1px solid var(--border); border-radius: 999px; overflow: hidden;
+    }
+    .meter>div {
+      height: 100%; transform: scaleX(0); transform-origin: left;
+      background: linear-gradient(90deg, #36b36e, #d8db3d, #ff6659);
+      transition: transform .08s;
+    }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
+      backdrop-filter: blur(10px);
+    }
+    .settings { display: flex; gap: 14px; align-items: center; flex-wrap: wrap }
+    .field { display: flex; gap: 7px; align-items: center; flex: 1; min-width: 240px }
+    label { font-weight: 700 }
+    .field select, .field input {
+      flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #ffffff88;
+      border-radius: 9px; background: #fff; color: #222;
+    }
+    .engine-config { display: none }
+    .engine-config.visible { display: block }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px }
+    .row:last-child { margin-bottom: 0 }
+    .row label { min-width: 82px }
+    .row select, .row input[type=url], .row input[type=text], .row input[type=file] {
+      flex: 1; min-width: 230px; padding: 9px; border-radius: 8px;
+      border: 1px solid #ddd; background: #fff; color: #222;
+    }
+    .hint { font-size: 13px; line-height: 1.55; color: #fff0a7; margin: 8px 0 0 }
+    .hint a { color: #fff5b7; font-weight: 700 }
+    .hint code { background: #0003; padding: 1px 5px; border-radius: 4px }
+    .progress {
+      height: 8px; background: #ffffff30; border-radius: 999px;
+      overflow: hidden; margin-top: 10px; display: none;
+    }
+    .progress.visible { display: block }
+    .progress>div { height: 100%; width: 0; background: #6de08e; transition: width .2s }
+    .progress>div.indeterminate { width: 32%; animation: loading 1.2s infinite }
+    @keyframes loading {
+      from { transform: translateX(-120%) }
+      to { transform: translateX(320%) }
+    }
+    .model-status { min-height: 20px; text-align: center; font-size: 13px; margin-top: 7px }
+    .error { color: #ffd0d0 }
+    .success { color: #c7ffd2 }
+    .controls { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 18px 0 }
+    button.action {
+      border: 1px solid #ffffff70; border-radius: 11px; padding: 13px 22px;
+      color: #fff; font-weight: 750; cursor: pointer; box-shadow: 0 4px 14px #0003; transition: .2s;
+    }
+    button.action:hover:not(:disabled) { transform: translateY(-2px) }
+    button:disabled { opacity: .52; cursor: not-allowed }
+    #controlBtn { background: linear-gradient(135deg, #5268dd, #74429b); min-width: 155px }
+    #controlBtn.listening { background: linear-gradient(135deg, #d94f4f, #aa2d55) }
+    #copyBtn { background: #b87825 }
+    #exportBtn { background: #16856f }
+    #clearBtn { background: #c74747 }
+    .notice {
+      padding: 12px 15px; color: #161616; background: #ffd86a;
+      border-radius: 10px; text-align: center; font-weight: 700; margin-bottom: 14px;
+    }
+    .notice.local { background: #a8ebba }
+    .notice.partial { background: #ffe4a0 }
+    details {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; margin-bottom: 20px;
+    }
+    summary { padding: 14px 17px; cursor: pointer; font-weight: 750 }
+    .details-content { padding: 0 18px 18px; line-height: 1.65 }
+    .details-content h3 { color: #fff0a7; margin-bottom: 5px }
+    .details-content ul { margin-top: 5px; padding-left: 22px }
+    #toast {
+      position: fixed; z-index: 50; left: 50%; bottom: 24px;
+      transform: translate(-50%, 18px); background: #1f2030ee; color: #fff;
+      padding: 11px 18px; border-radius: 10px; opacity: 0; pointer-events: none;
+      transition: .25s; max-width: 90%; text-align: center; font-weight: 750;
+    }
+    #toast.show { opacity: 1; transform: translate(-50%, 0) }
+    @media(max-width:720px) {
+      body { padding: 12px }
+      .status-grid { grid-template-columns: 1fr 1fr }
+      .transcript-container { height: 42vh }
+      .field { min-width: 100% }
+      .controls { display: grid; grid-template-columns: 1fr 1fr }
+      .action { width: 100% }
+    }
+    @media print {
+      body { background: #fff; color: #000; padding: 0 }
+      .topbar, h1, .status-grid, .meter, .panel, .controls, .notice, details { display: none !important }
+      .app { width: 100% }
+      .transcript-container { height: auto; box-shadow: none; padding: 0; overflow: visible }
+      #transcript { font-size: 11pt }
+    }
+  </style>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-GHGBM401HN');
+  </script>
 </head>
 <body>
-    <button id="uiLangToggle" title="Switch the user interface language">Switch to English</button>
+  <div class="topbar"><button id="uiLangToggle" type="button">Switch to English</button></div>
+  <h1 id="mainTitle">多國語言即時逐字稿工具</h1>
+  <main class="app">
+    <section class="status-grid" aria-label="執行狀態">
+      <div class="status-card"><div class="status-label" id="statusEngineLabel">引擎</div><div class="status-value" id="statusEngineValue">Web Speech API</div></div>
+      <div class="status-card"><div class="status-label" id="statusRuntimeLabel">執行環境</div><div class="status-value" id="statusRuntimeValue">瀏覽器服務</div></div>
+      <div class="status-card"><div class="status-label" id="statusPrivacyLabel">音訊處理</div><div class="status-value" id="statusPrivacyValue">可能傳送至服務商</div></div>
+      <div class="status-card"><div class="status-label" id="statusStateLabel">狀態</div><div class="status-value" id="statusStateValue">待命</div></div>
+    </section>
 
-    <h1 id="main-title">多國語言即時逐字稿工具</h1>
+    <section class="transcript-container" id="transcriptContainer" aria-live="polite" aria-label="逐字稿">
+      <pre id="transcript"><span class="placeholder" id="placeholderText"></span><span id="finalText"></span><span id="interimText" class="interim"></span></pre>
+    </section>
+    <div class="meter" aria-label="麥克風音量"><div id="volumeLevel"></div></div>
 
-    <div class="transcript-container" id="transcriptContainer">
-        <pre id="transcript"><span class="placeholder" id="placeholder-text"></span><span id="final-text"></span><span id="interim-text" class="interim"></span></pre>
-    </div>
+    <section class="panel settings">
+      <div class="field"><label for="engineSelector" id="engineLabel">引擎：</label><select id="engineSelector">
+        <option value="webspeech" id="optWebspeech">Web Speech API（雲端）</option>
+        <option value="vosk" id="optVosk">Vosk（本機離線）</option>
+        <option value="sherpa" id="optSherpa">sherpa-onnx（本機串流）</option>
+        <option value="whisper" id="optWhisper">Whisper（本機 WebGPU/WASM）</option>
+      </select></div>
+      <div class="field" id="languageField"><label for="languageSelector" id="langLabel">辨識語言：</label><select id="languageSelector">
+        <option value="zh-TW">中文（台灣）</option><option value="zh-CN">中文（中國大陸）</option><option value="zh-HK">粵語（香港）</option>
+        <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ja-JP">日本語</option>
+        <option value="ko-KR">한국어</option><option value="es-ES">Español</option><option value="fr-FR">Français</option><option value="de-DE">Deutsch</option>
+      </select></div>
+    </section>
 
-    <div class="volume-meter">
-        <div class="volume-level" id="volumeLevel"></div>
-    </div>
+    <section class="panel engine-config" id="voskConfig">
+      <div class="row"><label for="voskModelSource" id="voskSourceLabel">模型來源：</label><select id="voskModelSource">
+        <option value="builtin" id="optVoskBuiltin">網站內建模型</option><option value="file" id="optVoskFile">本機模型 ZIP</option><option value="url" id="optVoskUrl">自訂 URL</option>
+      </select></div>
+      <div class="row" id="voskBuiltinRow"><label for="voskBuiltinLang" id="voskModelLabel">模型：</label><select id="voskBuiltinLang">
+        <option value="cn">中文 small（約 44 MB）</option><option value="en">English small（約 41 MB）</option>
+      </select></div>
+      <div class="row" id="voskFileRow" hidden><label for="voskModelFile" id="voskFileLabel">檔案：</label><input id="voskModelFile" type="file" accept=".zip"></div>
+      <div class="row" id="voskUrlRow" hidden><label for="voskModelUrl">URL：</label><input id="voskModelUrl" type="url" placeholder="https://example.org/model.zip"></div>
+      <div class="row"><button class="action" id="loadVoskBtn" type="button">載入模型</button></div>
+      <div class="progress" id="voskProgress"><div id="voskProgressBar"></div></div><div class="model-status" id="voskStatus"></div>
+      <p class="hint" id="voskHint"></p>
+    </section>
 
-    <div class="settings">
-        <label for="engineSelector" id="engine-label">引擎:</label>
-        <select id="engineSelector">
-            <option value="webspeech">Web Speech API (Google)</option>
-            <option value="vosk">Vosk (離線)</option>
-            <option value="whisper">Whisper (本機 WebGPU)</option>
-        </select>
-        <label for="languageSelector" id="lang-label">辨識語言:</label>
-        <select id="languageSelector" title="選擇要進行辨識的語言">
-            <option value="en-US">English (US)</option>
-            <option value="en-GB">English (UK)</option>
-            <option value="zh-TW">中文 (台灣TW)</option>
-            <option value="zh-CN">中文 (中国大陆CN)</option>
-            <option value="zh-HK">粵語 (香港HK)</option>
-            <option value="ja-JP">日本語(JP)</option>
-            <option value="ko-KR">한국어(KR)</option>
-            <option value="es-ES">Español (España)</option>
-            <option value="fr-FR">Français</option>
-            <option value="de-DE">Deutsch</option>
-        </select>
-    </div>
+    <section class="panel engine-config" id="sherpaConfig">
+      <div class="row"><label for="sherpaBaseUrl" id="sherpaBaseLabel">資產位置：</label><input id="sherpaBaseUrl" type="text" placeholder="https://huggingface.co/<user>/<repo>/resolve/main/sherpa/"></div>
+      <div class="row"><button class="action" id="loadSherpaBtn" type="button">載入模型</button></div>
+      <div class="progress" id="sherpaProgress"><div id="sherpaProgressBar"></div></div><div class="model-status" id="sherpaStatus"></div>
+      <p class="hint" id="sherpaHint"></p>
+    </section>
 
-    <div class="vosk-config" id="voskConfig">
-        <div class="row">
-            <label id="vosk-model-label">模型:</label>
-            <select id="voskModelSource">
-                <option value="builtin" id="vosk-source-builtin">內建模型</option>
-                <option value="file" id="vosk-source-file">本機檔案上傳</option>
-                <option value="url" id="vosk-source-url">自訂 URL</option>
-            </select>
-        </div>
-        <div class="row" id="builtinRow">
-            <label id="vosk-lang-label">語言:</label>
-            <select id="voskBuiltinLang">
-                <option value="cn">中文 (small, ~44MB)</option>
-                <option value="en">English (small, ~41MB)</option>
-            </select>
-        </div>
-        <div class="row" id="fileUploadRow" style="display:none;">
-            <label id="vosk-file-label">檔案:</label>
-            <input type="file" id="voskModelFile" accept=".zip,.tar.gz,.tar,.gz" style="flex:1; color:white; font-size:14px;">
-            <p class="vosk-hint"><span id="voskFileHintText"></span> <a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a></p>
-        </div>
-        <div class="row" id="customUrlRow" style="display:none;">
-            <label id="vosk-url-label">URL:</label>
-            <input type="url" id="voskModelUrl" placeholder="https://your-server.com/model.tar.gz">
-        </div>
-        <div class="row" style="justify-content: center;">
-            <button id="loadModelBtn">載入模型</button>
-        </div>
-        <div class="model-progress" id="modelProgress">
-            <div class="model-progress-bar" id="modelProgressBar"></div>
-        </div>
-        <div class="model-status" id="modelStatus"></div>
-    </div>
+    <section class="panel engine-config" id="whisperConfig">
+      <div class="row"><label for="whisperModelSelect" id="whisperModelLabel">模型：</label><select id="whisperModelSelect">
+        <option value="tiny">Whisper tiny（約 40 MB，速度優先）</option><option value="base">Whisper base（約 74 MB）</option><option value="small" selected>Whisper small（約 240 MB，準確度優先）</option>
+      </select></div>
+      <div class="row"><label for="vadSensitivity" id="vadLabel">收音靈敏度：</label><select id="vadSensitivity">
+        <option value="0.012" id="optVadHigh">高</option><option value="0.018" selected id="optVadMid">中</option><option value="0.028" id="optVadLow">低</option>
+      </select></div>
+      <div class="row"><button class="action" id="loadWhisperBtn" type="button">載入模型</button></div>
+      <div class="progress" id="whisperProgress"><div id="whisperProgressBar"></div></div><div class="model-status" id="whisperStatus"></div>
+      <p class="hint" id="whisperHint"></p>
+    </section>
 
-    <div class="engine-config" id="whisperConfig">
-        <div class="row">
-            <label id="whisper-model-label">模型:</label>
-            <select id="whisperModelSelect">
-                <option value="tiny">Whisper tiny (~40MB)</option>
-                <option value="base">Whisper base (~74MB)</option>
-                <option value="small" selected>Whisper small (~240MB)</option>
-            </select>
-        </div>
-        <div class="row" style="justify-content: center;">
-            <button id="loadWhisperBtn">載入模型</button>
-        </div>
-        <div class="model-progress" id="whisperProgress">
-            <div class="model-progress-bar" id="whisperProgressBar"></div>
-        </div>
-        <div class="model-status" id="whisperStatus"></div>
-    </div>
+    <section class="controls">
+      <button class="action" id="controlBtn" type="button">開始辨識</button><button class="action" id="copyBtn" type="button" disabled>複製內容</button>
+      <button class="action" id="exportBtn" type="button" disabled>輸出逐字稿</button><button class="action" id="clearBtn" type="button">清空</button>
+    </section>
+    <div class="notice" id="privacyNotice"></div>
 
-    <div class="controls">
-        <div class="button-row">
-            <button id="controlBtn" title="點擊以開始語音辨識">開始辨識</button>
-            <button id="copyBtn" disabled title="停止辨識後才能複製">複製內容</button>
-            <button id="exportBtn" disabled title="停止辨識後才能匯出">輸出逐字稿</button>
-            <button id="clearBtn" title="清空逐字稿">清空</button>
-        </div>
-        <div class="warning-notice" id="warning-text">
-            本工具將把收到音檔上傳 Google 請謹慎使用
-        </div>
-    </div>
+    <details><summary id="privacySummary">使用須知與隱私聲明</summary><div class="details-content">
+      <p id="howItWorksText"></p>
+      <h3 id="enginesTitle"></h3><ul id="enginesList"></ul>
+      <h3 id="riskTitle"></h3><ul id="riskList"></ul>
+      <p id="privacyConclusion"></p>
+    </div></details>
+  </main><div id="toast" role="status"></div>
 
-    <div class="privacy-notice">
-        <details>
-            <summary id="privacy-summary">使用須知 & 隱私聲明</summary>
-            <div class="content">
-                <p id="how-it-works-text"></p>
-                <h3 id="suitable-scenarios-title"></h3>
-                <ul id="suitable-scenarios-list"></ul>
-                <h3 id="risk-scenarios-title"></h3>
-                <ul id="risk-scenarios-list"></ul>
-                <p id="privacy-conclusion"></p>
-            </div>
-        </details>
-    </div>
+  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js"></script>
+  <script>
+(() => {
+  'use strict';
 
-    <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js"></script>
-    <script>
-    (function() {
-        const VOSK_CDN = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
-        const VOSK_BUILTIN_MODELS = {
-            cn: new URL('models/vosk-model-small-cn-0.22.zip', document.baseURI).href,
-            en: new URL('models/vosk-model-small-en-us-0.15.zip', document.baseURI).href,
-        };
-        const WHISPER_MODELS = {
-            tiny: 'Xenova/whisper-tiny',
-            base: 'Xenova/whisper-base',
-            small: 'Xenova/whisper-small',
-        };
-        const WHISPER_LANG_MAP = {
-            'en-US': 'en', 'en-GB': 'en', 'zh-TW': 'zh', 'zh-CN': 'zh', 'zh-HK': 'yue',
-            'ja-JP': 'ja', 'ko-KR': 'ko', 'es-ES': 'es', 'fr-FR': 'fr', 'de-DE': 'de',
-        };
+  const CDN = {
+    vosk: 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js',
+    transformers: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0'
+  };
+  const VOSK_MODELS = {
+    cn: new URL('models/vosk-model-small-cn-0.22.zip', document.baseURI).href,
+    en: new URL('models/vosk-model-small-en-us-0.15.zip', document.baseURI).href
+  };
+  const WHISPER_MODELS = {
+    tiny: 'onnx-community/whisper-tiny',
+    base: 'onnx-community/whisper-base',
+    small: 'onnx-community/whisper-small'
+  };
+  // 粵語走 Whisper 的 yue，其餘中文變體走 zh
+  const LANG = {
+    'zh-TW': 'zh', 'zh-CN': 'zh', 'zh-HK': 'yue',
+    'en-US': 'en', 'en-GB': 'en', 'ja-JP': 'ja',
+    'ko-KR': 'ko', 'es-ES': 'es', 'fr-FR': 'fr', 'de-DE': 'de'
+  };
+  const SAMPLE_RATE = 16000;
+  const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const WEB_RESTART_DELAY = IS_MOBILE ? 200 : 500;
 
-        const UIElements = {
-            pageTitle: document.getElementById('pageTitle'),
-            mainTitle: document.getElementById('main-title'),
-            transcriptContainer: document.getElementById('transcriptContainer'),
-            placeholderText: document.getElementById('placeholder-text'),
-            finalText: document.getElementById('final-text'),
-            interimText: document.getElementById('interim-text'),
-            controlBtn: document.getElementById('controlBtn'),
-            exportBtn: document.getElementById('exportBtn'),
-            copyBtn: document.getElementById('copyBtn'),
-            clearBtn: document.getElementById('clearBtn'),
-            volumeLevel: document.getElementById('volumeLevel'),
-            engineSelector: document.getElementById('engineSelector'),
-            engineLabel: document.getElementById('engine-label'),
-            languageSelector: document.getElementById('languageSelector'),
-            langLabel: document.getElementById('lang-label'),
-            uiLangToggle: document.getElementById('uiLangToggle'),
-            warningText: document.getElementById('warning-text'),
-            privacySummary: document.getElementById('privacy-summary'),
-            howItWorksText: document.getElementById('how-it-works-text'),
-            suitableScenariosTitle: document.getElementById('suitable-scenarios-title'),
-            suitableScenariosList: document.getElementById('suitable-scenarios-list'),
-            riskScenariosTitle: document.getElementById('risk-scenarios-title'),
-            riskScenariosList: document.getElementById('risk-scenarios-list'),
-            privacyConclusion: document.getElementById('privacy-conclusion'),
-            voskConfig: document.getElementById('voskConfig'),
-            voskModelSource: document.getElementById('voskModelSource'),
-            voskBuiltinLang: document.getElementById('voskBuiltinLang'),
-            builtinRow: document.getElementById('builtinRow'),
-            voskModelFile: document.getElementById('voskModelFile'),
-            voskFileHintText: document.getElementById('voskFileHintText'),
-            fileUploadRow: document.getElementById('fileUploadRow'),
-            voskModelUrl: document.getElementById('voskModelUrl'),
-            customUrlRow: document.getElementById('customUrlRow'),
-            loadModelBtn: document.getElementById('loadModelBtn'),
-            modelProgress: document.getElementById('modelProgress'),
-            modelProgressBar: document.getElementById('modelProgressBar'),
-            modelStatus: document.getElementById('modelStatus'),
-            voskModelLabel: document.getElementById('vosk-model-label'),
-            voskUrlLabel: document.getElementById('vosk-url-label'),
-            whisperConfig: document.getElementById('whisperConfig'),
-            whisperModelSelect: document.getElementById('whisperModelSelect'),
-            whisperModelLabel: document.getElementById('whisper-model-label'),
-            loadWhisperBtn: document.getElementById('loadWhisperBtn'),
-            whisperProgress: document.getElementById('whisperProgress'),
-            whisperProgressBar: document.getElementById('whisperProgressBar'),
-            whisperStatus: document.getElementById('whisperStatus'),
-        };
+  const $ = id => document.getElementById(id);
+  const el = {
+    pageTitle: $('pageTitle'), title: $('mainTitle'), engine: $('engineSelector'), lang: $('languageSelector'),
+    languageField: $('languageField'),
+    control: $('controlBtn'), copy: $('copyBtn'), export: $('exportBtn'), clear: $('clearBtn'),
+    placeholder: $('placeholderText'), final: $('finalText'), interim: $('interimText'),
+    container: $('transcriptContainer'), volume: $('volumeLevel'), notice: $('privacyNotice'),
+    statusEngine: $('statusEngineValue'), statusRuntime: $('statusRuntimeValue'),
+    statusPrivacy: $('statusPrivacyValue'), statusState: $('statusStateValue'), toggle: $('uiLangToggle'),
+    voskConfig: $('voskConfig'), voskSource: $('voskModelSource'), voskBuiltinRow: $('voskBuiltinRow'),
+    voskFileRow: $('voskFileRow'), voskUrlRow: $('voskUrlRow'), voskLang: $('voskBuiltinLang'),
+    voskFile: $('voskModelFile'), voskUrl: $('voskModelUrl'), loadVosk: $('loadVoskBtn'),
+    voskProgress: $('voskProgress'), voskBar: $('voskProgressBar'), voskStatus: $('voskStatus'),
+    sherpaConfig: $('sherpaConfig'), sherpaBase: $('sherpaBaseUrl'), loadSherpa: $('loadSherpaBtn'),
+    sherpaProgress: $('sherpaProgress'), sherpaBar: $('sherpaProgressBar'), sherpaStatus: $('sherpaStatus'),
+    whisperConfig: $('whisperConfig'), whisperModel: $('whisperModelSelect'), vad: $('vadSensitivity'),
+    loadWhisper: $('loadWhisperBtn'), whisperProgress: $('whisperProgress'), whisperBar: $('whisperProgressBar'),
+    whisperStatus: $('whisperStatus')
+  };
 
-        const translations = {
-            en: {
-                pageTitle: "Multilingual Real-time Transcription Tool",
-                mainTitle: "Multilingual Real-time Transcription Tool",
-                engineLabel: "Engine:",
-                langLabel: "Recognition Language:",
-                startBtn: "Start Recognition",
-                stopBtn: "Stop Recognition",
-                exportBtn: "Export Transcript",
-                copyBtn: "Copy Transcript",
-                clearBtn: "Clear",
-                copyBtnSuccess: "Copied!",
-                toggleUiLangBtn: "切换到中文",
-                placeholder: "Click 'Start Recognition' and your transcript will appear here...",
-                micDeniedError: "You have denied microphone access. Please allow microphone access to use this feature.",
-                apiNotSupportedError: "Your browser does not support the Web Speech API. Please use the latest version of Chrome.",
-                controlBtnTooltipStart: "Click to start voice recognition (or press Space)",
-                controlBtnTooltipStop: "Click to stop voice recognition (or press Space)",
-                exportBtnTooltip: "Export the transcript as a .txt file",
-                exportBtnTooltipDisabled: "No transcript to export",
-                copyBtnTooltip: "Copy the transcript to your clipboard",
-                copyBtnTooltipDisabled: "No transcript to copy",
-                clearBtnTooltip: "Clear the transcript",
-                languageSelectorTooltip: "Select the language to be recognized",
-                uiLangToggleTooltip: "Switch the user interface language",
-                warningTextGoogle: "This tool uploads audio to Google. Use with caution.",
-                warningTextVosk: "Vosk offline mode — audio is processed locally, not uploaded.",
-                copiedSuccess: "Copied to clipboard!",
-                copiedError: "Copy failed. Please try again.",
-                privacySummary: "Usage Guide & Privacy Notice",
-                howItWorksText: "To convert speech to text, this tool uses the browser's built-in Web Speech API, which sends your voice data to Google's servers for processing. Please be aware of the following:",
-                suitableScenariosTitle: "Suitable Scenarios:",
-                suitableScenarios: ["Assisting in listening to public online lectures, webinars, or courses.", "Transcribing public content like videos or podcasts.", "Personal learning and language practice."],
-                riskScenariosTitle: "High-Risk Scenarios (DO NOT USE with Google mode):",
-                riskScenarios: ["Meetings involving <strong>business secrets</strong> or confidential information.", "Conversations involving <strong>personal privacy</strong> (e.g., with doctors, lawyers).", "Any content containing <strong>sensitive personal data</strong> (ID numbers, passwords, etc.)."],
-                privacyConclusion: "For sensitive content, switch to Vosk offline mode — all processing happens locally on your device.",
-                voskModelLabel: "Model:",
-                voskUrlLabel: "URL:",
-                voskFileLabel: "File:",
-                voskSourceBuiltin: "Built-in models",
-                voskSourceFile: "Upload local file",
-                voskSourceUrl: "Custom URL",
-                voskLangLabel: "Language:",
-                loadModelBtn: "Load Model",
-                loadModelBtnLoading: "Loading...",
-                voskLoadingLib: "Loading Vosk library...",
-                voskLoadingModel: "Loading model...",
-                voskModelReady: "Model loaded! Ready to use.",
-                voskModelError: "Failed to load model.",
-                voskLibError: "Failed to load Vosk library. Check your internet connection.",
-                voskSelectModel: "Please select a model file or enter a URL first.",
-                voskFileHint: "Download a model from the link below, then upload the .zip file here.",
-                whisperModelLabel: "Model:",
-                whisperLoadingLib: "Loading Whisper engine...",
-                whisperLoadingModel: "Downloading model (first time ~40–240MB, then cached in browser)...",
-                whisperModelReady: "Whisper model loaded! Ready to use.",
-                whisperModelError: "Failed to load Whisper model.",
-                whisperLibError: "Failed to load Whisper engine. Check your internet connection.",
-                whisperSelectModel: "Please load the Whisper model first.",
-                warningTextWhisper: "Whisper offline mode — audio is processed locally on your GPU, not uploaded.",
-            },
-            zh: {
-                pageTitle: "多國語言即時逐字稿工具",
-                mainTitle: "多國語言即時逐字稿工具",
-                engineLabel: "引擎:",
-                langLabel: "辨識語言:",
-                startBtn: "開始辨識",
-                stopBtn: "停止辨識",
-                exportBtn: "輸出逐字稿",
-                copyBtn: "複製內容",
-                clearBtn: "清空",
-                copyBtnSuccess: "已複製！",
-                toggleUiLangBtn: "Switch to English",
-                placeholder: "點擊「開始辨識」後,你的逐字稿將會顯示在這裡...",
-                micDeniedError: "您拒絕了麥克風權限。請允許麥克風存取以使用此功能。",
-                apiNotSupportedError: "您的瀏覽器不支援 Web Speech API,請使用最新版本的 Chrome 瀏覽器。",
-                controlBtnTooltipStart: "點擊以開始語音辨識（或按空白鍵）",
-                controlBtnTooltipStop: "點擊以停止語音辨識（或按空白鍵）",
-                exportBtnTooltip: "將逐字稿匯出為 .txt 檔案",
-                exportBtnTooltipDisabled: "尚無逐字稿可匯出",
-                copyBtnTooltip: "將逐字稿複製到剪貼簿",
-                copyBtnTooltipDisabled: "尚無逐字稿可複製",
-                clearBtnTooltip: "清空逐字稿",
-                languageSelectorTooltip: "選擇要進行辨識的語言",
-                uiLangToggleTooltip: "切換使用者介面語言",
-                warningTextGoogle: "本工具將把收到音檔上傳 Google 請謹慎使用",
-                warningTextVosk: "Vosk 離線模式 — 音訊在本機處理，不會上傳",
-                copiedSuccess: "已複製到剪貼簿！",
-                copiedError: "複製失敗，請重試。",
-                privacySummary: "使用須知 & 隱私聲明",
-                howItWorksText: "本工具透過瀏覽器內建的 Web Speech API 進行語音轉文字,這會將您的聲音資料傳送到 Google 的伺服器進行處理。請務必了解以下事項：",
-                suitableScenariosTitle: "適合的使用場景：",
-                suitableScenarios: ["輔助聆聽公開的線上演講、課程。", "轉錄影片、Podcast 等公開內容。", "個人學習、語言練習。"],
-                riskScenariosTitle: "高風險場景 (Google 模式下絕對不要使用)：",
-                riskScenarios: ["任何涉及<strong>商業機密</strong>或公司內部資訊的會議。", "任何涉及<strong>個人隱私</strong>的對話 (例如與醫生、律師的對話)。", "任何包含<strong>敏感個資</strong>的內容 (如身分證號、密碼等)。"],
-                privacyConclusion: "針對敏感內容，請切換到 Vosk 離線模式 — 所有處理都在您的裝置本機完成。",
-                voskModelLabel: "模型:",
-                voskUrlLabel: "URL:",
-                voskFileLabel: "檔案:",
-                voskSourceBuiltin: "內建模型",
-                voskSourceFile: "本機檔案上傳",
-                voskSourceUrl: "自訂 URL",
-                voskLangLabel: "語言:",
-                loadModelBtn: "載入模型",
-                loadModelBtnLoading: "載入中...",
-                voskLoadingLib: "正在載入 Vosk 函式庫...",
-                voskLoadingModel: "正在載入模型...",
-                voskModelReady: "模型已載入！可以開始使用。",
-                voskModelError: "模型載入失敗。",
-                voskLibError: "Vosk 函式庫載入失敗，請確認網路連線。",
-                voskSelectModel: "請先選擇模型檔案或輸入 URL。",
-                voskFileHint: "請先從下方連結下載模型，再上傳 .zip 檔案。",
-                whisperModelLabel: "模型:",
-                whisperLoadingLib: "正在載入 Whisper 引擎...",
-                whisperLoadingModel: "正在下載模型（首次約 40–240MB，之後快取於瀏覽器）...",
-                whisperModelReady: "Whisper 模型已載入！可以開始使用。",
-                whisperModelError: "Whisper 模型載入失敗。",
-                whisperLibError: "Whisper 引擎載入失敗，請確認網路連線。",
-                whisperSelectModel: "請先載入 Whisper 模型。",
-                warningTextWhisper: "Whisper 離線模式 — 音訊在本機 GPU 處理，不會上傳",
+  const T = {
+    zh: {
+      pageTitle: '多國語言即時逐字稿工具', title: '多國語言即時逐字稿工具',
+      toggleBtn: 'Switch to English',
+      engineLabel: '引擎：', langLabel: '辨識語言：',
+      optWebspeech: 'Web Speech API（雲端）', optVosk: 'Vosk（本機離線）',
+      optSherpa: 'sherpa-onnx（本機串流）', optWhisper: 'Whisper（本機 WebGPU/WASM）',
+      voskSourceLabel: '模型來源：', voskModelLabel: '模型：', voskFileLabel: '檔案：',
+      optVoskBuiltin: '網站內建模型', optVoskFile: '本機模型 ZIP', optVoskUrl: '自訂 URL',
+      sherpaBaseLabel: '資產位置：', whisperModelLabel: '模型：', vadLabel: '收音靈敏度：',
+      optVadHigh: '高', optVadMid: '中', optVadLow: '低',
+      loadModel: '載入模型', loading: '載入中…',
+      start: '開始辨識', stop: '停止辨識', stopping: '正在完成最後一句…',
+      copy: '複製內容', export: '輸出逐字稿', clear: '清空',
+      statusEngineLabel: '引擎', statusRuntimeLabel: '執行環境',
+      statusPrivacyLabel: '音訊處理', statusStateLabel: '狀態',
+      idle: '待命', listening: '辨識中', processing: '處理中',
+      localProcessing: '本機處理', cloudProcessing: '可能傳送至服務商',
+      browserService: '瀏覽器服務',
+      loaded: '模型已就緒',
+      placeholder: '按「開始辨識」後，逐字稿會顯示在這裡。',
+      copied: '已複製到剪貼簿', copyFailed: '複製失敗',
+      nothingToCopy: '尚無有效逐字稿可複製。', nothingToExport: '尚無有效逐字稿可輸出。',
+      mic: '無法存取麥克風，請檢查權限與 HTTPS 設定。',
+      micBusy: '麥克風目前無法使用，請關閉其他占用麥克風的程式後再試。',
+      netError: '語音服務網路錯誤', noWebSpeech: '此瀏覽器不支援 Web Speech API。',
+      loadFirst: '請先載入模型。',
+      busyClear: '辨識或背景處理尚未完成，暫時無法清空。',
+      modelChanged: '模型選項已變更，請重新載入模型。',
+      sourceChanged: '模型來源已變更，請重新載入模型。',
+      loadFailed: '載入失敗：',
+      whisperFailed: 'Whisper 辨識失敗：',
+      whisperDeviceLost: '硬體裝置或顯存異常，請重新載入模型。',
+      whisperBusy: '前次 Whisper 工作尚未完成，請稍後再試。',
+      capturing: '🎙 正在收音…',
+      voskLoading: '正在釋放舊模型並載入 Vosk 模型…',
+      voskFileProtocol: '瀏覽器安全限制：file:// 無法載入內建相對路徑模型，請透過 localhost 或改選本機 ZIP 檔案。',
+      voskNoFile: '請選擇 ZIP 模型檔', voskNoUrl: '請輸入模型 URL',
+      whisperLoading: '正在釋放舊 Pipeline 並載入 Whisper 模型…',
+      sherpaLoading: '正在載入 sherpa-onnx WASM 與模型（約 250 MB，之後由瀏覽器快取）…',
+      sherpaNoBase: '請先填入 sherpa 資產位置（sherpa-onnx-asr.js 所在目錄）。',
+      sherpaReloadNeeded: 'sherpa WASM 已載入，變更資產位置需重新整理頁面。',
+      webNotice: 'Web Speech API 可能將音訊傳送至瀏覽器或語音服務供應商，請勿處理機密或敏感資料。',
+      localNotice: '語音辨識在本機執行。外部程式與模型若尚未快取，載入時仍會連線下載。',
+      voskHint: '內建模型路徑為 <code>models/vosk-model-small-cn-0.22.zip</code> 與 <code>models/vosk-model-small-en-us-0.15.zip</code>。也可自行下載其他模型：<a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a>',
+      sherpaHint: '填入放置 <code>sherpa-onnx-asr.js</code>、<code>sherpa-onnx-wasm-main-asr.js</code>、<code>.wasm</code> 與 <code>.data</code> 的目錄網址（結尾需含 <code>/</code>），或用相對路徑 <code>sherpa/</code>。模型為中英雙語串流 Zipformer，辨識語言由模型決定，與上方語言選單無關。',
+      whisperHint: 'Whisper 使用停頓分句。首次載入會下載模型並使用瀏覽器快取；WebGPU 不可用時自動改用 WASM。停止辨識時會等待最後一句處理完成。',
+      privacySummary: '使用須知與隱私聲明',
+      howItWorks: '本工具提供四種語音辨識引擎，音訊的處理位置依引擎而不同，請依內容敏感度選擇：',
+      enginesTitle: '四種引擎', engines: [
+        'Web Speech API：免下載模型，但音訊處理方式由瀏覽器供應商決定，可能上傳至雲端。',
+        'Vosk：模型載入後在本機即時辨識，資源需求低，適合舊設備。',
+        'sherpa-onnx：本機真正串流辨識，延遲最低，中英雙語，適合長時間會議即時字幕。',
+        'Whisper：本機分句辨識，多語言能力最佳，但需要較高運算資源。'
+      ],
+      riskTitle: '高風險場景（請勿使用 Web Speech API 模式）', risks: [
+        '任何涉及<strong>商業機密</strong>或機關內部資訊的會議。',
+        '任何涉及<strong>個人隱私</strong>的對話（例如與醫師、律師）。',
+        '任何包含<strong>敏感個資</strong>的內容（身分證號、密碼等）。'
+      ],
+      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx 或 Whisper。本頁使用 Google Analytics 統計造訪次數，但不會上傳逐字稿或麥克風音訊。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
+    },
+    en: {
+      pageTitle: 'Multilingual Real-time Transcription', title: 'Multilingual Real-time Transcription',
+      toggleBtn: '切換至中文',
+      engineLabel: 'Engine:', langLabel: 'Language:',
+      optWebspeech: 'Web Speech API (cloud)', optVosk: 'Vosk (local, offline)',
+      optSherpa: 'sherpa-onnx (local, streaming)', optWhisper: 'Whisper (local, WebGPU/WASM)',
+      voskSourceLabel: 'Model source:', voskModelLabel: 'Model:', voskFileLabel: 'File:',
+      optVoskBuiltin: 'Built-in models', optVoskFile: 'Local model ZIP', optVoskUrl: 'Custom URL',
+      sherpaBaseLabel: 'Assets URL:', whisperModelLabel: 'Model:', vadLabel: 'Sensitivity:',
+      optVadHigh: 'High', optVadMid: 'Medium', optVadLow: 'Low',
+      loadModel: 'Load model', loading: 'Loading…',
+      start: 'Start recognition', stop: 'Stop recognition', stopping: 'Finishing final phrase…',
+      copy: 'Copy', export: 'Export transcript', clear: 'Clear',
+      statusEngineLabel: 'Engine', statusRuntimeLabel: 'Runtime',
+      statusPrivacyLabel: 'Audio processing', statusStateLabel: 'Status',
+      idle: 'Idle', listening: 'Listening', processing: 'Processing',
+      localProcessing: 'On-device', cloudProcessing: 'May be sent to provider',
+      browserService: 'Browser service',
+      loaded: 'Model ready',
+      placeholder: 'Press Start recognition and the transcript will appear here.',
+      copied: 'Copied to clipboard', copyFailed: 'Copy failed',
+      nothingToCopy: 'No transcript to copy.', nothingToExport: 'No transcript to export.',
+      mic: 'Microphone unavailable. Check permission and HTTPS.',
+      micBusy: 'Microphone is in use. Close other apps using it and try again.',
+      netError: 'Speech service network error', noWebSpeech: 'This browser does not support the Web Speech API.',
+      loadFirst: 'Load the model first.',
+      busyClear: 'Recognition or background processing is still running.',
+      modelChanged: 'Model changed. Please load the model again.',
+      sourceChanged: 'Model source changed. Please load the model again.',
+      loadFailed: 'Load failed: ',
+      whisperFailed: 'Whisper inference failed: ',
+      whisperDeviceLost: 'Device or VRAM error. Please reload the model.',
+      whisperBusy: 'A previous Whisper job is still running. Try again shortly.',
+      capturing: '🎙 Listening…',
+      voskLoading: 'Releasing previous model and loading Vosk…',
+      voskFileProtocol: 'Browser security: file:// cannot load the built-in relative model path. Use localhost or pick a local ZIP.',
+      voskNoFile: 'Select a ZIP model file', voskNoUrl: 'Enter a model URL',
+      whisperLoading: 'Releasing previous pipeline and loading Whisper…',
+      sherpaLoading: 'Loading sherpa-onnx WASM and model (~250 MB, cached afterwards)…',
+      sherpaNoBase: 'Enter the sherpa assets URL (the directory holding sherpa-onnx-asr.js).',
+      sherpaReloadNeeded: 'sherpa WASM already loaded. Reload the page to change the assets URL.',
+      webNotice: 'Web Speech API may send audio to the browser or speech service provider. Do not use it for sensitive information.',
+      localNotice: 'Recognition runs locally. External libraries and models are still downloaded if not cached.',
+      voskHint: 'Built-in models: <code>models/vosk-model-small-cn-0.22.zip</code> and <code>models/vosk-model-small-en-us-0.15.zip</code>. More models: <a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a>',
+      sherpaHint: 'Enter the directory URL holding <code>sherpa-onnx-asr.js</code>, <code>sherpa-onnx-wasm-main-asr.js</code>, the <code>.wasm</code> and <code>.data</code> files (trailing <code>/</code> required), or the relative path <code>sherpa/</code>. The model is a bilingual zh-en streaming Zipformer; the language selector above does not apply.',
+      whisperHint: 'Whisper segments on pauses. The model downloads once and is cached by the browser; it falls back to WASM when WebGPU is unavailable. Stopping waits for the final phrase.',
+      privacySummary: 'Usage and privacy',
+      howItWorks: 'This tool offers four recognition engines. Where the audio is processed depends on the engine — choose according to how sensitive the content is:',
+      enginesTitle: 'The four engines', engines: [
+        'Web Speech API: no model download, but the browser vendor decides how audio is handled and it may go to the cloud.',
+        'Vosk: runs locally once loaded, low resource use, good for older devices.',
+        'sherpa-onnx: true local streaming recognition, lowest latency, bilingual zh-en, best for live meeting captions.',
+        'Whisper: local phrase-based recognition, best multilingual quality, needs more compute.'
+      ],
+      riskTitle: 'High-risk scenarios (do not use Web Speech API)', risks: [
+        'Meetings involving <strong>business or internal confidential</strong> information.',
+        'Conversations involving <strong>personal privacy</strong> (e.g. doctors, lawyers).',
+        'Any content with <strong>sensitive personal data</strong> (ID numbers, passwords).'
+      ],
+      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx or Whisper. This page uses Google Analytics for visit counts only; transcripts and microphone audio are never uploaded. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
+    }
+  };
+  const t = () => T[state.ui];
+
+  const state = {
+    ui: 'zh', engine: 'webspeech', running: false, stopping: false,
+    start: null, end: null, segments: [], interim: '',
+    recognition: null, restartTimer: null, manualStop: false,
+    webGeneration: 0, webRecognitionActive: false
+  };
+  const vosk = {
+    loaded: false, model: null, recognizer: null, session: null,
+    loadPromise: null, loadGeneration: 0
+  };
+  const sherpa = {
+    module: null, recognizer: null, stream: null, session: null,
+    loaded: false, loadPromise: null, sessionId: 0, base: null
+  };
+  const whisper = {
+    module: null, pipe: null, model: null, device: null, session: null,
+    queue: [], busy: false, drainPromise: null, sessionId: 0,
+    loadPromise: null, loadGeneration: 0, vad: null
+  };
+  let toastTimer;
+  const openccConverters = new Map();
+  let pcmWorkletModuleUrl = null;
+  const scriptLoadPromises = new Map();
+
+  // ==================== Audio capture and resampling ====================
+  class AudioCapture {
+    constructor(onChunk, onLevel) {
+      this.onChunk = onChunk;
+      this.onLevel = onLevel;
+      this.stream = null;
+      this.context = null;
+      this.source = null;
+      this.node = null;
+      this.silent = null;
+    }
+    async start() {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+      });
+      this.context = new (window.AudioContext || window.webkitAudioContext)();
+      await this.context.resume();
+
+      const code = `class PCMProcessor extends AudioWorkletProcessor{
+        constructor(){
+          super();
+          this.bufSize=2048;
+          this.buf=new Float32Array(this.bufSize);
+          this.idx=0;
+        }
+        process(inputs){
+          const ch=inputs[0]&&inputs[0][0];
+          if(!ch) return true;
+          for(let i=0;i<ch.length;i++){
+            this.buf[this.idx++]=ch[i];
+            if(this.idx>=this.bufSize){
+              this.port.postMessage(this.buf,[this.buf.buffer]);
+              this.buf=new Float32Array(this.bufSize);
+              this.idx=0;
             }
-        };
+          }
+          return true;
+        }
+      }
+      registerProcessor('pcm-processor',PCMProcessor);`;
 
-        const CONFIG = {
-            RESTART_DELAY_MOBILE: 200,
-            RESTART_DELAY_DESKTOP: 500,
-            AUDIO_METER_DELAY: 300,
-            SCROLL_THRESHOLD: 50,
-            VOLUME_MULTIPLIER: 10,
-            FEEDBACK_DURATION: 2000,
-            MIN_SEGMENTS_FOR_EXPORT: 2,
-            VOSK_SAMPLE_RATE: 16000,
-            VOSK_BUFFER_SIZE: 8192,
-            WHISPER_CDN: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/+esm',
-            WHISPER_WINDOW_SEC: 6,
-            WHISPER_INTERVAL_MS: 2600,
-            WHISPER_MIN_NEW_SEC: 1.2,
-            WHISPER_BUFFER_CAP_SEC: 8,
-        };
+      if (!pcmWorkletModuleUrl) {
+        pcmWorkletModuleUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      }
 
-        const ENGINE = { WEB_SPEECH: 'webspeech', VOSK: 'vosk', WHISPER: 'whisper' };
+      await this.context.audioWorklet.addModule(pcmWorkletModuleUrl);
+      this.source = this.context.createMediaStreamSource(this.stream);
+      this.node = new AudioWorkletNode(this.context, 'pcm-processor');
+      this.silent = this.context.createGain();
+      this.silent.gain.value = 0;
 
-        // --- 簡體 → 繁體轉換 (opencc-js) ---
-        // Vosk 中文模型與 Whisper 預設輸出簡體中文；依辨識語言轉成對應繁體
-        // （zh-TW/zh-CN → 台灣用語 twp；zh-HK → 香港用語 hk；非中文語言不轉換）
-        const openccConverters = {};
+      this.source.connect(this.node);
+      this.node.connect(this.silent);
+      this.silent.connect(this.context.destination);
 
-        function getOpenccConverter(variant) {
-            if (!window.OpenCC) return null;
-            if (!openccConverters[variant]) {
-                openccConverters[variant] = window.OpenCC.Converter({ from: 'cn', to: variant });
-            }
-            return openccConverters[variant];
+      this.node.port.onmessage = e => {
+        const input = e.data;
+        let sum = 0;
+        for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+        const rms = Math.sqrt(sum / input.length);
+        this.onLevel?.(rms);
+        const output = resample(input, this.context.sampleRate, SAMPLE_RATE);
+        this.onChunk?.(output, rms);
+      };
+    }
+    async stop() {
+      const contextToClose = this.context;
+      const streamToStop = this.stream;
+
+      try {
+        try { this.node?.disconnect(); } catch (e) { console.warn(e); }
+        try { this.source?.disconnect(); } catch (e) { console.warn(e); }
+        try { this.silent?.disconnect(); } catch (e) { console.warn(e); }
+        try { streamToStop?.getTracks().forEach(track => track.stop()); } catch (e) { console.warn(e); }
+
+        if (contextToClose && contextToClose.state !== 'closed') {
+          try {
+            await contextToClose.close();
+          } catch (error) {
+            console.warn('AudioContext close failed:', error);
+          }
+        }
+      } finally {
+        this.stream = null;
+        this.context = null;
+        this.source = null;
+        this.node = null;
+        this.silent = null;
+        this.onLevel?.(0);
+      }
+    }
+  }
+
+  function resample(input, from, to) {
+    if (from === to) return input;
+    const n = Math.max(1, Math.round(input.length * to / from)),
+      out = new Float32Array(n), ratio = from / to;
+    for (let i = 0; i < n; i++) {
+      const p = i * ratio, a = Math.floor(p), b = Math.min(a + 1, input.length - 1), f = p - a;
+      out[i] = input[a] * (1 - f) + input[b] * f;
+    }
+    return out;
+  }
+
+  function makeAudioBuffer(context, data) {
+    const b = context.createBuffer(1, data.length, SAMPLE_RATE);
+    b.copyToChannel(data, 0);
+    return b;
+  }
+
+  function showToast(message) {
+    const el = $('toast');
+    el.textContent = message;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  }
+
+  function getOpenccConverter(variant) {
+    if (!window.OpenCC) return null;
+    if (!openccConverters.has(variant)) {
+      openccConverters.set(variant, window.OpenCC.Converter({ from: 'cn', to: variant }));
+    }
+    return openccConverters.get(variant);
+  }
+
+  function traditional(value) {
+    if (!value || !window.OpenCC) return value;
+    // Vosk 內建中文模型與 sherpa 中英模型必定輸出簡中，語言選單對它們無效
+    const forcedChinese =
+      state.engine === 'sherpa' ||
+      (state.engine === 'vosk' && el.voskSource.value === 'builtin' && el.voskLang.value === 'cn');
+    if (!forcedChinese && !el.lang.value.startsWith('zh')) return value;
+
+    try {
+      const variant = (!forcedChinese && el.lang.value === 'zh-HK') ? 'hk' : 'twp';
+      const converter = getOpenccConverter(variant);
+      return converter ? converter(value) : value;
+    } catch (error) {
+      console.warn('OpenCC conversion failed:', error);
+      return value;
+    }
+  }
+
+  function stamp(d = new Date()) {
+    return `[${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}]`;
+  }
+
+  function commit(s) {
+    s = traditional((s || '').trim());
+    if (!s) return;
+    state.segments.push({ time: new Date(), text: s });
+    state.interim = '';
+    render();
+  }
+
+  function getEffectiveSegments() {
+    return state.segments.filter(segment => {
+      const content = String(segment.text || '').trim();
+      return content && !content.startsWith('--- Recording Start');
+    });
+  }
+
+  function getEffectiveTranscriptText(lineSeparator = '\n') {
+    return getEffectiveSegments()
+      .map(segment => `${stamp(segment.time)} ${String(segment.text).trim()}`)
+      .join(lineSeparator);
+  }
+
+  function render() {
+    el.placeholder.hidden = !!(state.segments.length || state.interim);
+    el.final.textContent = state.segments.map(x => `${stamp(x.time)} ${x.text}`).join('\n');
+    el.interim.textContent = state.interim ? `\n${state.interim}` : '';
+
+    const hasContent = getEffectiveSegments().length > 0;
+    el.copy.disabled = !hasContent;
+    el.export.disabled = !hasContent;
+
+    requestAnimationFrame(() => {
+      el.container.scrollTop = el.container.scrollHeight;
+    });
+  }
+
+  function setLevel(rms) {
+    el.volume.style.transform = `scaleX(${Math.min(1, rms * 12)})`;
+  }
+
+  function begin() {
+    state.start = new Date();
+    state.end = null;
+    state.segments = [];
+    state.interim = '';
+    commit('--- Recording Start / 錄音開始 ---');
+  }
+
+  function finish() {
+    state.end = new Date();
+    state.running = false;
+    state.stopping = false;
+    state.interim = '';
+    el.engine.disabled = false;
+    el.lang.disabled = false;
+    updateButtons();
+    render();
+    setLevel(0);
+  }
+
+  function updateButtons() {
+    el.control.textContent = state.stopping ? t().stopping : (state.running ? t().stop : t().start);
+    el.control.classList.toggle('listening', state.running);
+    el.control.disabled = state.stopping;
+    el.statusState.textContent = state.stopping ? t().processing : (state.running ? t().listening : t().idle);
+    document.title = (state.running ? '● ' : '') + t().pageTitle;
+  }
+
+  function updateEngine() {
+    state.engine = el.engine.value;
+    el.voskConfig.classList.toggle('visible', state.engine === 'vosk');
+    el.sherpaConfig.classList.toggle('visible', state.engine === 'sherpa');
+    el.whisperConfig.classList.toggle('visible', state.engine === 'whisper');
+    // Vosk 與 sherpa 的語言由模型決定，隱藏語言選單
+    el.languageField.style.display = (state.engine === 'vosk' || state.engine === 'sherpa') ? 'none' : '';
+
+    const local = state.engine !== 'webspeech';
+    el.notice.textContent = local ? t().localNotice : t().webNotice;
+    el.notice.className = 'notice ' + (local ? 'local' : 'partial');
+    el.statusEngine.textContent = { webspeech: 'Web Speech API', vosk: 'Vosk', sherpa: 'sherpa-onnx', whisper: 'Whisper' }[state.engine];
+    el.statusRuntime.textContent = {
+      webspeech: t().browserService, vosk: 'WASM / CPU', sherpa: 'WASM / CPU',
+      whisper: whisper.device || 'WebGPU / WASM'
+    }[state.engine];
+    el.statusPrivacy.textContent = local ? t().localProcessing : t().cloudProcessing;
+    save();
+  }
+
+  async function loadScript(src, globalName) {
+    if (globalName && window[globalName]) return window[globalName];
+    if (scriptLoadPromises.has(src)) return scriptLoadPromises.get(src);
+
+    const loadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = false;
+      script.dataset.dynamicSrc = src;
+      script.onload = () => {
+        if (globalName && !window[globalName]) {
+          script.remove();
+          reject(new Error(`Script loaded, but window.${globalName} is unavailable.`));
+          return;
+        }
+        resolve(globalName ? window[globalName] : true);
+      };
+      script.onerror = () => {
+        script.remove();
+        reject(new Error(`Script load failed: ${src}`));
+      };
+      document.head.appendChild(script);
+    });
+
+    scriptLoadPromises.set(src, loadPromise);
+    try {
+      return await loadPromise;
+    } catch (error) {
+      scriptLoadPromises.delete(src);
+      throw error;
+    }
+  }
+
+  async function disposeWhisperPipeline(pipeline) {
+    if (!pipeline || typeof pipeline.dispose !== 'function') return;
+    try {
+      await pipeline.dispose();
+    } catch (error) {
+      console.warn('Whisper pipeline disposal failed:', error);
+    }
+  }
+
+  function removeVoskRecognizer() {
+    const recognizerToRemove = vosk.recognizer;
+    vosk.recognizer = null;
+    if (!recognizerToRemove) return;
+    try {
+      recognizerToRemove.remove?.();
+    } catch (error) {
+      console.warn('Vosk recognizer cleanup failed:', error);
+    }
+  }
+
+  async function terminateVoskModel(model) {
+    if (!model) return;
+    try {
+      const result = model.terminate?.();
+      if (result && typeof result.then === 'function') await result;
+    } catch (error) {
+      console.warn('Vosk model termination failed:', error);
+    }
+  }
+
+  // ==================== Vosk offline engine ====================
+  async function loadVosk() {
+    if (vosk.loadPromise) return vosk.loadPromise;
+    const generation = ++vosk.loadGeneration;
+
+    vosk.loadPromise = (async () => {
+      el.loadVosk.disabled = true;
+      el.voskProgress.classList.add('visible');
+      el.voskBar.classList.add('indeterminate');
+      el.voskStatus.textContent = t().voskLoading;
+      el.voskStatus.className = 'model-status';
+
+      let modelUrl = null;
+      let revokeModelUrl = false;
+      let newlyCreatedModel = null;
+
+      try {
+        await loadScript(CDN.vosk, 'Vosk');
+
+        const source = el.voskSource.value;
+        if (source === 'builtin') {
+          if (window.location.protocol === 'file:') throw new Error(t().voskFileProtocol);
+          modelUrl = VOSK_MODELS[el.voskLang.value];
+        } else if (source === 'file') {
+          const file = el.voskFile.files[0];
+          if (!file) throw new Error(t().voskNoFile);
+          modelUrl = URL.createObjectURL(file);
+          revokeModelUrl = true;
+        } else {
+          modelUrl = el.voskUrl.value.trim();
+          if (!modelUrl) throw new Error(t().voskNoUrl);
         }
 
-        function toTraditional(text) {
-            if (!text) return text;
-            let lang = UIElements.languageSelector ? UIElements.languageSelector.value : 'zh-TW';
-            // Vosk 模式語言下拉是隱藏的：內建 cn 模型必定輸出簡中，直接視為繁體中文需求
-            if (state.engine === ENGINE.VOSK &&
-                UIElements.voskModelSource && UIElements.voskModelSource.value === 'builtin' &&
-                UIElements.voskBuiltinLang && UIElements.voskBuiltinLang.value === 'cn') {
-                lang = 'zh-TW';
-            }
-            if (!lang.startsWith('zh')) return text;
-            const variant = lang === 'zh-HK' ? 'hk' : 'twp';
-            const converter = getOpenccConverter(variant);
-            return converter ? converter(text) : text;
+        removeVoskRecognizer();
+
+        const previousModel = vosk.model;
+        vosk.model = null;
+        vosk.loaded = false;
+        await terminateVoskModel(previousModel);
+
+        if (generation !== vosk.loadGeneration) return;
+
+        newlyCreatedModel = await Vosk.createModel(modelUrl);
+
+        if (generation !== vosk.loadGeneration) {
+          await terminateVoskModel(newlyCreatedModel);
+          return;
         }
 
-        const state = {
-            currentUiLang: 'zh',
-            engine: ENGINE.WEB_SPEECH,
-            startTime: null,
-            endTime: null,
-            transcriptSegments: [],
-            renderedSegmentCount: 0,
-            isRecognizing: false,
-            interimTranscript: '',
-            isManualStop: false,
-            recognition: null,
-            isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
-            restartTimeout: null,
-            recognitionActive: false,
-        };
+        vosk.model = newlyCreatedModel;
+        newlyCreatedModel = null;
+        vosk.loaded = true;
+        el.voskStatus.textContent = t().loaded;
+        el.voskStatus.className = 'model-status success';
+      } catch (error) {
+        console.error('Vosk model load failed:', error);
+        await terminateVoskModel(newlyCreatedModel);
 
-        let basePageTitle = '多國語言即時逐字稿工具';
-
-        const voskState = {
-            libLoaded: false,
-            libLoading: false,
-            model: null,
-            modelLoading: false,
-            modelReady: false,
-            recognizer: null,
-            audioContext: null,
-            stream: null,
-            processorNode: null,
-        };
-
-        const audioState = {
-            context: null,
-            stream: null,
-            analyser: null,
-            animationFrameId: null,
-            dataArray: null,
-        };
-
-        const whisperState = {
-            pipeline: null,
-            modelName: null,
-            libLoading: false,
-            ready: false,
-            audioContext: null,
-            stream: null,
-            processorNode: null,
-            buffer: [],
-            bufferSamples: 0,
-            totalSamples: 0,
-            lastProcessedSamples: 0,
-            lastFullText: '',
-            transcribing: false,
-            intervalId: null,
-        };
-
-        function init() {
-            loadPreferences();
-            setupEventListeners();
-            initSpeechRecognition();
-            setUiLanguage(state.currentUiLang);
-            updateEngineUI();
+        if (generation === vosk.loadGeneration) {
+          vosk.loaded = false;
+          vosk.model = null;
+          el.voskStatus.textContent = t().loadFailed + (error.message || error);
+          el.voskStatus.className = 'model-status error';
         }
-
-        function setupEventListeners() {
-            UIElements.uiLangToggle.addEventListener('click', toggleUiLanguage);
-            UIElements.controlBtn.addEventListener('click', toggleRecognition);
-            UIElements.exportBtn.addEventListener('click', exportTranscript);
-            UIElements.copyBtn.addEventListener('click', copyTranscript);
-            UIElements.clearBtn.addEventListener('click', clearTranscript);
-            UIElements.languageSelector.addEventListener('change', () => {
-                if (state.recognition) {
-                    state.recognition.lang = UIElements.languageSelector.value;
-                }
-                savePreferences();
-            });
-            UIElements.engineSelector.addEventListener('change', () => {
-                state.engine = UIElements.engineSelector.value;
-                updateEngineUI();
-                savePreferences();
-            });
-            UIElements.voskModelSource.addEventListener('change', () => {
-                const val = UIElements.voskModelSource.value;
-                UIElements.builtinRow.style.display = val === 'builtin' ? 'flex' : 'none';
-                UIElements.fileUploadRow.style.display = val === 'file' ? 'flex' : 'none';
-                UIElements.customUrlRow.style.display = val === 'url' ? 'flex' : 'none';
-            });
-            UIElements.loadModelBtn.addEventListener('click', loadVoskModel);
-            UIElements.loadWhisperBtn.addEventListener('click', loadWhisperModel);
-            UIElements.voskModelFile.addEventListener('change', () => {
-                const f = UIElements.voskModelFile.files[0];
-                UIElements.voskFileHintText.textContent = (f ? f.name + ' — ' : '') + translations[state.currentUiLang].voskFileHint;
-            });
-            document.addEventListener('keydown', (e) => {
-                if (e.code === 'Space' && e.target === document.body && !UIElements.controlBtn.disabled) {
-                    e.preventDefault();
-                    toggleRecognition();
-                }
-            });
+      } finally {
+        if (revokeModelUrl && modelUrl) URL.revokeObjectURL(modelUrl);
+        if (generation === vosk.loadGeneration) {
+          el.voskBar.classList.remove('indeterminate');
+          el.voskBar.style.width = vosk.loaded ? '100%' : '0';
+          el.loadVosk.disabled = false;
         }
-
-        function initSpeechRecognition() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                if (state.engine === ENGINE.WEB_SPEECH) {
-                    UIElements.controlBtn.disabled = true;
-                }
-                return;
-            }
-            state.recognition = new SpeechRecognition();
-            state.recognition.continuous = !state.isMobile;
-            state.recognition.interimResults = true;
-            state.recognition.maxAlternatives = 1;
-
-            state.recognition.onstart = handleRecognitionStart;
-            state.recognition.onerror = handleRecognitionError;
-            state.recognition.onend = handleRecognitionEnd;
-            state.recognition.onresult = handleRecognitionResult;
-        }
-
-        function updateEngineUI() {
-            const isVosk = state.engine === ENGINE.VOSK;
-            const isWhisper = state.engine === ENGINE.WHISPER;
-            UIElements.voskConfig.classList.toggle('visible', isVosk);
-            UIElements.whisperConfig.classList.toggle('visible', isWhisper);
-            UIElements.languageSelector.style.display = isVosk ? 'none' : '';
-            UIElements.langLabel.style.display = isVosk ? 'none' : '';
-
-            const t = translations[state.currentUiLang];
-            UIElements.warningText.textContent = isVosk ? t.warningTextVosk : (isWhisper ? t.warningTextWhisper : t.warningTextGoogle);
-            UIElements.warningText.classList.toggle('offline', isVosk || isWhisper);
-
-            if (isVosk) {
-                UIElements.controlBtn.disabled = !voskState.modelReady;
-            } else if (isWhisper) {
-                UIElements.controlBtn.disabled = !whisperState.ready;
-            } else {
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                UIElements.controlBtn.disabled = !SpeechRecognition;
-            }
-        }
-
-        // --- Toast ---
-
-        let toastTimer = null;
-
-        function showToast(message) {
-            let toast = document.getElementById('toast');
-            if (!toast) {
-                toast = document.createElement('div');
-                toast.id = 'toast';
-                document.body.appendChild(toast);
-            }
-            toast.textContent = message;
-            toast.classList.add('show');
-            clearTimeout(toastTimer);
-            toastTimer = setTimeout(() => toast.classList.remove('show'), CONFIG.FEEDBACK_DURATION);
-        }
-
-        // --- Vosk Engine ---
-
-        function loadVoskLibrary() {
-            return new Promise((resolve, reject) => {
-                if (voskState.libLoaded && window.Vosk) { resolve(); return; }
-                if (voskState.libLoading) { reject(new Error('Already loading')); return; }
-                voskState.libLoading = true;
-                const script = document.createElement('script');
-                script.src = VOSK_CDN;
-                script.onload = () => { voskState.libLoaded = true; voskState.libLoading = false; resolve(); };
-                script.onerror = () => { voskState.libLoading = false; reject(new Error('Script load failed')); };
-                document.head.appendChild(script);
-            });
-        }
-
-        async function loadVoskModel() {
-            const t = translations[state.currentUiLang];
-            const source = UIElements.voskModelSource.value;
-            let modelPath;
-            let isBlobUrl = false;
-
-            if (source === 'builtin') {
-                const lang = UIElements.voskBuiltinLang.value;
-                modelPath = VOSK_BUILTIN_MODELS[lang];
-                if (!modelPath) {
-                    setModelStatus(t.voskSelectModel, 'error');
-                    return;
-                }
-            } else if (source === 'file') {
-                const file = UIElements.voskModelFile.files[0];
-                if (!file) {
-                    setModelStatus(t.voskSelectModel, 'error');
-                    return;
-                }
-                modelPath = URL.createObjectURL(file);
-                isBlobUrl = true;
-            } else {
-                const url = UIElements.voskModelUrl.value.trim();
-                if (!url) {
-                    setModelStatus(t.voskSelectModel, 'error');
-                    return;
-                }
-                modelPath = url;
-            }
-
-            UIElements.loadModelBtn.disabled = true;
-            UIElements.loadModelBtn.textContent = t.loadModelBtnLoading;
-            UIElements.modelProgress.classList.add('visible');
-            UIElements.modelProgressBar.style.width = '0%';
-            setModelStatus(t.voskLoadingLib, '');
-
-            try {
-                await loadVoskLibrary();
-            } catch (e) {
-                setModelStatus(t.voskLibError, 'error');
-                resetLoadBtn();
-                return;
-            }
-
-            setModelStatus(t.voskLoadingModel, '');
-            UIElements.modelProgressBar.style.width = '30%';
-
-            try {
-                if (voskState.model) {
-                    voskState.model.terminate();
-                    voskState.model = null;
-                }
-
-                voskState.modelLoading = true;
-                const model = await window.Vosk.createModel(modelPath);
-                voskState.model = model;
-                voskState.modelReady = true;
-                voskState.modelLoading = false;
-
-                UIElements.modelProgressBar.style.width = '100%';
-                setModelStatus(t.voskModelReady, 'success');
-                UIElements.controlBtn.disabled = false;
-            } catch (e) {
-                console.error('Vosk model load error:', e);
-                voskState.modelLoading = false;
-                voskState.modelReady = false;
-                setModelStatus(t.voskModelError, 'error');
-            } finally {
-                if (isBlobUrl && modelPath) {
-                    URL.revokeObjectURL(modelPath);
-                }
-            }
-
-            resetLoadBtn();
-        }
-
-        function setModelStatus(text, type) {
-            UIElements.modelStatus.textContent = text;
-            UIElements.modelStatus.className = 'model-status' + (type ? ' ' + type : '');
-        }
-
-        function resetLoadBtn() {
-            const t = translations[state.currentUiLang];
-            UIElements.loadModelBtn.disabled = false;
-            UIElements.loadModelBtn.textContent = t.loadModelBtn;
-        }
-
-        function startVoskRecognition() {
-            const t = translations[state.currentUiLang];
-            if (!voskState.modelReady || !voskState.model) {
-                showToast(t.voskSelectModel);
-                return;
-            }
-
-            beginNewRecording();
-            state.isRecognizing = true;
-            updateButtonStates();
-
-            navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    channelCount: 1,
-                    sampleRate: CONFIG.VOSK_SAMPLE_RATE,
-                }
-            }).then(stream => {
-                if (!state.isRecognizing) {
-                    stream.getTracks().forEach(track => track.stop());
-                    return;
-                }
-                voskState.stream = stream;
-                voskState.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: CONFIG.VOSK_SAMPLE_RATE });
-
-                voskState.recognizer = new voskState.model.KaldiRecognizer(CONFIG.VOSK_SAMPLE_RATE);
-                voskState.recognizer.setWords(false);
-
-                voskState.recognizer.on('result', (message) => {
-                    const text = toTraditional(message.result?.text);
-                    if (text) {
-                        state.transcriptSegments.push({ timestamp: new Date(), text: text });
-                        state.interimTranscript = '';
-                        updateTranscriptDisplay();
-                        updateButtonStates();
-                    }
-                });
-
-                voskState.recognizer.on('partialresult', (message) => {
-                    const partial = message.result?.partial;
-                    if (partial) {
-                        state.interimTranscript = toTraditional(partial);
-                        updateTranscriptDisplay();
-                    }
-                });
-
-                const source = voskState.audioContext.createMediaStreamSource(stream);
-
-                voskState.processorNode = voskState.audioContext.createScriptProcessor(CONFIG.VOSK_BUFFER_SIZE, 1, 1);
-                voskState.processorNode.onaudioprocess = (event) => {
-                    try {
-                        if (voskState.recognizer) {
-                            voskState.recognizer.acceptWaveform(event.inputBuffer);
-                        }
-                    } catch (e) {
-                        console.error('Vosk acceptWaveform error:', e);
-                    }
-                };
-
-                source.connect(voskState.processorNode);
-                voskState.processorNode.connect(voskState.audioContext.destination);
-
-                state.isRecognizing = true;
-                state.recognitionActive = true;
-                UIElements.languageSelector.disabled = true;
-                UIElements.engineSelector.disabled = true;
-                updateButtonStates();
-
-                setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), CONFIG.AUDIO_METER_DELAY);
-
-            }).catch(err => {
-                console.error('Microphone error:', err);
-                state.isRecognizing = false;
-                updateButtonStates();
-                showToast(t.micDeniedError);
-            });
-        }
-
-        function stopVoskRecognition() {
-            state.isManualStop = true;
-
-            if (voskState.processorNode) {
-                voskState.processorNode.disconnect();
-                voskState.processorNode = null;
-            }
-            if (voskState.stream) {
-                voskState.stream.getTracks().forEach(track => track.stop());
-                voskState.stream = null;
-            }
-            if (voskState.audioContext && voskState.audioContext.state !== 'closed') {
-                voskState.audioContext.close();
-                voskState.audioContext = null;
-            }
-            if (voskState.recognizer) {
-                voskState.recognizer.remove();
-                voskState.recognizer = null;
-            }
-
-            state.isRecognizing = false;
-            state.recognitionActive = false;
-            UIElements.languageSelector.disabled = false;
-            UIElements.engineSelector.disabled = false;
-            state.endTime = new Date();
-            state.interimTranscript = '';
-            updateTranscriptDisplay();
-            updateButtonStates();
-            stopAudioMeter();
-        }
-
-        // --- Whisper Engine (transformers.js + WebGPU / WASM) ---
-
-        async function loadWhisperLibrary() {
-            if (whisperState.pipeline) return;
-            if (whisperState.libLoading) throw new Error('Already loading');
-            whisperState.libLoading = true;
-            try {
-                const mod = await import(CONFIG.WHISPER_CDN);
-                window.whisperTransformers = mod;
-                if (mod.env) {
-                    mod.env.allowLocalModels = false;
-                    mod.env.useBrowserCache = true;
-                }
-            } finally {
-                whisperState.libLoading = false;
-            }
-        }
-
-        async function loadWhisperModel() {
-            const t = translations[state.currentUiLang];
-            const modelName = WHISPER_MODELS[UIElements.whisperModelSelect.value];
-            UIElements.loadWhisperBtn.disabled = true;
-            UIElements.loadWhisperBtn.textContent = t.loadModelBtnLoading;
-            UIElements.whisperProgress.classList.add('visible');
-            UIElements.whisperProgressBar.style.width = '0%';
-            setWhisperStatus(t.whisperLoadingLib, '');
-
-            try {
-                await loadWhisperLibrary();
-            } catch (e) {
-                console.error('Whisper lib load error:', e);
-                setWhisperStatus(t.whisperLibError, 'error');
-                resetWhisperBtn();
-                return;
-            }
-
-            setWhisperStatus(t.whisperLoadingModel, '');
-            UIElements.whisperProgressBar.classList.add('indeterminate');
-
-            try {
-                if (!(whisperState.pipeline && whisperState.modelName === modelName)) {
-                    const { pipeline } = window.whisperTransformers;
-                    let pipe = null;
-                    const hasGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
-                    if (hasGPU) {
-                        try {
-                            pipe = await pipeline('automatic-speech-recognition', modelName, { device: 'webgpu', dtype: 'q8' });
-                        } catch (e) {
-                            console.warn('WebGPU pipeline failed, falling back to WASM:', e);
-                        }
-                    }
-                    if (!pipe) {
-                        // wasm 上 q8 的 decoder 量化在 transformers.js 4.2.0 會崩
-                        // （Missing required scale），且失敗載入會毒化瀏覽器模型快取；
-                        // 退回路徑改用 q4
-                        pipe = await pipeline('automatic-speech-recognition', modelName, { device: 'wasm', dtype: 'q4' });
-                    }
-                    whisperState.pipeline = pipe;
-                    whisperState.modelName = modelName;
-                }
-                whisperState.ready = true;
-                UIElements.whisperProgressBar.classList.remove('indeterminate');
-                UIElements.whisperProgressBar.style.width = '100%';
-                setWhisperStatus(t.whisperModelReady, 'success');
-                UIElements.controlBtn.disabled = false;
-            } catch (e) {
-                console.error('Whisper model load error:', e);
-                UIElements.whisperProgressBar.classList.remove('indeterminate');
-                whisperState.ready = false;
-                setWhisperStatus(t.whisperModelError, 'error');
-            }
-            resetWhisperBtn();
-        }
-
-        function setWhisperStatus(text, type) {
-            UIElements.whisperStatus.textContent = text;
-            UIElements.whisperStatus.className = 'model-status' + (type ? ' ' + type : '');
-        }
-
-        function resetWhisperBtn() {
-            const t = translations[state.currentUiLang];
-            UIElements.loadWhisperBtn.disabled = false;
-            UIElements.loadWhisperBtn.textContent = t.loadModelBtn;
-        }
-
-        async function whisperTranscribe(audio) {
-            if (!whisperState.pipeline) return '';
-            const lang = WHISPER_LANG_MAP[UIElements.languageSelector.value] || null;
-            const out = await whisperState.pipeline(audio, {
-                language: lang,
-                task: 'transcribe',
-                chunk_length_s: 30,
-                stride_length_s: 5,
-            });
-            return toTraditional((out && out.text ? out.text : '').trim());
-        }
-
-        function commitWhisperDelta(newText) {
-            if (!newText) {
-                state.interimTranscript = '';
-                return false;
-            }
-            const prev = whisperState.lastFullText;
-            if (prev && newText === prev) {
-                state.interimTranscript = '';
-                return false;
-            }
-            let delta = newText;
-            if (prev) {
-                const minLen = Math.min(prev.length, newText.length);
-                let i = 0;
-                while (i < minLen && prev[i] === newText[i]) i++;
-                delta = newText.slice(i).trim();
-            }
-            if (delta) {
-                state.transcriptSegments.push({ timestamp: new Date(), text: delta });
-                state.interimTranscript = '';
-            } else {
-                state.interimTranscript = newText.slice(0, 120) + '…';
-            }
-            whisperState.lastFullText = newText;
-            return !!delta;
-        }
-
-        function concatLastN(chunks, totalLen, n) {
-            const out = new Float32Array(n);
-            let need = n;
-            let writePos = n;
-            for (let i = chunks.length - 1; i >= 0 && need > 0; i--) {
-                const c = chunks[i];
-                const take = Math.min(need, c.length);
-                writePos -= take;
-                out.set(c.subarray(c.length - take), writePos);
-                need -= take;
-            }
-            return out;
-        }
-
-        function startWhisperRecognition() {
-            const t = translations[state.currentUiLang];
-            if (!whisperState.ready || !whisperState.pipeline) {
-                showToast(t.whisperSelectModel);
-                return;
-            }
-
-            beginNewRecording();
-            state.isRecognizing = true;
-            updateButtonStates();
-
-            navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    channelCount: 1,
-                    sampleRate: CONFIG.VOSK_SAMPLE_RATE,
-                }
-            }).then(stream => {
-                if (!state.isRecognizing) {
-                    stream.getTracks().forEach(track => track.stop());
-                    return;
-                }
-                whisperState.stream = stream;
-                whisperState.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: CONFIG.VOSK_SAMPLE_RATE });
-                whisperState.processorNode = whisperState.audioContext.createScriptProcessor(CONFIG.VOSK_BUFFER_SIZE, 1, 1);
-                whisperState.buffer = [];
-                whisperState.bufferSamples = 0;
-                whisperState.totalSamples = 0;
-                whisperState.lastProcessedSamples = 0;
-                whisperState.lastFullText = '';
-
-                whisperState.processorNode.onaudioprocess = (event) => {
-                    const data = event.inputBuffer.getChannelData(0);
-                    whisperState.buffer.push(new Float32Array(data));
-                    whisperState.bufferSamples += data.length;
-                    whisperState.totalSamples += data.length;
-                    const cap = CONFIG.VOSK_SAMPLE_RATE * CONFIG.WHISPER_BUFFER_CAP_SEC;
-                    while (whisperState.bufferSamples > cap) {
-                        whisperState.bufferSamples -= whisperState.buffer[0].length;
-                        whisperState.buffer.shift();
-                    }
-                };
-
-                const source = whisperState.audioContext.createMediaStreamSource(stream);
-                source.connect(whisperState.processorNode);
-                whisperState.processorNode.connect(whisperState.audioContext.destination);
-
-                UIElements.languageSelector.disabled = true;
-                UIElements.engineSelector.disabled = true;
-                whisperState.intervalId = setInterval(runWhisperCycle, CONFIG.WHISPER_INTERVAL_MS);
-
-                setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), CONFIG.AUDIO_METER_DELAY);
-            }).catch(err => {
-                console.error('Microphone error:', err);
-                state.isRecognizing = false;
-                updateButtonStates();
-                showToast(t.micDeniedError);
-            });
-        }
-
-        async function runWhisperCycle() {
-            if (!state.isRecognizing || whisperState.transcribing) return;
-            const newSamples = whisperState.totalSamples - whisperState.lastProcessedSamples;
-            if (newSamples < CONFIG.VOSK_SAMPLE_RATE * CONFIG.WHISPER_MIN_NEW_SEC) return;
-            const windowLen = Math.min(CONFIG.VOSK_SAMPLE_RATE * CONFIG.WHISPER_WINDOW_SEC, whisperState.bufferSamples);
-            if (windowLen < CONFIG.VOSK_SAMPLE_RATE) return;
-            const audio = concatLastN(whisperState.buffer, whisperState.bufferSamples, windowLen);
-            whisperState.transcribing = true;
-            try {
-                const text = await whisperTranscribe(audio);
-                commitWhisperDelta(text);
-                whisperState.lastProcessedSamples = whisperState.totalSamples;
-                updateTranscriptDisplay();
-                updateButtonStates();
-            } catch (e) {
-                console.error('Whisper cycle error:', e);
-            } finally {
-                whisperState.transcribing = false;
-            }
-        }
-
-        function stopWhisperRecognition() {
-            state.isManualStop = true;
-            if (whisperState.intervalId) {
-                clearInterval(whisperState.intervalId);
-                whisperState.intervalId = null;
-            }
-            if (whisperState.processorNode) {
-                whisperState.processorNode.disconnect();
-                whisperState.processorNode = null;
-            }
-            if (whisperState.stream) {
-                whisperState.stream.getTracks().forEach(track => track.stop());
-                whisperState.stream = null;
-            }
-            if (whisperState.audioContext && whisperState.audioContext.state !== 'closed') {
-                whisperState.audioContext.close();
-            }
-            whisperState.audioContext = null;
-            whisperState.buffer = [];
-            whisperState.bufferSamples = 0;
-            whisperState.lastFullText = '';
-
-            state.isRecognizing = false;
-            state.recognitionActive = false;
-            UIElements.languageSelector.disabled = false;
-            UIElements.engineSelector.disabled = false;
-            state.endTime = new Date();
-            state.interimTranscript = '';
-            updateTranscriptDisplay();
-            updateButtonStates();
-            stopAudioMeter();
-        }
-
-        // --- Web Speech API Engine ---
-
-        function beginNewRecording() {
-            state.isManualStop = false;
-            state.startTime = new Date();
-            state.transcriptSegments = [{ timestamp: state.startTime, text: '--- Recording Start / 錄音開始 ---' }];
-            state.renderedSegmentCount = 0;
-            state.interimTranscript = '';
-            UIElements.finalText.textContent = '';
-            updateTranscriptDisplay();
-        }
-
-        function toggleUiLanguage() {
-            const newLang = state.currentUiLang === 'zh' ? 'en' : 'zh';
-            setUiLanguage(newLang);
-            savePreferences();
-        }
-
-        function setUiLanguage(lang) {
-            state.currentUiLang = lang;
-            const t = translations[lang];
-            basePageTitle = t.pageTitle;
-
-            UIElements.pageTitle.textContent = t.pageTitle;
-            UIElements.mainTitle.textContent = t.mainTitle;
-            UIElements.engineLabel.textContent = t.engineLabel;
-            UIElements.langLabel.textContent = t.langLabel;
-            UIElements.exportBtn.textContent = t.exportBtn;
-            UIElements.copyBtn.textContent = t.copyBtn;
-            UIElements.clearBtn.textContent = t.clearBtn;
-            UIElements.clearBtn.title = t.clearBtnTooltip;
-            UIElements.uiLangToggle.textContent = t.toggleUiLangBtn;
-            UIElements.placeholderText.textContent = t.placeholder;
-            UIElements.uiLangToggle.title = t.uiLangToggleTooltip;
-            UIElements.languageSelector.title = t.languageSelectorTooltip;
-            UIElements.voskModelLabel.textContent = t.voskModelLabel;
-            UIElements.voskUrlLabel.textContent = t.voskUrlLabel;
-            UIElements.loadModelBtn.textContent = voskState.modelLoading ? t.loadModelBtnLoading : t.loadModelBtn;
-            document.getElementById('vosk-source-builtin').textContent = t.voskSourceBuiltin;
-            document.getElementById('vosk-source-file').textContent = t.voskSourceFile;
-            document.getElementById('vosk-source-url').textContent = t.voskSourceUrl;
-            const langLabelVosk = document.getElementById('vosk-lang-label');
-            if (langLabelVosk) langLabelVosk.textContent = t.voskLangLabel;
-            const fileLabelEl = document.getElementById('vosk-file-label');
-            if (fileLabelEl) fileLabelEl.textContent = t.voskFileLabel;
-            UIElements.voskFileHintText.textContent = t.voskFileHint;
-            UIElements.whisperModelLabel.textContent = t.whisperModelLabel;
-            UIElements.loadWhisperBtn.textContent = t.loadModelBtn;
-
-            const isVosk = state.engine === ENGINE.VOSK;
-            const isWhisper = state.engine === ENGINE.WHISPER;
-            UIElements.warningText.textContent = isVosk ? t.warningTextVosk : (isWhisper ? t.warningTextWhisper : t.warningTextGoogle);
-
-            UIElements.privacySummary.textContent = t.privacySummary;
-            UIElements.howItWorksText.textContent = t.howItWorksText;
-            UIElements.suitableScenariosTitle.textContent = t.suitableScenariosTitle;
-            UIElements.riskScenariosTitle.textContent = t.riskScenariosTitle;
-            UIElements.privacyConclusion.textContent = t.privacyConclusion;
-
-            UIElements.suitableScenariosList.innerHTML = t.suitableScenarios.map(item => `<li class="safe">${item}</li>`).join('');
-            UIElements.riskScenariosList.innerHTML = t.riskScenarios.map(item => `<li class="unsafe">${item}</li>`).join('');
-
-            updateButtonStates();
-        }
-
-        function updateButtonStates() {
-            const t = translations[state.currentUiLang];
-            UIElements.controlBtn.textContent = state.isRecognizing ? t.stopBtn : t.startBtn;
-            UIElements.controlBtn.title = state.isRecognizing ? t.controlBtnTooltipStop : t.controlBtnTooltipStart;
-            UIElements.controlBtn.classList.toggle('listening', state.isRecognizing);
-
-            document.title = state.isRecognizing ? '● ' + basePageTitle : basePageTitle;
-
-            const canExportOrCopy = state.transcriptSegments.length > CONFIG.MIN_SEGMENTS_FOR_EXPORT;
-            UIElements.exportBtn.disabled = !canExportOrCopy;
-            UIElements.copyBtn.disabled = !canExportOrCopy;
-
-            UIElements.exportBtn.title = canExportOrCopy ? t.exportBtnTooltip : t.exportBtnTooltipDisabled;
-            UIElements.copyBtn.title = canExportOrCopy ? t.copyBtnTooltip : t.copyBtnTooltipDisabled;
-        }
-
-        function toggleRecognition() {
-            if (state.isRecognizing) {
-                if (state.engine === ENGINE.VOSK) stopVoskRecognition();
-                else if (state.engine === ENGINE.WHISPER) stopWhisperRecognition();
-                else stopRecognition();
-            } else {
-                if (state.engine === ENGINE.VOSK) startVoskRecognition();
-                else if (state.engine === ENGINE.WHISPER) startWhisperRecognition();
-                else startRecognition();
-            }
-        }
-
-        function startRecognition() {
-            if (!state.recognition) {
-                showToast(translations[state.currentUiLang].apiNotSupportedError);
-                return;
-            }
-            state.recognition.lang = UIElements.languageSelector.value;
-            beginNewRecording();
-            state.isRecognizing = true;
-            updateButtonStates();
-
-            setTimeout(() => startAudioMeter().catch(err => console.warn("Could not start audio meter:", err)), CONFIG.AUDIO_METER_DELAY);
-
-            try {
-                if (!state.recognitionActive) state.recognition.start();
-            } catch (e) {
-                console.error("Error starting recognition:", e);
-                state.isRecognizing = false;
-                updateButtonStates();
-                showToast("無法啟動語音辨識，請重新整理頁面再試。\nFailed to start recognition, please refresh and try again.");
-            }
-        }
-
-        function stopRecognition() {
-            state.isManualStop = true;
-            if (state.recognitionActive) {
-                state.recognition.stop();
-            } else {
-                handleRecognitionEnd();
-            }
-        }
-
-        function handleRecognitionStart() {
-            if (state.isManualStop) {
-                state.recognition.stop();
-                return;
-            }
-            state.recognitionActive = true;
-            state.isRecognizing = true;
-            UIElements.languageSelector.disabled = true;
-            UIElements.engineSelector.disabled = true;
-            updateButtonStates();
-        }
-
-        function handleRecognitionError(event) {
-            console.error('Speech Recognition Error:', event.error, event);
-            state.recognitionActive = false;
-            const t = translations[state.currentUiLang];
-            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                state.isManualStop = true;
-                showToast(t.micDeniedError);
-            } else if (event.error === 'network') {
-                state.isManualStop = true;
-                showToast('網路連線問題,請檢查網路設定。\nNetwork error, please check your connection.');
-            }
-        }
-
-        function handleRecognitionEnd() {
-            state.recognitionActive = false;
-            clearTimeout(state.restartTimeout);
-
-            if (!state.isManualStop && state.isRecognizing) {
-                const restartDelay = state.isMobile ? CONFIG.RESTART_DELAY_MOBILE : CONFIG.RESTART_DELAY_DESKTOP;
-                state.restartTimeout = setTimeout(() => {
-                    if (state.isRecognizing && !state.recognitionActive) {
-                        try { state.recognition.start(); } catch (e) { console.error('Failed to auto-restart:', e); }
-                    }
-                }, restartDelay);
-            } else {
-                state.isRecognizing = false;
-                UIElements.languageSelector.disabled = false;
-                UIElements.engineSelector.disabled = false;
-                state.endTime = new Date();
-                updateButtonStates();
-                stopAudioMeter();
-            }
-        }
-
-        function handleRecognitionResult(event) {
-            state.interimTranscript = '';
-            let finalTranscriptThisTurn = '';
-
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                const transcript = toTraditional(event.results[i][0].transcript);
-                if (event.results[i].isFinal) {
-                    finalTranscriptThisTurn += transcript.trim() + ' ';
-                } else {
-                    state.interimTranscript += transcript;
-                }
-            }
-
-            if (finalTranscriptThisTurn) {
-                state.transcriptSegments.push({ timestamp: new Date(), text: finalTranscriptThisTurn.trim() });
-            }
-
-            updateTranscriptDisplay();
-            updateButtonStates();
-        }
-
-        // --- Shared Functions ---
-
-        function updateTranscriptDisplay() {
-            if (state.transcriptSegments.length > 0 || state.interimTranscript) {
-                UIElements.placeholderText.style.display = 'none';
-            } else {
-                UIElements.placeholderText.style.display = 'inline';
-            }
-
-            if (state.renderedSegmentCount < state.transcriptSegments.length) {
-                const newSegments = state.transcriptSegments.slice(state.renderedSegmentCount);
-                const newText = newSegments.map(s => `${formatTime(s.timestamp)} ${s.text}`).join('\n');
-                const prefix = state.renderedSegmentCount > 0 ? '\n' : '';
-                UIElements.finalText.textContent += prefix + newText;
-                state.renderedSegmentCount = state.transcriptSegments.length;
-            }
-
-            UIElements.interimText.textContent = state.interimTranscript ? '\n' + state.interimTranscript : '';
-
-            const container = UIElements.transcriptContainer;
-            const isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + CONFIG.SCROLL_THRESHOLD;
-            if (isScrolledToBottom) {
-                container.scrollTop = container.scrollHeight;
-            }
-        }
-
-        function getFullTranscriptText() {
-            return state.transcriptSegments.map(segment => `${formatTime(segment.timestamp)} ${segment.text}`).join('\n');
-        }
-
-        function exportTranscript() {
-            if (!state.startTime) return;
-            const textToSave = getFullTranscriptText().replace(/\n/g, '\r\n');
-            const fileName = createFileName(state.startTime, state.endTime || new Date());
-            const blob = new Blob([textToSave], { type: 'text/plain;charset=utf-8' });
-
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(a.href);
-        }
-
-        function copyTranscript() {
-            if (state.transcriptSegments.length <= CONFIG.MIN_SEGMENTS_FOR_EXPORT && !state.interimTranscript) return;
-
-            const textToCopy = getFullTranscriptText();
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                const originalText = UIElements.copyBtn.textContent;
-                UIElements.copyBtn.textContent = translations[state.currentUiLang].copyBtnSuccess;
-                setTimeout(() => {
-                    UIElements.copyBtn.textContent = originalText;
-                }, CONFIG.FEEDBACK_DURATION);
-            }, (err) => {
-                console.error('Could not copy text: ', err);
-                showToast(translations[state.currentUiLang].copiedError);
-            });
-        }
-
-        function clearTranscript() {
-            state.transcriptSegments = [];
-            state.renderedSegmentCount = 0;
-            state.interimTranscript = '';
-            state.startTime = null;
-            state.endTime = null;
-            UIElements.finalText.textContent = '';
-            UIElements.interimText.textContent = '';
-            UIElements.placeholderText.style.display = 'inline';
-            updateButtonStates();
-        }
-
-        function savePreferences() {
-            try {
-                localStorage.setItem('stt_ui_lang', state.currentUiLang);
-                localStorage.setItem('stt_rec_lang', UIElements.languageSelector.value);
-                localStorage.setItem('stt_engine', state.engine);
-            } catch (e) {}
-        }
-
-        function loadPreferences() {
-            try {
-                const savedUiLang = localStorage.getItem('stt_ui_lang');
-                const savedRecLang = localStorage.getItem('stt_rec_lang');
-                const savedEngine = localStorage.getItem('stt_engine');
-                const browserLang = navigator.language || navigator.userLanguage;
-
-                state.currentUiLang = savedUiLang || (browserLang.startsWith('zh') ? 'zh' : 'en');
-                if (savedRecLang) {
-                    UIElements.languageSelector.value = savedRecLang;
-                } else if (browserLang.startsWith('zh')) {
-                    UIElements.languageSelector.value = browserLang.includes('TW') || browserLang.includes('HK') ? 'zh-TW' : 'zh-CN';
-                }
-                if (savedEngine && (savedEngine === ENGINE.WEB_SPEECH || savedEngine === ENGINE.VOSK || savedEngine === ENGINE.WHISPER)) {
-                    state.engine = savedEngine;
-                    UIElements.engineSelector.value = savedEngine;
-                }
-            } catch (e) {}
-        }
-
-        async function startAudioMeter() {
-            if (!navigator.mediaDevices?.getUserMedia) return Promise.reject('getUserMedia not supported');
-            if (audioState.context) return;
-            if (!state.isRecognizing) return;
-
-            if (state.engine === ENGINE.VOSK && voskState.stream) {
-                audioState.stream = voskState.stream;
-                if (voskState.audioContext) audioState.context = voskState.audioContext;
-            } else if (state.engine === ENGINE.WHISPER && whisperState.stream) {
-                audioState.stream = whisperState.stream;
-                if (whisperState.audioContext) audioState.context = whisperState.audioContext;
-            } else {
-                audioState.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            }
-
-            if (!audioState.context) {
-                audioState.context = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            audioState.analyser = audioState.context.createAnalyser();
-            const source = audioState.context.createMediaStreamSource(audioState.stream);
-            source.connect(audioState.analyser);
-            audioState.dataArray = new Uint8Array(audioState.analyser.frequencyBinCount);
-            drawVolume();
-        }
-
-        function stopAudioMeter() {
-            if (audioState.animationFrameId) cancelAnimationFrame(audioState.animationFrameId);
-            if (state.engine === ENGINE.WEB_SPEECH && audioState.stream) {
-                audioState.stream.getTracks().forEach(track => track.stop());
-            }
-            audioState.stream = null;
-            if (state.engine === ENGINE.WEB_SPEECH && audioState.context) {
-                audioState.context.close().then(() => { audioState.context = null; }).catch(() => { audioState.context = null; });
-            } else {
-                audioState.context = null;
-            }
-            UIElements.volumeLevel.style.transform = 'scaleX(0)';
-        }
-
-        function drawVolume() {
-            const dataArray = audioState.dataArray;
-            audioState.analyser.getByteTimeDomainData(dataArray);
-            let sumSquares = 0.0;
-            for (const amplitude of dataArray) {
-                const a = (amplitude / 128.0) - 1.0;
-                sumSquares += a * a;
-            }
-            const rms = Math.sqrt(sumSquares / dataArray.length);
-            const volume = Math.min(100, rms * 100 * CONFIG.VOLUME_MULTIPLIER);
-
-            UIElements.volumeLevel.style.transform = `scaleX(${volume / 100})`;
-
-            audioState.animationFrameId = requestAnimationFrame(drawVolume);
-        }
-
-        function formatTime(date) {
-            const h = formatTwoDigits(date.getHours());
-            const m = formatTwoDigits(date.getMinutes());
-            const s = formatTwoDigits(date.getSeconds());
-            return `[${h}:${m}:${s}]`;
-        }
-
-        function formatTwoDigits(n) {
-            return n < 10 ? '0' + n : String(n);
-        }
-
-        function createFileName(start, end) {
-            const date = `${start.getFullYear()}-${formatTwoDigits(start.getMonth() + 1)}-${formatTwoDigits(start.getDate())}`;
-            const startTimeStr = `${formatTwoDigits(start.getHours())}-${formatTwoDigits(start.getMinutes())}-${formatTwoDigits(start.getSeconds())}`;
-            const endTimeStr = `${formatTwoDigits(end.getHours())}-${formatTwoDigits(end.getMinutes())}-${formatTwoDigits(end.getSeconds())}`;
-            return `transcript_${date}_${startTimeStr}_to_${endTimeStr}.txt`;
-        }
-
-        document.addEventListener('DOMContentLoaded', init);
+      }
     })();
-    </script>
+
+    try {
+      await vosk.loadPromise;
+    } finally {
+      if (generation === vosk.loadGeneration) vosk.loadPromise = null;
+    }
+  }
+
+  async function startVosk() {
+    if (!vosk.loaded) return showToast(t().loadFirst);
+    begin();
+    state.running = true;
+    updateButtons();
+    el.engine.disabled = el.lang.disabled = true;
+    try {
+      vosk.recognizer = new vosk.model.KaldiRecognizer(SAMPLE_RATE);
+      vosk.recognizer.setWords(false);
+      vosk.recognizer.on('result', m => commit(m.result?.text));
+      vosk.recognizer.on('partialresult', m => {
+        state.interim = traditional(m.result?.partial || '');
+        render();
+      });
+      const activeRecognizer = vosk.recognizer;
+
+      vosk.session = new AudioCapture(chunk => {
+        if (!state.running || state.stopping) return;
+        if (!activeRecognizer || activeRecognizer !== vosk.recognizer) return;
+        if (!vosk.session?.context || vosk.session.context.state === 'closed') return;
+
+        try {
+          activeRecognizer.acceptWaveform(makeAudioBuffer(vosk.session.context, chunk));
+        } catch (error) {
+          console.warn('Vosk audio chunk ignored:', error);
+        }
+      }, setLevel);
+      await vosk.session.start();
+    } catch (e) {
+      console.error(e);
+      showToast(t().mic);
+      await stopVosk();
+    }
+  }
+
+  async function stopVosk() {
+    state.stopping = true;
+    state.running = false;
+    updateButtons();
+    await vosk.session?.stop();
+    vosk.session = null;
+    removeVoskRecognizer();
+    finish();
+  }
+
+  // ==================== sherpa-onnx streaming engine ====================
+  // ponytail: emscripten 的 Module 是單例，WASM 只能載入一次；換資產位置需重新整理頁面。
+  async function loadSherpa() {
+    if (sherpa.loadPromise) return sherpa.loadPromise;
+
+    const base = el.sherpaBase.value.trim();
+    if (!base) {
+      el.sherpaStatus.textContent = t().sherpaNoBase;
+      el.sherpaStatus.className = 'model-status error';
+      return;
+    }
+    if (sherpa.loaded) {
+      if (sherpa.base !== base.replace(/\/?$/, '/')) {
+        el.sherpaStatus.textContent = t().sherpaReloadNeeded;
+        el.sherpaStatus.className = 'model-status error';
+        return;
+      }
+      el.sherpaStatus.textContent = t().loaded;
+      el.sherpaStatus.className = 'model-status success';
+      return;
+    }
+
+    const dir = new URL(base.replace(/\/?$/, '/'), document.baseURI).href;
+
+    sherpa.loadPromise = (async () => {
+      el.loadSherpa.disabled = true;
+      el.sherpaProgress.classList.add('visible');
+      el.sherpaBar.classList.add('indeterminate');
+      el.sherpaStatus.textContent = t().sherpaLoading;
+      el.sherpaStatus.className = 'model-status';
+
+      try {
+        // sherpa 的 emscripten glue 讀取全域 Module，必須在載入 wasm 主檔前設定好
+        const ready = new Promise((resolve, reject) => {
+          window.Module = {
+            locateFile: path => dir + path,
+            setStatus: status => {
+              if (status) el.sherpaStatus.textContent = status;
+            },
+            onRuntimeInitialized: () => resolve(window.Module),
+            onAbort: reason => reject(new Error(String(reason)))
+          };
+        });
+
+        await loadScript(dir + 'sherpa-onnx-asr.js', 'createOnlineRecognizer');
+        await loadScript(dir + 'sherpa-onnx-wasm-main-asr.js');
+        sherpa.module = await ready;
+
+        sherpa.recognizer = window.createOnlineRecognizer(sherpa.module);
+        sherpa.loaded = true;
+        sherpa.base = dir;
+        el.sherpaStatus.textContent = t().loaded;
+        el.sherpaStatus.className = 'model-status success';
+      } catch (error) {
+        console.error('sherpa-onnx load failed:', error);
+        sherpa.loaded = false;
+        sherpa.recognizer = null;
+        sherpa.module = null;
+        el.sherpaStatus.textContent = t().loadFailed + (error.message || error);
+        el.sherpaStatus.className = 'model-status error';
+      } finally {
+        el.sherpaBar.classList.remove('indeterminate');
+        el.sherpaBar.style.width = sherpa.loaded ? '100%' : '0';
+        el.loadSherpa.disabled = false;
+        sherpa.loadPromise = null;
+      }
+    })();
+
+    return sherpa.loadPromise;
+  }
+
+  // 在音訊回呼中同步解碼。串流 Zipformer 的 RTF 遠低於 1，主執行緒吃得下。
+  // ponytail: 單執行緒同步解碼；若在低階機器上卡住 UI，再搬進 Worker。
+  function sherpaDecode(sessionId) {
+    if (sessionId !== sherpa.sessionId || !sherpa.recognizer || !sherpa.stream) return;
+
+    while (sherpa.recognizer.isReady(sherpa.stream)) {
+      sherpa.recognizer.decode(sherpa.stream);
+    }
+
+    const partial = (sherpa.recognizer.getResult(sherpa.stream)?.text || '').trim();
+
+    if (sherpa.recognizer.isEndpoint(sherpa.stream)) {
+      sherpa.recognizer.reset(sherpa.stream);
+      if (partial) {
+        commit(partial);
+        return;
+      }
+    }
+    state.interim = traditional(partial);
+    render();
+  }
+
+  async function startSherpa() {
+    if (!sherpa.loaded || !sherpa.recognizer) return showToast(t().loadFirst);
+
+    begin();
+    state.running = true;
+    state.stopping = false;
+    sherpa.sessionId += 1;
+    const sessionId = sherpa.sessionId;
+    updateButtons();
+    el.engine.disabled = el.lang.disabled = true;
+
+    try {
+      sherpa.stream = sherpa.recognizer.createStream();
+      sherpa.session = new AudioCapture(chunk => {
+        if (!state.running || state.stopping) return;
+        if (sessionId !== sherpa.sessionId || !sherpa.stream) return;
+        try {
+          sherpa.stream.acceptWaveform(SAMPLE_RATE, chunk);
+          sherpaDecode(sessionId);
+        } catch (error) {
+          console.warn('sherpa audio chunk ignored:', error);
+        }
+      }, setLevel);
+      await sherpa.session.start();
+    } catch (error) {
+      console.error(error);
+      showToast(t().mic);
+      await stopSherpa();
+    }
+  }
+
+  async function stopSherpa() {
+    if (state.stopping) return;
+    state.stopping = true;
+    state.running = false;
+    updateButtons();
+
+    const sessionId = sherpa.sessionId;
+    try {
+      if (sherpa.stream && sherpa.recognizer) {
+        // 補 0.4 秒靜音，讓模型吐出最後一段尚未收尾的語音
+        sherpa.stream.acceptWaveform(SAMPLE_RATE, new Float32Array(Math.round(SAMPLE_RATE * 0.4)));
+        sherpa.stream.inputFinished();
+        while (sessionId === sherpa.sessionId && sherpa.recognizer.isReady(sherpa.stream)) {
+          sherpa.recognizer.decode(sherpa.stream);
+        }
+        commit(sherpa.recognizer.getResult(sherpa.stream)?.text || '');
+      }
+    } catch (error) {
+      console.warn('sherpa flush failed:', error);
+    } finally {
+      try { sherpa.stream?.free(); } catch (error) { console.warn(error); }
+      sherpa.stream = null;
+      await sherpa.session?.stop();
+      sherpa.session = null;
+      finish();
+    }
+  }
+
+  // ==================== Whisper VAD and offline engine ====================
+  function createVad() {
+    return {
+      speaking: false, silence: 0, speech: 0,
+      pre: [], audio: [], samples: 0, threshold: +el.vad.value
+    };
+  }
+
+  function vadPush(v, chunk, rms) {
+    const ms = chunk.length / SAMPLE_RATE * 1000;
+    v.pre.push(chunk);
+    let preN = v.pre.reduce((n, x) => n + x.length, 0);
+    while (preN > SAMPLE_RATE * .4) {
+      preN -= v.pre[0].length;
+      v.pre.shift();
+    }
+    if (rms >= v.threshold) {
+      if (!v.speaking) {
+        v.speaking = true;
+        v.audio = [...v.pre];
+        v.samples = v.audio.reduce((n, x) => n + x.length, 0);
+      }
+      v.silence = 0;
+      v.speech += ms;
+      v.audio.push(chunk);
+      v.samples += chunk.length;
+    } else if (v.speaking) {
+      v.silence += ms;
+      v.audio.push(chunk);
+      v.samples += chunk.length;
+      if (v.silence >= 800 || v.samples >= SAMPLE_RATE * 15) {
+        const audio = concat(v.audio, v.samples);
+        const valid = v.speech >= 800;
+        v.speaking = false;
+        v.silence = v.speech = v.samples = 0;
+        v.audio = [];
+        return valid ? audio : null;
+      }
+    }
+    return null;
+  }
+
+  function vadFlush(v) {
+    if (v.speaking && v.speech >= 800) {
+      const x = concat(v.audio, v.samples);
+      v.speaking = false;
+      v.audio = [];
+      v.samples = 0;
+      return x;
+    }
+    return null;
+  }
+
+  function concat(parts, n) {
+    const out = new Float32Array(n);
+    let p = 0;
+    for (const x of parts) {
+      out.set(x, p);
+      p += x.length;
+    }
+    return out;
+  }
+
+  async function loadWhisper() {
+    if (whisper.loadPromise) return whisper.loadPromise;
+    const generation = ++whisper.loadGeneration;
+
+    whisper.loadPromise = (async () => {
+      el.loadWhisper.disabled = true;
+      el.whisperProgress.classList.add('visible');
+      el.whisperBar.classList.add('indeterminate');
+      el.whisperStatus.textContent = t().whisperLoading;
+      el.whisperStatus.className = 'model-status';
+
+      let candidatePipeline = null;
+      let candidateDevice = null;
+
+      try {
+        whisper.module ||= await import(CDN.transformers);
+        whisper.module.env.allowLocalModels = false;
+        whisper.module.env.useBrowserCache = true;
+
+        const modelName = WHISPER_MODELS[el.whisperModel.value];
+        if (whisper.pipe && whisper.model === modelName) {
+          el.whisperStatus.textContent = `${t().loaded}（${whisper.device}）`;
+          el.whisperStatus.className = 'model-status success';
+          return;
+        }
+
+        if (whisper.drainPromise || whisper.queue.length > 0) await waitForWhisperDrain();
+
+        const previousPipeline = whisper.pipe;
+        whisper.pipe = null;
+        whisper.model = null;
+        whisper.device = null;
+        await disposeWhisperPipeline(previousPipeline);
+
+        if (generation !== whisper.loadGeneration) return;
+
+        if (navigator.gpu) {
+          try {
+            candidatePipeline = await whisper.module.pipeline(
+              'automatic-speech-recognition', modelName, { device: 'webgpu', dtype: 'q4' });
+            candidateDevice = 'WebGPU';
+          } catch (error) {
+            console.warn('WebGPU pipeline failed; falling back to WASM:', error);
+          }
+        }
+
+        if (!candidatePipeline) {
+          candidatePipeline = await whisper.module.pipeline(
+            'automatic-speech-recognition', modelName, { device: 'wasm', dtype: 'q8' });
+          candidateDevice = 'WASM';
+        }
+
+        if (generation !== whisper.loadGeneration) {
+          await disposeWhisperPipeline(candidatePipeline);
+          return;
+        }
+
+        whisper.pipe = candidatePipeline;
+        candidatePipeline = null;
+        whisper.model = modelName;
+        whisper.device = candidateDevice;
+        el.whisperStatus.textContent = `${t().loaded}（${whisper.device}）`;
+        el.whisperStatus.className = 'model-status success';
+        if (state.engine === 'whisper') el.statusRuntime.textContent = whisper.device;
+      } catch (error) {
+        console.error('Whisper model load failed:', error);
+        await disposeWhisperPipeline(candidatePipeline);
+
+        if (generation === whisper.loadGeneration) {
+          whisper.pipe = null;
+          whisper.model = null;
+          whisper.device = null;
+          el.whisperStatus.textContent = t().loadFailed + (error.message || error);
+          el.whisperStatus.className = 'model-status error';
+        }
+      } finally {
+        if (generation === whisper.loadGeneration) {
+          el.whisperBar.classList.remove('indeterminate');
+          el.whisperBar.style.width = whisper.pipe ? '100%' : '0';
+          el.loadWhisper.disabled = false;
+        }
+      }
+    })();
+
+    try {
+      await whisper.loadPromise;
+    } finally {
+      if (generation === whisper.loadGeneration) whisper.loadPromise = null;
+    }
+  }
+
+  function enqueueWhisperAudio(audio) {
+    whisper.queue.push({ audio, language: el.lang.value, sessionId: whisper.sessionId });
+    void processWhisperQueue();
+  }
+
+  function processWhisperQueue() {
+    if (whisper.drainPromise) return whisper.drainPromise;
+    const processingSessionId = whisper.sessionId;
+
+    whisper.drainPromise = (async () => {
+      whisper.busy = true;
+      try {
+        while (whisper.queue.length > 0) {
+          const job = whisper.queue.shift();
+          if (!job || job.sessionId !== processingSessionId) continue;
+
+          el.statusState.textContent = t().processing;
+          try {
+            const output = await whisper.pipe(job.audio, {
+              language: LANG[job.language],
+              task: 'transcribe',
+              chunk_length_s: 15,
+              stride_length_s: 2
+            });
+            if (job.sessionId === whisper.sessionId) commit(output?.text || '');
+          } catch (error) {
+            console.error('Whisper inference failed:', error);
+            showToast(t().whisperFailed + (error.message || error));
+            const msg = String(error?.message || '').toLowerCase();
+            if (msg.includes('device lost') || msg.includes('webgpu') || msg.includes('oom')) {
+              whisper.pipe = null;
+              whisper.model = null;
+              el.whisperStatus.textContent = t().whisperDeviceLost;
+              el.whisperStatus.className = 'model-status error';
+            }
+          }
+        }
+      } finally {
+        whisper.busy = false;
+        whisper.drainPromise = null;
+        if (state.running) el.statusState.textContent = t().listening;
+        if (whisper.queue.length > 0) void processWhisperQueue();
+      }
+    })();
+
+    return whisper.drainPromise;
+  }
+
+  async function waitForWhisperDrain() {
+    while (whisper.drainPromise || whisper.queue.length > 0) {
+      await (whisper.drainPromise || processWhisperQueue());
+    }
+  }
+
+  async function startWhisper() {
+    const selectedModel = WHISPER_MODELS[el.whisperModel.value];
+    if (!whisper.pipe || whisper.model !== selectedModel) return showToast(t().loadFirst);
+
+    if (whisper.drainPromise || whisper.queue.length > 0) {
+      state.stopping = true;
+      updateButtons();
+      el.statusState.textContent = t().processing;
+
+      try {
+        await waitForWhisperDrain();
+      } catch (error) {
+        console.error('Failed to drain previous Whisper session:', error);
+        showToast(t().whisperBusy);
+        state.stopping = false;
+        updateButtons();
+        return;
+      }
+      state.stopping = false;
+    }
+
+    begin();
+    state.running = true;
+    state.stopping = false;
+    whisper.sessionId += 1;
+    whisper.queue = [];
+    updateButtons();
+    el.engine.disabled = el.lang.disabled = true;
+
+    const vad = createVad();
+    whisper.vad = vad;
+
+    try {
+      whisper.session = new AudioCapture((chunk, rms) => {
+        if (!state.running || state.stopping) return;
+        const utterance = vadPush(vad, chunk, rms);
+        state.interim = vad.speaking ? t().capturing : '';
+        render();
+        if (utterance) enqueueWhisperAudio(utterance);
+      }, setLevel);
+      await whisper.session.start();
+    } catch (error) {
+      console.error(error);
+      showToast(t().mic);
+      await stopWhisper();
+    }
+  }
+
+  async function stopWhisper() {
+    if (state.stopping) return;
+    state.stopping = true;
+    state.running = false;
+    updateButtons();
+
+    const finalAudio = whisper.vad ? vadFlush(whisper.vad) : null;
+    if (finalAudio) enqueueWhisperAudio(finalAudio);
+
+    try {
+      await whisper.session?.stop();
+    } catch (error) {
+      console.warn('Whisper audio session cleanup failed:', error);
+    } finally {
+      whisper.session = null;
+    }
+
+    await waitForWhisperDrain();
+    finish();
+  }
+
+  // ==================== Web Speech API engine ====================
+  function clearWebRestartTimer() {
+    if (state.restartTimer) {
+      clearTimeout(state.restartTimer);
+      state.restartTimer = null;
+    }
+  }
+
+  function initWebSpeech() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => { state.webRecognitionActive = true; };
+
+    recognition.onresult = event => {
+      state.interim = '';
+      let finalText = '';
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0].transcript;
+        if (event.results[index].isFinal) finalText += transcript + ' ';
+        else state.interim += transcript;
+      }
+
+      if (finalText.trim()) commit(finalText);
+      else render();
+    };
+
+    recognition.onerror = event => {
+      console.error('Web Speech error:', event);
+      state.webRecognitionActive = false;
+
+      if (['not-allowed', 'service-not-allowed', 'network', 'audio-capture'].includes(event.error)) {
+        state.manualStop = true;
+        clearWebRestartTimer();
+        setLevel(0);
+
+        if (event.error === 'network') showToast(t().netError);
+        else if (event.error === 'audio-capture') showToast(t().micBusy);
+        else showToast(t().mic);
+      }
+    };
+
+    recognition.onend = () => {
+      state.webRecognitionActive = false;
+      clearWebRestartTimer();
+
+      if (state.running && !state.manualStop) {
+        const scheduledGeneration = state.webGeneration;
+
+        state.restartTimer = setTimeout(() => {
+          state.restartTimer = null;
+          const isCurrentGeneration = scheduledGeneration === state.webGeneration;
+          const shouldRestart = state.running && !state.manualStop && !state.webRecognitionActive;
+          if (!isCurrentGeneration || !shouldRestart) return;
+
+          try {
+            recognition.start();
+          } catch (error) {
+            if (error?.name !== 'InvalidStateError') console.error('Web Speech restart failed:', error);
+          }
+        }, WEB_RESTART_DELAY);
+      } else {
+        setLevel(0);
+        finish();
+      }
+    };
+
+    state.recognition = recognition;
+  }
+
+  function startWeb() {
+    if (!state.recognition) return showToast(t().noWebSpeech);
+
+    clearWebRestartTimer();
+    state.webGeneration += 1;
+    state.webRecognitionActive = false;
+
+    begin();
+    state.running = true;
+    state.manualStop = false;
+    state.recognition.lang = el.lang.value;
+    el.engine.disabled = el.lang.disabled = true;
+    updateButtons();
+    setLevel(0);
+
+    try {
+      state.recognition.start();
+    } catch (error) {
+      console.error('Web Speech start failed:', error);
+      state.manualStop = true;
+      setLevel(0);
+      finish();
+    }
+  }
+
+  function stopWeb() {
+    state.manualStop = true;
+    state.stopping = true;
+    state.webGeneration += 1;
+    clearWebRestartTimer();
+    updateButtons();
+
+    try {
+      if (state.webRecognitionActive) state.recognition.stop();
+      else { setLevel(0); finish(); }
+    } catch (error) {
+      console.warn('Web Speech stop failed:', error);
+      setLevel(0);
+      finish();
+    }
+  }
+
+  const ENGINES = {
+    vosk: { start: startVosk, stop: stopVosk },
+    sherpa: { start: startSherpa, stop: stopSherpa },
+    whisper: { start: startWhisper, stop: stopWhisper },
+    webspeech: { start: startWeb, stop: stopWeb }
+  };
+
+  async function toggle() {
+    if (state.stopping) return;
+    const engine = ENGINES[state.engine] || ENGINES.webspeech;
+    await (state.running ? engine.stop() : engine.start());
+  }
+
+  // ==================== UI, preferences, export ====================
+  function setUi(lang) {
+    state.ui = lang;
+    const d = T[lang];
+    document.documentElement.lang = lang === 'zh' ? 'zh-TW' : 'en';
+    el.title.textContent = d.title;
+    el.toggle.textContent = d.toggleBtn;
+    el.placeholder.textContent = d.placeholder;
+    el.copy.textContent = d.copy;
+    el.export.textContent = d.export;
+    el.clear.textContent = d.clear;
+    el.loadVosk.textContent = el.loadSherpa.textContent = el.loadWhisper.textContent = d.loadModel;
+
+    for (const key of [
+      'engineLabel', 'langLabel', 'optWebspeech', 'optVosk', 'optSherpa', 'optWhisper',
+      'voskSourceLabel', 'voskModelLabel', 'voskFileLabel', 'optVoskBuiltin', 'optVoskFile',
+      'optVoskUrl', 'sherpaBaseLabel', 'whisperModelLabel', 'vadLabel', 'optVadHigh',
+      'optVadMid', 'optVadLow', 'statusEngineLabel', 'statusRuntimeLabel',
+      'statusPrivacyLabel', 'statusStateLabel', 'privacySummary',
+      'enginesTitle', 'riskTitle', 'privacyConclusion'
+    ]) {
+      $(key).textContent = d[key];
+    }
+    $('howItWorksText').textContent = d.howItWorks;
+    $('voskHint').innerHTML = d.voskHint;
+    $('sherpaHint').innerHTML = d.sherpaHint;
+    $('whisperHint').innerHTML = d.whisperHint;
+    $('enginesList').innerHTML = d.engines.map(x => `<li>${x}</li>`).join('');
+    $('riskList').innerHTML = d.risks.map(x => `<li>${x}</li>`).join('');
+
+    updateEngine();
+    updateButtons();
+    save();
+  }
+
+  function save() {
+    try {
+      localStorage.setItem('stt-pref', JSON.stringify({
+        ui: state.ui,
+        engine: el.engine.value,
+        lang: el.lang.value,
+        whisper: el.whisperModel.value,
+        sherpaBase: el.sherpaBase.value.trim()
+      }));
+    } catch {}
+  }
+
+  function load() {
+    try {
+      const p = JSON.parse(localStorage.getItem('stt-pref') || '{}');
+      if (p.engine) el.engine.value = p.engine;
+      if (p.lang) el.lang.value = p.lang;
+      if (p.whisper) el.whisperModel.value = p.whisper;
+      if (p.sherpaBase) el.sherpaBase.value = p.sherpaBase;
+      state.ui = p.ui || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
+    } catch {}
+  }
+
+  el.engine.onchange = updateEngine;
+  el.lang.onchange = save;
+  el.sherpaBase.onchange = save;
+  el.whisperModel.onchange = () => {
+    el.whisperStatus.textContent = t().modelChanged;
+    el.whisperStatus.className = 'model-status';
+    save();
+  };
+  el.voskLang.onchange = () => {
+    vosk.loaded = false;
+    el.voskStatus.textContent = t().modelChanged;
+    el.voskStatus.className = 'model-status';
+  };
+  el.voskSource.onchange = () => {
+    vosk.loaded = false;
+    el.voskStatus.textContent = t().sourceChanged;
+    el.voskStatus.className = 'model-status';
+    const s = el.voskSource.value;
+    el.voskBuiltinRow.hidden = s !== 'builtin';
+    el.voskFileRow.hidden = s !== 'file';
+    el.voskUrlRow.hidden = s !== 'url';
+  };
+  el.control.onclick = toggle;
+  el.loadVosk.onclick = loadVosk;
+  el.loadSherpa.onclick = loadSherpa;
+  el.loadWhisper.onclick = loadWhisper;
+  el.toggle.onclick = () => setUi(state.ui === 'zh' ? 'en' : 'zh');
+
+  el.clear.onclick = () => {
+    if (state.running || state.stopping || whisper.drainPromise) return showToast(t().busyClear);
+
+    clearWebRestartTimer();
+    removeVoskRecognizer();
+    state.segments = [];
+    state.interim = '';
+    state.start = null;
+    state.end = null;
+    state.manualStop = false;
+    state.webRecognitionActive = false;
+    whisper.queue = [];
+    whisper.vad = null;
+
+    el.placeholder.textContent = t().placeholder;
+    setLevel(0);
+    render();
+    requestAnimationFrame(() => { el.container.scrollTop = 0; });
+    updateButtons();
+  };
+
+  el.copy.onclick = async () => {
+    const transcriptText = getEffectiveTranscriptText('\n');
+    if (!transcriptText) return showToast(t().nothingToCopy);
+    try {
+      await navigator.clipboard.writeText(transcriptText);
+      showToast(t().copied);
+    } catch (error) {
+      console.error('Clipboard write failed:', error);
+      showToast(t().copyFailed);
+    }
+  };
+
+  el.export.onclick = () => {
+    const transcriptText = getEffectiveTranscriptText('\r\n');
+    if (!transcriptText) return showToast(t().nothingToExport);
+
+    const blob = new Blob(['﻿' + transcriptText], { type: 'text/plain;charset=utf-8' });
+    const anchor = document.createElement('a');
+    const startedAt = state.start || new Date();
+    const objectUrl = URL.createObjectURL(blob);
+
+    anchor.href = objectUrl;
+    anchor.download = `transcript_${startedAt.toISOString().slice(0, 10)}_${stamp(startedAt).slice(1, -1).replaceAll(':', '-')}.txt`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 500);
+  };
+
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && e.target === document.body) {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  window.addEventListener('beforeunload', event => {
+    if (state.running) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+
+  load();
+  initWebSpeech();
+  setUi(state.ui);
+  render();
+})();
+  </script>
 </body>
 </html>
