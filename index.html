@@ -215,7 +215,7 @@
 
     <section class="panel engine-config" id="sherpaConfig">
       <div class="row"><label for="sherpaBaseUrl" id="sherpaBaseLabel">資產位置：</label><input id="sherpaBaseUrl" type="text" value="https://huggingface.co/cormort/sherpa-zh-en-streaming/resolve/main/sherpa/" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/sherpa/"></div>
-      <div class="row"><button class="action" id="loadSherpaBtn" type="button">載入模型</button></div>
+      <div class="row"><button class="action" id="loadSherpaBtn" type="button">載入模型</button><button class="action" id="clearSherpaCacheBtn" type="button">清除已快取模型</button></div>
       <div class="progress" id="sherpaProgress"><div id="sherpaProgressBar"></div></div><div class="model-status" id="sherpaStatus"></div>
       <p class="hint" id="sherpaHint"></p>
     </section>
@@ -271,6 +271,8 @@
     'ko-KR': 'ko', 'es-ES': 'es', 'fr-FR': 'fr', 'de-DE': 'de'
   };
   const SAMPLE_RATE = 16000;
+  const SHERPA_DATA_FILE = 'sherpa-onnx-wasm-main-asr.data';
+  const SHERPA_CACHE = 'sherpa-onnx-model-v1';
   const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   const WEB_RESTART_DELAY = IS_MOBILE ? 200 : 500;
 
@@ -288,6 +290,7 @@
     voskFile: $('voskModelFile'), voskUrl: $('voskModelUrl'), loadVosk: $('loadVoskBtn'),
     voskProgress: $('voskProgress'), voskBar: $('voskProgressBar'), voskStatus: $('voskStatus'),
     sherpaConfig: $('sherpaConfig'), sherpaBase: $('sherpaBaseUrl'), loadSherpa: $('loadSherpaBtn'),
+    clearSherpaCache: $('clearSherpaCacheBtn'),
     sherpaProgress: $('sherpaProgress'), sherpaBar: $('sherpaProgressBar'), sherpaStatus: $('sherpaStatus'),
     whisperConfig: $('whisperConfig'), whisperModel: $('whisperModelSelect'), vad: $('vadSensitivity'),
     loadWhisper: $('loadWhisperBtn'), whisperProgress: $('whisperProgress'), whisperBar: $('whisperProgressBar'),
@@ -335,12 +338,17 @@
       whisperLoading: '正在釋放舊 Pipeline 並載入 Whisper 模型…',
       sherpaLoading: '正在載入 sherpa-onnx WASM 與模型（約 212 MB，之後由瀏覽器快取）…',
       sherpaDownloading: '正在下載模型',
+      sherpaFromCache: '已從本機快取載入模型',
+      sherpaClearCache: '清除已快取模型',
+      sherpaCacheCleared: '已清除快取模型，重新整理頁面後會重新下載。',
+      sherpaCacheEmpty: '沒有已快取的模型。',
+      sherpaCacheFailed: '寫入快取失敗（可能是儲存空間不足），本次仍可使用，但下次需重新下載。',
       sherpaNoBase: '請先填入 sherpa 資產位置（sherpa-onnx-asr.js 所在目錄）。',
       sherpaReloadNeeded: 'sherpa WASM 已載入，變更資產位置需重新整理頁面。',
       webNotice: 'Web Speech API 可能將音訊傳送至瀏覽器或語音服務供應商，請勿處理機密或敏感資料。',
       localNotice: '語音辨識在本機執行。外部程式與模型若尚未快取，載入時仍會連線下載。',
       voskHint: '內建模型路徑為 <code>models/vosk-model-small-cn-0.22.zip</code> 與 <code>models/vosk-model-small-en-us-0.15.zip</code>。也可自行下載其他模型：<a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a>',
-      sherpaHint: '填入放置 <code>sherpa-onnx-asr.js</code>、<code>sherpa-onnx-wasm-main-asr.js</code>、<code>.wasm</code> 與 <code>.data</code> 的目錄網址（結尾需含 <code>/</code>），或用相對路徑 <code>sherpa/</code>。模型為中英雙語串流 Zipformer，辨識語言由模型決定，與上方語言選單無關。',
+      sherpaHint: '填入放置 <code>sherpa-onnx-asr.js</code>、<code>sherpa-onnx-wasm-main-asr.js</code>、<code>.wasm</code> 與 <code>.data</code> 的目錄網址（結尾需含 <code>/</code>），或用相對路徑 <code>sherpa/</code>。模型為中英雙語串流 Zipformer，辨識語言由模型決定，與上方語言選單無關。首次載入約 199 MB，之後存於瀏覽器 Cache Storage，重開頁面不需重抓。',
       whisperHint: 'Whisper 使用停頓分句。首次載入會下載模型並使用瀏覽器快取；WebGPU 不可用時自動改用 WASM。停止辨識時會等待最後一句處理完成。',
       privacySummary: '使用須知與隱私聲明',
       howItWorks: '本工具提供四種語音辨識引擎，音訊的處理位置依引擎而不同，請依內容敏感度選擇：',
@@ -397,12 +405,17 @@
       whisperLoading: 'Releasing previous pipeline and loading Whisper…',
       sherpaLoading: 'Loading sherpa-onnx WASM and model (~212 MB, cached afterwards)…',
       sherpaDownloading: 'Downloading model',
+      sherpaFromCache: 'Model loaded from local cache',
+      sherpaClearCache: 'Clear cached model',
+      sherpaCacheCleared: 'Cached model cleared. It will download again after a reload.',
+      sherpaCacheEmpty: 'No cached model found.',
+      sherpaCacheFailed: 'Caching failed (likely out of storage). Usable now, but it will download again next time.',
       sherpaNoBase: 'Enter the sherpa assets URL (the directory holding sherpa-onnx-asr.js).',
       sherpaReloadNeeded: 'sherpa WASM already loaded. Reload the page to change the assets URL.',
       webNotice: 'Web Speech API may send audio to the browser or speech service provider. Do not use it for sensitive information.',
       localNotice: 'Recognition runs locally. External libraries and models are still downloaded if not cached.',
       voskHint: 'Built-in models: <code>models/vosk-model-small-cn-0.22.zip</code> and <code>models/vosk-model-small-en-us-0.15.zip</code>. More models: <a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a>',
-      sherpaHint: 'Enter the directory URL holding <code>sherpa-onnx-asr.js</code>, <code>sherpa-onnx-wasm-main-asr.js</code>, the <code>.wasm</code> and <code>.data</code> files (trailing <code>/</code> required), or the relative path <code>sherpa/</code>. The model is a bilingual zh-en streaming Zipformer; the language selector above does not apply.',
+      sherpaHint: 'Enter the directory URL holding <code>sherpa-onnx-asr.js</code>, <code>sherpa-onnx-wasm-main-asr.js</code>, the <code>.wasm</code> and <code>.data</code> files (trailing <code>/</code> required), or the relative path <code>sherpa/</code>. The model is a bilingual zh-en streaming Zipformer; the language selector above does not apply. The first load fetches ~199 MB, then keeps it in Cache Storage so reopening the page needs no re-download.',
       whisperHint: 'Whisper segments on pauses. The model downloads once and is cached by the browser; it falls back to WASM when WebGPU is unavailable. Stopping waits for the final phrase.',
       privacySummary: 'Usage and privacy',
       howItWorks: 'This tool offers four recognition engines. Where the audio is processed depends on the engine — choose according to how sensitive the content is:',
@@ -871,6 +884,85 @@
   }
 
   // ==================== sherpa-onnx streaming engine ====================
+  function setSherpaProgress(loaded, total) {
+    const mb = n => (n / 1048576).toFixed(1);
+    if (total) {
+      el.sherpaBar.classList.remove('indeterminate');
+      el.sherpaBar.style.width = `${(loaded / total * 100).toFixed(1)}%`;
+      el.sherpaStatus.textContent =
+        `${t().sherpaDownloading} ${mb(loaded)} / ${mb(total)} MB（${(loaded / total * 100).toFixed(1)}%）`;
+    } else {
+      el.sherpaStatus.textContent = `${t().sherpaDownloading} ${mb(loaded)} MB`;
+    }
+  }
+
+  // 回傳 .data 的 ArrayBuffer：優先讀 Cache Storage，沒有才下載並存起來。
+  // ponytail: 快取失敗（配額不足、非安全環境）就退回純下載，功能不受影響。
+  async function fetchSherpaPackage(url) {
+    let cache = null;
+    try {
+      cache = await caches.open(SHERPA_CACHE);
+    } catch (error) {
+      console.warn('Cache Storage unavailable:', error);
+    }
+
+    if (cache) {
+      const hit = await cache.match(url);
+      if (hit) {
+        el.sherpaStatus.textContent = t().sherpaFromCache;
+        el.sherpaBar.classList.remove('indeterminate');
+        el.sherpaBar.style.width = '100%';
+        return hit.arrayBuffer();
+      }
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${response.status}: ${url}`);
+
+    const total = Number(response.headers.get('Content-Length')) || 0;
+    const reader = response.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      setSherpaProgress(loaded, total);
+    }
+
+    const bytes = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    if (cache) {
+      try {
+        await cache.put(url, new Response(bytes, {
+          headers: { 'Content-Type': 'application/octet-stream' }
+        }));
+      } catch (error) {
+        console.warn('Caching the sherpa package failed:', error);
+        showToast(t().sherpaCacheFailed);
+      }
+    }
+
+    return bytes.buffer;
+  }
+
+  async function clearSherpaCache() {
+    try {
+      const deleted = await caches.delete(SHERPA_CACHE);
+      showToast(deleted ? t().sherpaCacheCleared : t().sherpaCacheEmpty);
+    } catch (error) {
+      console.error('Clearing the sherpa cache failed:', error);
+      showToast(t().sherpaCacheFailed);
+    }
+  }
+
   // ponytail: emscripten 的 Module 是單例，WASM 只能載入一次；換資產位置需重新整理頁面。
   async function loadSherpa() {
     if (sherpa.loadPromise) return sherpa.loadPromise;
@@ -902,24 +994,26 @@
       el.sherpaStatus.className = 'model-status';
 
       try {
+        await loadScript(dir + 'sherpa-onnx-asr.js', 'createOnlineRecognizer');
+
+        // 自行取得 199 MB 的 .data 並存進 Cache Storage，再用 getPreloadedPackage
+        // 交給 emscripten，避免每次開頁面重抓（HF 沒給 Cache-Control，
+        // 這個預建包也沒開 --use-preload-cache）
+        const packageData = await fetchSherpaPackage(dir + SHERPA_DATA_FILE);
+
         // sherpa 的 emscripten glue 讀取全域 Module，必須在載入 wasm 主檔前設定好
         const ready = new Promise((resolve, reject) => {
           window.Module = {
             locateFile: path => dir + path,
+            getPreloadedPackage: () => packageData,
             setStatus: status => {
-              if (!status) return;
-              // emscripten 回的是原始位元組數，換成 MB 與百分比
-              const m = status.match(/Downloading data\.\.\. \((\d+)\/(\d+)\)/);
-              el.sherpaStatus.textContent = m
-                ? `${t().sherpaDownloading} ${(m[1] / 1048576).toFixed(1)} / ${(m[2] / 1048576).toFixed(1)} MB（${(m[1] / m[2] * 100).toFixed(1)}%）`
-                : status;
+              if (status) el.sherpaStatus.textContent = status;
             },
             onRuntimeInitialized: () => resolve(window.Module),
             onAbort: reason => reject(new Error(String(reason)))
           };
         });
 
-        await loadScript(dir + 'sherpa-onnx-asr.js', 'createOnlineRecognizer');
         await loadScript(dir + 'sherpa-onnx-wasm-main-asr.js');
         sherpa.module = await ready;
 
@@ -1447,6 +1541,7 @@
     el.export.textContent = d.export;
     el.clear.textContent = d.clear;
     el.loadVosk.textContent = el.loadSherpa.textContent = el.loadWhisper.textContent = d.loadModel;
+    el.clearSherpaCache.textContent = d.sherpaClearCache;
 
     for (const key of [
       'engineLabel', 'langLabel', 'optWebspeech', 'optVosk', 'optSherpa', 'optWhisper',
@@ -1518,6 +1613,7 @@
   el.control.onclick = toggle;
   el.loadVosk.onclick = loadVosk;
   el.loadSherpa.onclick = loadSherpa;
+  el.clearSherpaCache.onclick = clearSherpaCache;
   el.loadWhisper.onclick = loadWhisper;
   el.toggle.onclick = () => setUi(state.ui === 'zh' ? 'en' : 'zh');
 
