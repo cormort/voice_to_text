@@ -214,7 +214,7 @@
     </section>
 
     <section class="panel engine-config" id="sherpaConfig">
-      <div class="row"><label for="sherpaBaseUrl" id="sherpaBaseLabel">資產位置：</label><input id="sherpaBaseUrl" type="text" placeholder="https://huggingface.co/<user>/<repo>/resolve/main/sherpa/"></div>
+      <div class="row"><label for="sherpaBaseUrl" id="sherpaBaseLabel">資產位置：</label><input id="sherpaBaseUrl" type="text" value="https://huggingface.co/cormort/sherpa-zh-en-streaming/resolve/main/sherpa/" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/sherpa/"></div>
       <div class="row"><button class="action" id="loadSherpaBtn" type="button">載入模型</button></div>
       <div class="progress" id="sherpaProgress"><div id="sherpaProgressBar"></div></div><div class="model-status" id="sherpaStatus"></div>
       <p class="hint" id="sherpaHint"></p>
@@ -333,7 +333,8 @@
       voskFileProtocol: '瀏覽器安全限制：file:// 無法載入內建相對路徑模型，請透過 localhost 或改選本機 ZIP 檔案。',
       voskNoFile: '請選擇 ZIP 模型檔', voskNoUrl: '請輸入模型 URL',
       whisperLoading: '正在釋放舊 Pipeline 並載入 Whisper 模型…',
-      sherpaLoading: '正在載入 sherpa-onnx WASM 與模型（約 250 MB，之後由瀏覽器快取）…',
+      sherpaLoading: '正在載入 sherpa-onnx WASM 與模型（約 212 MB，之後由瀏覽器快取）…',
+      sherpaDownloading: '正在下載模型',
       sherpaNoBase: '請先填入 sherpa 資產位置（sherpa-onnx-asr.js 所在目錄）。',
       sherpaReloadNeeded: 'sherpa WASM 已載入，變更資產位置需重新整理頁面。',
       webNotice: 'Web Speech API 可能將音訊傳送至瀏覽器或語音服務供應商，請勿處理機密或敏感資料。',
@@ -394,7 +395,8 @@
       voskFileProtocol: 'Browser security: file:// cannot load the built-in relative model path. Use localhost or pick a local ZIP.',
       voskNoFile: 'Select a ZIP model file', voskNoUrl: 'Enter a model URL',
       whisperLoading: 'Releasing previous pipeline and loading Whisper…',
-      sherpaLoading: 'Loading sherpa-onnx WASM and model (~250 MB, cached afterwards)…',
+      sherpaLoading: 'Loading sherpa-onnx WASM and model (~212 MB, cached afterwards)…',
+      sherpaDownloading: 'Downloading model',
       sherpaNoBase: 'Enter the sherpa assets URL (the directory holding sherpa-onnx-asr.js).',
       sherpaReloadNeeded: 'sherpa WASM already loaded. Reload the page to change the assets URL.',
       webNotice: 'Web Speech API may send audio to the browser or speech service provider. Do not use it for sensitive information.',
@@ -905,7 +907,12 @@
           window.Module = {
             locateFile: path => dir + path,
             setStatus: status => {
-              if (status) el.sherpaStatus.textContent = status;
+              if (!status) return;
+              // emscripten 回的是原始位元組數，換成 MB 與百分比
+              const m = status.match(/Downloading data\.\.\. \((\d+)\/(\d+)\)/);
+              el.sherpaStatus.textContent = m
+                ? `${t().sherpaDownloading} ${(m[1] / 1048576).toFixed(1)} / ${(m[2] / 1048576).toFixed(1)} MB（${(m[1] / m[2] * 100).toFixed(1)}%）`
+                : status;
             },
             onRuntimeInitialized: () => resolve(window.Module),
             onAbort: reason => reject(new Error(String(reason)))
