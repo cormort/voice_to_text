@@ -78,13 +78,54 @@
       border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
       backdrop-filter: blur(10px);
     }
-    .settings { display: flex; gap: 14px; align-items: center; flex-wrap: wrap }
+    .settings { display: block }
     .field { display: flex; gap: 7px; align-items: center; flex: 1; min-width: 240px }
     label { font-weight: 700 }
     .field select, .field input {
       flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #ffffff88;
       border-radius: 9px; background: #fff; color: #222;
     }
+    .panel-label { display: block; font-weight: 700; margin: 0 0 10px }
+    .engine-cards {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+      gap: 10px; margin: 0 0 6px;
+    }
+    .engine-card {
+      display: flex; flex-direction: column; gap: 5px; text-align: left;
+      background: rgba(255, 255, 255, .12); border: 2px solid rgba(255, 255, 255, .25);
+      border-radius: 12px; padding: 12px 14px; color: #fff; cursor: pointer;
+      font: inherit; transition: transform .15s, border-color .15s, background .15s;
+    }
+    .engine-card:hover:not(:disabled) { transform: translateY(-2px); background: rgba(255, 255, 255, .2) }
+    .engine-card.active {
+      border-color: #ffe16b; background: rgba(255, 255, 255, .22);
+      box-shadow: 0 0 0 3px #ffe16b44;
+    }
+    .engine-card:disabled { opacity: .55; cursor: not-allowed }
+    .ecard-top { display: flex; justify-content: space-between; align-items: center; gap: 8px }
+    .ecard-name { font-weight: 750; font-size: 15px; line-height: 1.25 }
+    .ecard-tag { font-size: 11px; font-weight: 750; padding: 2px 8px; border-radius: 999px; white-space: nowrap }
+    .ecard-tag.local { background: #178a57; color: #fff }
+    .ecard-tag.cloud { background: #b9751e; color: #fff }
+    .ecard-desc { font-size: 12px; opacity: .88; line-height: 1.45 }
+    .quickstart {
+      margin: 10px 0 0; padding: 10px 14px; border-radius: 10px;
+      background: #10102aaa; border: 1px solid #ffffff26; font-size: 13px; line-height: 1.65;
+    }
+    .quickstart b { color: #ffe16b }
+    .quickstart code { background: #0004; padding: 1px 6px; border-radius: 5px; font-weight: 650 }
+    .moss-filezone {
+      position: relative; flex: 1; min-width: 250px; height: 62px;
+      display: flex; align-items: center; justify-content: center;
+      border: 2px dashed #ffffff66; border-radius: 10px; background: #ffffff12;
+      cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .moss-filezone.over { border-color: #ffe16b; background: #ffe16b22 }
+    .moss-filezone input[type=file] {
+      position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
+    }
+    .moss-filetext { font-size: 13px; font-weight: 700; pointer-events: none }
+    @media(max-width:720px) { .engine-cards { grid-template-columns: 1fr 1fr } }
     .engine-config { display: none }
     .engine-config.visible { display: block }
     .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px }
@@ -186,17 +227,42 @@
     <div class="meter" aria-label="麥克風音量"><div id="volumeLevel"></div></div>
 
     <section class="panel settings">
-      <div class="field"><label for="engineSelector" id="engineLabel">引擎：</label><select id="engineSelector">
+      <label id="engineLabel" class="panel-label">引擎：</label>
+      <div class="engine-cards" id="engineCards" role="radiogroup" aria-label="引擎選擇">
+        <button type="button" class="engine-card" data-engine="webspeech">
+          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
+          <span class="ecard-desc"></span>
+        </button>
+        <button type="button" class="engine-card" data-engine="vosk">
+          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+          <span class="ecard-desc"></span>
+        </button>
+        <button type="button" class="engine-card" data-engine="sherpa">
+          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+          <span class="ecard-desc"></span>
+        </button>
+        <button type="button" class="engine-card" data-engine="whisper">
+          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+          <span class="ecard-desc"></span>
+        </button>
+        <button type="button" class="engine-card" data-engine="moss">
+          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
+          <span class="ecard-desc"></span>
+        </button>
+      </div>
+      <select id="engineSelector" hidden>
         <option value="webspeech" id="optWebspeech">Web Speech API（雲端）</option>
         <option value="vosk" id="optVosk">Vosk（本機離線）</option>
         <option value="sherpa" id="optSherpa">sherpa-onnx（本機串流）</option>
         <option value="whisper" id="optWhisper">Whisper（本機 WebGPU/WASM）</option>
-      </select></div>
+        <option value="moss" id="optMoss">MOSS 會議轉寫（雲端 Space，批次）</option>
+      </select>
       <div class="field" id="languageField"><label for="languageSelector" id="langLabel">辨識語言：</label><select id="languageSelector">
         <option value="zh-TW">中文（台灣）</option><option value="zh-CN">中文（中國大陸）</option><option value="zh-HK">粵語（香港）</option>
         <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ja-JP">日本語</option>
         <option value="ko-KR">한국어</option><option value="es-ES">Español</option><option value="fr-FR">Français</option><option value="de-DE">Deutsch</option>
       </select></div>
+      <p class="quickstart" id="quickstartText"></p>
     </section>
 
     <section class="panel engine-config" id="voskConfig">
@@ -230,6 +296,22 @@
       <div class="row"><button class="action" id="loadWhisperBtn" type="button">載入模型</button></div>
       <div class="progress" id="whisperProgress"><div id="whisperProgressBar"></div></div><div class="model-status" id="whisperStatus"></div>
       <p class="hint" id="whisperHint"></p>
+    </section>
+
+    <section class="panel engine-config" id="mossConfig">
+      <div class="row"><label for="mossSpaceSelect" id="mossSpaceLabel">運算位置：</label><select id="mossSpaceSelect">
+        <option value="official" id="optMossOfficial">Hugging Face 官方 Space（較快）</option>
+        <option value="litert" id="optMossLitert">社群 LiteRT Space（回傳繁中）</option>
+      </select></div>
+      <div class="row"><label for="mossFile" id="mossFileLabel">音訊／影片檔：</label>
+        <div class="moss-filezone" id="mossFileZone">
+          <input id="mossFile" type="file" accept="audio/*,video/*">
+          <span class="moss-filetext" id="mossFileText">點選檔案或拖放到此</span>
+        </div>
+      </div>
+      <div class="row"><button class="action" id="mossRunBtn" type="button">開始轉寫</button><button class="action" id="mossSrtBtn" type="button" disabled>輸出 SRT 字幕</button></div>
+      <div class="progress" id="mossProgress"><div id="mossProgressBar"></div></div><div class="model-status" id="mossStatus"></div>
+      <p class="hint" id="mossHint"></p>
     </section>
 
     <section class="controls">
@@ -279,7 +361,7 @@
   const $ = id => document.getElementById(id);
   const el = {
     pageTitle: $('pageTitle'), title: $('mainTitle'), engine: $('engineSelector'), lang: $('languageSelector'),
-    languageField: $('languageField'),
+    languageField: $('languageField'), engineCards: $('engineCards'), quickstart: $('quickstartText'),
     control: $('controlBtn'), copy: $('copyBtn'), export: $('exportBtn'), clear: $('clearBtn'),
     placeholder: $('placeholderText'), final: $('finalText'), interim: $('interimText'),
     container: $('transcriptContainer'), volume: $('volumeLevel'), notice: $('privacyNotice'),
@@ -294,7 +376,12 @@
     sherpaProgress: $('sherpaProgress'), sherpaBar: $('sherpaProgressBar'), sherpaStatus: $('sherpaStatus'),
     whisperConfig: $('whisperConfig'), whisperModel: $('whisperModelSelect'), vad: $('vadSensitivity'),
     loadWhisper: $('loadWhisperBtn'), whisperProgress: $('whisperProgress'), whisperBar: $('whisperProgressBar'),
-    whisperStatus: $('whisperStatus')
+    whisperStatus: $('whisperStatus'),
+    mossConfig: $('mossConfig'), mossSpace: $('mossSpaceSelect'), mossFile: $('mossFile'),
+    mossFileZone: $('mossFileZone'), mossFileText: $('mossFileText'),
+    mossRun: $('mossRunBtn'), mossSrt: $('mossSrtBtn'),
+    mossProgress: $('mossProgress'), mossBar: $('mossProgressBar'),
+    mossStatus: $('mossStatus')
   };
 
   const T = {
@@ -304,6 +391,31 @@
       engineLabel: '引擎：', langLabel: '辨識語言：',
       optWebspeech: 'Web Speech API（雲端）', optVosk: 'Vosk（本機離線）',
       optSherpa: 'sherpa-onnx（本機串流）', optWhisper: 'Whisper（本機 WebGPU/WASM）',
+      optMoss: 'MOSS 會議轉寫（雲端 Space，批次）', mossSpaceLabel: '運算位置：',
+      optMossOfficial: 'Hugging Face 官方 Space（較快）', optMossLitert: '社群 LiteRT Space（回傳繁中）',
+      mossFileLabel: '音訊／影片檔：', mossRun: '開始轉寫',
+      mossUploading: '上傳中…', mossRunning: '轉寫中…（長錄音可能數分鐘，請勿關閉頁面）',
+      mossDone: '轉寫完成', mossFailed: '轉寫失敗',
+      mossPickFile: '請先選擇音訊或影片檔',
+      mossNoSegments: '模型未回傳分段，已保留原始輸出。', mossEmpty: '沒有取得任何內容。',
+      mossColdHint: '若為久未使用，Space 可能正在喚醒，請稍後重試。',
+      mossBatchMode: '批次轉寫（請用上方檔案）',
+      mossNotice: 'MOSS 為批次轉寫：整段音訊會上傳至第三方 Hugging Face Space 處理，請勿用於機密或敏感內容。',
+      mossPickHint: '點選檔案或拖放到此', mossSrt: '輸出 SRT 字幕',
+      ecards: {
+        webspeech: { name: 'Web Speech', tag: '☁️ 雲端', desc: '免下載模型，瀏覽器即時辨識' },
+        vosk: { name: 'Vosk', tag: '🔒 本機', desc: '低資源離線即時，適合舊裝置' },
+        sherpa: { name: 'sherpa-onnx', tag: '🔒 本機', desc: '真串流低延遲，中英即時字幕' },
+        whisper: { name: 'Whisper', tag: '🔒 本機', desc: '多語言最佳，WebGPU / WASM 離線' },
+        moss: { name: 'MOSS 會議轉寫', tag: '☁️ 雲端批次', desc: '整段音訊 → 時間戳 + 說話人逐字稿' }
+      },
+      quickstart: {
+        webspeech: '直接按「<b>開始辨識</b>」即可，語音會送往雲端處理。',
+        vosk: '先在上方 Vosk 面板按「<b>載入模型</b>」（內建中文約 44 MB），再按「<b>開始辨識</b>」。',
+        sherpa: '在 sherpa 面板填入資產位置後按「<b>載入模型</b>」（首次約 199 MB，之後有快取），再開始辨識。',
+        whisper: '先按「<b>載入模型</b>」（第一次會下載，依模型大小約數十 MB 起），再開始辨識；WebGPU 不可用時自動退回 WASM。',
+        moss: '把錄音或影片<b>拖放到下方面板</b>（或點選檔案），按「<b>開始轉寫</b>」；回傳含時間戳與說話人的逐字稿，可再<b>輸出 SRT 字幕</b>。'
+      },
       voskSourceLabel: '模型來源：', voskModelLabel: '模型：', voskFileLabel: '檔案：',
       optVoskBuiltin: '網站內建模型', optVoskFile: '本機模型 ZIP', optVoskUrl: '自訂 URL',
       sherpaBaseLabel: '資產位置：', whisperModelLabel: '模型：', vadLabel: '收音靈敏度：',
@@ -350,13 +462,15 @@
       voskHint: '內建模型路徑為 <code>models/vosk-model-small-cn-0.22.zip</code> 與 <code>models/vosk-model-small-en-us-0.15.zip</code>。也可自行下載其他模型：<a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a>',
       sherpaHint: '填入放置 <code>sherpa-onnx-asr.js</code>、<code>sherpa-onnx-wasm-main-asr.js</code>、<code>.wasm</code> 與 <code>.data</code> 的目錄網址（結尾需含 <code>/</code>），或用相對路徑 <code>sherpa/</code>。模型為中英雙語串流 Zipformer，辨識語言由模型決定，與上方語言選單無關。首次載入約 199 MB，之後存於瀏覽器 Cache Storage，重開頁面不需重抓。',
       whisperHint: 'Whisper 使用停頓分句。首次載入會下載模型並使用瀏覽器快取；WebGPU 不可用時自動改用 WASM。停止辨識時會等待最後一句處理完成。',
+      mossHint: '把整段會議錄音或影片丟進來，一次取回含時間戳與說話人標籤（<code>[S01]</code>、<code>[S02]</code>…）的逐字稿。<strong>音訊會上傳到公開的 Hugging Face Space</strong>，不是本機處理，請勿用於機密內容。官方 Space 較快但輸出簡體（本頁會自動轉成台灣繁中）；社群 LiteRT Space 較慢，但直接回傳繁中，且 <code>[S01]</code> 標籤每 90 秒會重新編號。單次建議 30 分鐘以內，檔案越大上傳越久。',
       privacySummary: '使用須知與隱私聲明',
-      howItWorks: '本工具提供四種語音辨識引擎，音訊的處理位置依引擎而不同，請依內容敏感度選擇：',
-      enginesTitle: '四種引擎', engines: [
+      howItWorks: '本工具提供五種語音辨識引擎，音訊的處理位置依引擎而不同，請依內容敏感度選擇：',
+      enginesTitle: '五種引擎', engines: [
         'Web Speech API：免下載模型，但音訊處理方式由瀏覽器供應商決定，可能上傳至雲端。',
         'Vosk：模型載入後在本機即時辨識，資源需求低，適合舊設備。',
         'sherpa-onnx：本機真正串流辨識，延遲最低，中英雙語，適合長時間會議即時字幕。',
-        'Whisper：本機分句辨識，多語言能力最佳，但需要較高運算資源。'
+        'Whisper：本機分句辨識，多語言能力最佳，但需要較高運算資源。',
+        'MOSS-Transcribe-Diarize：雲端 Space 的批次轉寫，能同時輸出說話人分離與時間戳，適合會後整理多人逐字稿；<strong>音訊會上傳第三方</strong>，不適合敏感內容。'
       ],
       riskTitle: '高風險場景（請勿使用 Web Speech API 模式）', risks: [
         '任何涉及<strong>商業機密</strong>或機關內部資訊的會議。',
@@ -371,6 +485,31 @@
       engineLabel: 'Engine:', langLabel: 'Language:',
       optWebspeech: 'Web Speech API (cloud)', optVosk: 'Vosk (local, offline)',
       optSherpa: 'sherpa-onnx (local, streaming)', optWhisper: 'Whisper (local, WebGPU/WASM)',
+      optMoss: 'MOSS meeting transcription (cloud Space, batch)', mossSpaceLabel: 'Compute location:',
+      optMossOfficial: 'Official Hugging Face Space (faster)', optMossLitert: 'Community LiteRT Space (returns Traditional Chinese)',
+      mossFileLabel: 'Audio / video file:', mossRun: 'Start transcription',
+      mossUploading: 'Uploading…', mossRunning: 'Transcribing… (long recordings can take minutes, keep this page open)',
+      mossDone: 'Transcription complete', mossFailed: 'Transcription failed',
+      mossPickFile: 'Choose an audio or video file first',
+      mossNoSegments: 'No segments returned; the raw output was kept.', mossEmpty: 'Nothing was returned.',
+      mossColdHint: 'If unused for a while, the Space may be waking up — try again shortly.',
+      mossBatchMode: 'Batch mode (use the file above)',
+      mossNotice: 'MOSS is batch: the whole recording is uploaded to a third-party Hugging Face Space. Do not use it for confidential or sensitive content.',
+      mossPickHint: 'Click to choose or drop a file here', mossSrt: 'Export SRT subtitles',
+      ecards: {
+        webspeech: { name: 'Web Speech', tag: '☁️ Cloud', desc: 'No model download, browser realtime' },
+        vosk: { name: 'Vosk', tag: '🔒 Local', desc: 'Low-resource offline, good for older devices' },
+        sherpa: { name: 'sherpa-onnx', tag: '🔒 Local', desc: 'True streaming, lowest latency, zh-en live captions' },
+        whisper: { name: 'Whisper', tag: '🔒 Local', desc: 'Best multilingual, offline WebGPU / WASM' },
+        moss: { name: 'MOSS Transcription', tag: '☁️ Cloud batch', desc: 'Whole recording → timestamps + speaker diarization' }
+      },
+      quickstart: {
+        webspeech: 'Press <b>Start recognition</b> — audio goes to the cloud.',
+        vosk: 'Click <b>Load model</b> in the Vosk panel first (built-in Chinese ~44 MB), then <b>Start recognition</b>.',
+        sherpa: 'Fill in the assets URL, click <b>Load model</b> (~199 MB first time, then cached), then start.',
+        whisper: 'Click <b>Load model</b> first (downloads once), then start; falls back to WASM without WebGPU.',
+        moss: '<b>Drop the recording or video</b> below (or pick a file), press <b>Start transcription</b>; you can then <b>export SRT subtitles</b>.'
+      },
       voskSourceLabel: 'Model source:', voskModelLabel: 'Model:', voskFileLabel: 'File:',
       optVoskBuiltin: 'Built-in models', optVoskFile: 'Local model ZIP', optVoskUrl: 'Custom URL',
       sherpaBaseLabel: 'Assets URL:', whisperModelLabel: 'Model:', vadLabel: 'Sensitivity:',
@@ -417,13 +556,15 @@
       voskHint: 'Built-in models: <code>models/vosk-model-small-cn-0.22.zip</code> and <code>models/vosk-model-small-en-us-0.15.zip</code>. More models: <a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a>',
       sherpaHint: 'Enter the directory URL holding <code>sherpa-onnx-asr.js</code>, <code>sherpa-onnx-wasm-main-asr.js</code>, the <code>.wasm</code> and <code>.data</code> files (trailing <code>/</code> required), or the relative path <code>sherpa/</code>. The model is a bilingual zh-en streaming Zipformer; the language selector above does not apply. The first load fetches ~199 MB, then keeps it in Cache Storage so reopening the page needs no re-download.',
       whisperHint: 'Whisper segments on pauses. The model downloads once and is cached by the browser; it falls back to WASM when WebGPU is unavailable. Stopping waits for the final phrase.',
+      mossHint: 'Drop in a whole meeting recording or video and get back a transcript with timestamps and anonymous speaker labels (<code>[S01]</code>, <code>[S02]</code>…). <strong>The audio is uploaded to a public Hugging Face Space</strong> — this is not local processing, so do not use it for confidential content. The official Space is faster but returns Simplified Chinese (this page converts it to Traditional); the community LiteRT Space is slower but returns Traditional Chinese directly, and its <code>[S01]</code> labels restart every 90 seconds. Keep single files under ~30 minutes; larger uploads take longer.',
       privacySummary: 'Usage and privacy',
-      howItWorks: 'This tool offers four recognition engines. Where the audio is processed depends on the engine — choose according to how sensitive the content is:',
-      enginesTitle: 'The four engines', engines: [
+      howItWorks: 'This tool offers five recognition engines. Where the audio is processed depends on the engine — choose according to how sensitive the content is:',
+      enginesTitle: 'The five engines', engines: [
         'Web Speech API: no model download, but the browser vendor decides how audio is handled and it may go to the cloud.',
         'Vosk: runs locally once loaded, low resource use, good for older devices.',
         'sherpa-onnx: true local streaming recognition, lowest latency, bilingual zh-en, best for live meeting captions.',
-        'Whisper: local phrase-based recognition, best multilingual quality, needs more compute.'
+        'Whisper: local phrase-based recognition, best multilingual quality, needs more compute.',
+        'MOSS-Transcribe-Diarize: batch transcription in a cloud Space with speaker diarization and timestamps, good for post-meeting multi-speaker transcripts; <strong>audio is uploaded to a third party</strong>, so not for sensitive content.'
       ],
       riskTitle: 'High-risk scenarios (do not use Web Speech API)', risks: [
         'Meetings involving <strong>business or internal confidential</strong> information.',
@@ -433,14 +574,13 @@
       privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx or Whisper. This page uses Google Analytics for visit counts only; transcripts and microphone audio are never uploaded. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
     }
   };
-  const t = () => T[state.ui];
-
   const state = {
     ui: 'zh', engine: 'webspeech', running: false, stopping: false,
     start: null, end: null, segments: [], interim: '',
     recognition: null, restartTimer: null, manualStop: false,
     webGeneration: 0, webRecognitionActive: false
   };
+  const t = () => T[state.ui];
   const vosk = {
     loaded: false, model: null, recognizer: null, session: null,
     loadPromise: null, loadGeneration: 0
@@ -589,6 +729,7 @@
     if (!value || !window.OpenCC) return value;
     // Vosk 內建中文模型與 sherpa 中英模型必定輸出簡中，語言選單對它們無效
     const forcedChinese =
+      state.engine === 'moss' ||
       state.engine === 'sherpa' ||
       (state.engine === 'vosk' && el.voskSource.value === 'builtin' && el.voskLang.value === 'cn');
     if (!forcedChinese && !el.lang.value.startsWith('zh')) return value;
@@ -628,18 +769,41 @@
       .join(lineSeparator);
   }
 
+  let renderedSegments = 0;
+  let renderedText = '';
+
   function render() {
     el.placeholder.hidden = !!(state.segments.length || state.interim);
-    el.final.textContent = state.segments.map(x => `${stamp(x.time)} ${x.text}`).join('\n');
-    el.interim.textContent = state.interim ? `\n${state.interim}` : '';
+
+    // 快取被清空或段數縮減（clear）時，重建基底文字
+    if (state.segments.length < renderedSegments) {
+      renderedSegments = 0;
+      renderedText = '';
+      el.final.textContent = '';
+    }
+    // 只 append 新段落，避免每次都重建整份逐字稿
+    if (state.segments.length > renderedSegments) {
+      const delta = state.segments.slice(renderedSegments)
+        .map(x => `${stamp(x.time)} ${x.text}`).join('\n');
+      renderedText += (renderedText ? '\n' : '') + delta;
+      renderedSegments = state.segments.length;
+      el.final.textContent = renderedText;
+    }
+
+    const interimText = state.interim ? `\n${state.interim}` : '';
+    if (el.interim.textContent !== interimText) el.interim.textContent = interimText;
 
     const hasContent = getEffectiveSegments().length > 0;
     el.copy.disabled = !hasContent;
     el.export.disabled = !hasContent;
 
-    requestAnimationFrame(() => {
-      el.container.scrollTop = el.container.scrollHeight;
-    });
+    // 只在接近底部時才自動捲動，避免打斷閱讀舊內容
+    const nearBottom = el.container.scrollHeight - el.container.scrollTop - el.container.clientHeight < 48;
+    if (nearBottom) {
+      requestAnimationFrame(() => {
+        el.container.scrollTop = el.container.scrollHeight;
+      });
+    }
   }
 
   function setLevel(rms) {
@@ -667,11 +831,25 @@
   }
 
   function updateButtons() {
-    el.control.textContent = state.stopping ? t().stopping : (state.running ? t().stop : t().start);
-    el.control.classList.toggle('listening', state.running);
-    el.control.disabled = state.stopping;
+    const batch = state.engine === 'moss';
+    el.control.textContent = batch ? t().mossBatchMode
+      : (state.stopping ? t().stopping : (state.running ? t().stop : t().start));
+    el.control.classList.toggle('listening', state.running && !batch);
+    el.control.disabled = batch || state.stopping;
     el.statusState.textContent = state.stopping ? t().processing : (state.running ? t().listening : t().idle);
     document.title = (state.running ? '● ' : '') + t().pageTitle;
+    syncEngineCards();
+  }
+
+  function syncEngineCards() {
+    const lock = el.engine.disabled || state.running || state.stopping || moss.running;
+    el.engineCards.classList.toggle('locked', lock);
+    for (const card of el.engineCards.querySelectorAll('.engine-card')) {
+      const active = card.dataset.engine === state.engine;
+      card.classList.toggle('active', active);
+      card.setAttribute('aria-pressed', active ? 'true' : 'false');
+      card.disabled = lock;
+    }
   }
 
   function updateEngine() {
@@ -679,18 +857,23 @@
     el.voskConfig.classList.toggle('visible', state.engine === 'vosk');
     el.sherpaConfig.classList.toggle('visible', state.engine === 'sherpa');
     el.whisperConfig.classList.toggle('visible', state.engine === 'whisper');
+    el.mossConfig.classList.toggle('visible', state.engine === 'moss');
     // Vosk 與 sherpa 的語言由模型決定，隱藏語言選單
-    el.languageField.style.display = (state.engine === 'vosk' || state.engine === 'sherpa') ? 'none' : '';
+    el.languageField.style.display = (state.engine === 'vosk' || state.engine === 'sherpa' || state.engine === 'moss') ? 'none' : '';
 
-    const local = state.engine !== 'webspeech';
-    el.notice.textContent = local ? t().localNotice : t().webNotice;
+    const local = state.engine !== 'webspeech' && state.engine !== 'moss';
+    const icon = local ? '🔒 ' : '☁️ ';
+    el.notice.textContent = icon + (state.engine === 'moss' ? t().mossNotice : (local ? t().localNotice : t().webNotice));
     el.notice.className = 'notice ' + (local ? 'local' : 'partial');
-    el.statusEngine.textContent = { webspeech: 'Web Speech API', vosk: 'Vosk', sherpa: 'sherpa-onnx', whisper: 'Whisper' }[state.engine];
+    el.statusEngine.textContent = { webspeech: 'Web Speech API', vosk: 'Vosk', sherpa: 'sherpa-onnx', whisper: 'Whisper', moss: 'MOSS-Transcribe-Diarize' }[state.engine];
     el.statusRuntime.textContent = {
       webspeech: t().browserService, vosk: 'WASM / CPU', sherpa: 'WASM / CPU',
-      whisper: whisper.device || 'WebGPU / WASM'
+      whisper: whisper.device || 'WebGPU / WASM',
+      moss: el.mossSpace.value === 'litert' ? 'HF Space / LiteRT' : 'HF Space / CPU'
     }[state.engine];
-    el.statusPrivacy.textContent = local ? t().localProcessing : t().cloudProcessing;
+    el.statusPrivacy.textContent = icon + (local ? t().localProcessing : t().cloudProcessing);
+    el.quickstart.innerHTML = t().quickstart[state.engine] || '';
+    updateButtons();
     save();
   }
 
@@ -1280,8 +1463,10 @@
         }
 
         if (!candidatePipeline) {
+          // wasm 上 q8 的 decoder 量化在 transformers.js 4.2.0 會崩（Missing required scale），
+          // 且失敗載入會毒化瀏覽器模型快取；退回路徑必須用 q4
           candidatePipeline = await whisper.module.pipeline(
-            'automatic-speech-recognition', modelName, { device: 'wasm', dtype: 'q8' });
+            'automatic-speech-recognition', modelName, { device: 'wasm', dtype: 'q4' });
           candidateDevice = 'WASM';
         }
 
@@ -1348,7 +1533,8 @@
               chunk_length_s: 15,
               stride_length_s: 2
             });
-            if (job.sessionId === whisper.sessionId) commit(output?.text || '');
+            const text = String(output?.text || '').trim();
+            if (job.sessionId === whisper.sessionId && text) commit(text);
           } catch (error) {
             console.error('Whisper inference failed:', error);
             showToast(t().whisperFailed + (error.message || error));
@@ -1569,7 +1755,8 @@
     vosk: { start: startVosk, stop: stopVosk },
     sherpa: { start: startSherpa, stop: stopSherpa },
     whisper: { start: startWhisper, stop: stopWhisper },
-    webspeech: { start: startWeb, stop: stopWeb }
+    webspeech: { start: startWeb, stop: stopWeb },
+    moss: { start: () => showToast(t().mossBatchMode), stop: () => {} }
   };
 
   async function toggle() {
@@ -1579,6 +1766,208 @@
   }
 
   // ==================== UI, preferences, export ====================
+  // ==================== MOSS-Transcribe-Diarize（雲端 Hugging Face Space）====================
+  // 批次轉寫：整段音訊／影片上傳後，一次取回含時間戳與說話人標籤的逐字稿。
+  // 音訊會離開瀏覽器送到第三方 Space，因此隱私等級與 Web Speech API 同級（雲端），
+  // 不列入 privacyConclusion 的「敏感內容請改用」清單。
+  const moss = { running: false, segments: [] };
+  let mossProgressTimer = null;
+
+  const MOSS_SPACES = {
+    official: { host: 'https://openmoss-team-moss-transcribe-diarize.hf.space', apiName: 'run_transcription', mode: 'gradio' },
+    litert: { host: 'https://luigi-moss-transcribe-diarize-litert.hf.space', mode: 'rest' }
+  };
+
+  function mediaClock(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  }
+
+  // 官方 Space 回傳純文字，每段一行："[0.07-4.89] [S01] 文字"
+  // 逐行解析，文字內含 [ 也不截斷
+  function parseMossGradio(text) {
+    const out = [];
+    const linePattern = /^\[\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*\]\s*\[(S\d+)\]\s*(.*)$/;
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const hit = linePattern.exec(line);
+      if (!hit) continue;
+      const body = hit[4].trim();
+      if (body) out.push({ start: +hit[1], end: +hit[2], spk: hit[3], text: body });
+    }
+    return out;
+  }
+
+  // LiteRT Space 的 REST 路由已回傳解析好的 segments
+  function parseMossSegments(segments) {
+    return (segments || [])
+      .map(x => ({ start: x.start, end: x.end, spk: x.spk || 'S01', text: String(x.text || '').trim() }))
+      .filter(x => x.text);
+  }
+
+  function mossLine(seg) {
+    const range = seg.end == null ? mediaClock(seg.start) : `${mediaClock(seg.start)}-${mediaClock(seg.end)}`;
+    return `[${range}] [${seg.spk}] ${seg.text}`;
+  }
+
+  function setMossProgress(ratio) {
+    if (ratio === null) {
+      el.mossBar.classList.add('indeterminate');
+      el.mossBar.style.width = '';
+      return;
+    }
+    el.mossBar.classList.remove('indeterminate');
+    el.mossBar.style.width = `${ratio}%`;
+  }
+
+  function hideMossProgressLater() {
+    clearTimeout(mossProgressTimer);
+    mossProgressTimer = setTimeout(() => {
+      el.mossProgress.classList.remove('visible');
+      setMossProgress(0);
+      mossProgressTimer = null;
+    }, 800);
+  }
+
+  function updateMossFileText() {
+    const file = el.mossFile.files && el.mossFile.files[0];
+    el.mossFileText.textContent = file ? `${file.name} (${(file.size / 1048576).toFixed(1)} MB)` : t().mossPickHint;
+  }
+
+  function mossSrtTime(seconds) {
+    const raw = Math.max(0, Number(seconds) || 0);
+    const totalMs = Math.round(raw * 1000);
+    const h = Math.floor(totalMs / 3600000);
+    const m = Math.floor((totalMs % 3600000) / 60000);
+    const s = Math.floor((totalMs % 60000) / 1000);
+    const ms = totalMs % 1000;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+  }
+
+  function exportMossSrt() {
+    if (!moss.segments.length) return;
+    const body = moss.segments.map((seg, i) => {
+      const end = Number(seg.end) > 0 ? Number(seg.end) : seg.start;
+      return `${i + 1}\n${mossSrtTime(seg.start)} --> ${mossSrtTime(end)}\n[${seg.spk}] ${seg.text}\n`;
+    }).join('\n');
+    const base = String((el.mossFile.files && el.mossFile.files[0]?.name) || 'transcript').replace(/\.[^.]+$/, '') || 'transcript';
+    const blob = new Blob(['\uFEFF' + body], { type: 'text/plain;charset=utf-8' });
+    const anchor = document.createElement('a');
+    const objectUrl = URL.createObjectURL(blob);
+    anchor.href = objectUrl;
+    anchor.download = `${base}.srt`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 500);
+  }
+
+  async function runMoss() {
+    const file = el.mossFile.files && el.mossFile.files[0];
+    if (!file) { showToast(t().mossPickFile); return; }
+    if (moss.running) return;
+
+    const space = MOSS_SPACES[el.mossSpace.value] || MOSS_SPACES.official;
+    const startedAt = Date.now();
+    moss.running = true;
+    moss.segments = [];
+    el.mossSrt.disabled = true;
+    clearTimeout(mossProgressTimer);
+    el.mossRun.disabled = true;
+    el.engine.disabled = true;
+    el.control.disabled = true;
+    syncEngineCards();
+    el.mossProgress.classList.add('visible');
+    el.mossStatus.className = 'model-status';
+    el.mossStatus.textContent = t().mossUploading;
+    setMossProgress(null);
+
+    try {
+      let segments = [];
+      let rawText = '';
+
+      if (space.mode === 'rest') {
+        const res = await fetch(`${space.host}/api/transcribe?name=${encodeURIComponent(file.name)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        segments = parseMossSegments(data.segments);
+        rawText = data.rawTraditional || data.raw || '';
+      } else {
+        const form = new FormData();
+        form.append('files', file);
+        const upload = await fetch(`${space.host}/gradio_api/upload`, { method: 'POST', body: form });
+        if (!upload.ok) throw new Error(`upload HTTP ${upload.status}`);
+        const uploaded = await upload.json();
+        const path = Array.isArray(uploaded) ? uploaded[0] : uploaded;
+        setMossProgress(20);
+        el.mossStatus.textContent = t().mossRunning;
+
+        const call = await fetch(`${space.host}/gradio_api/call/${space.apiName}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: [{ path, meta: { _type: 'gradio.FileData' }, orig_name: file.name }, null] })
+        });
+        if (!call.ok) throw new Error(`call HTTP ${call.status}`);
+        const { event_id: eventId } = await call.json();
+        setMossProgress(55);
+
+        const stream = await fetch(`${space.host}/gradio_api/call/${space.apiName}/${eventId}`);
+        if (!stream.ok || !stream.body) throw new Error(`stream HTTP ${stream.status}`);
+        const reader = stream.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            try {
+              const parsed = JSON.parse(payload);
+              // Gradio 的 data 幀形如 ["<逐字稿>"]；官方 Space 的值就是整份逐字稿字串
+              const value = Array.isArray(parsed) ? parsed[0] : parsed;
+              if (typeof value === 'string' && value.trim()) rawText = value;
+            } catch (error) { /* 心跳或非 JSON 事件，忽略 */ }
+          }
+        }
+        segments = parseMossGradio(rawText);
+      }
+
+      setMossProgress(100);
+      if (!segments.length) {
+        el.mossStatus.className = 'model-status error';
+        el.mossStatus.textContent = rawText ? t().mossNoSegments : t().mossEmpty;
+        if (rawText) commit(rawText);
+        hideMossProgressLater();
+        return;
+      }
+
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
+      commit(`--- MOSS 轉寫：${file.name}（${segments.length} 段，耗時 ${seconds} 秒）---`);
+      for (const seg of segments) commit(mossLine(seg));
+      moss.segments = segments;
+      el.mossSrt.disabled = false;
+      el.mossStatus.className = 'model-status success';
+      el.mossStatus.textContent = `${t().mossDone}（${segments.length} 段，${seconds} 秒）`;
+      showToast(t().mossDone);
+      hideMossProgressLater();
+    } catch (error) {
+      console.warn('MOSS transcription failed:', error);
+      el.mossStatus.className = 'model-status error';
+      setMossProgress(0);
+      el.mossStatus.textContent = `${t().mossFailed}：${error.message}｜${t().mossColdHint}`;
+      hideMossProgressLater();
+    } finally {
+      moss.running = false;
+      el.mossRun.disabled = false;
+      el.engine.disabled = false;
+      updateButtons();
+    }
+  }
+
   function setUi(lang) {
     state.ui = lang;
     const d = T[lang];
@@ -1591,9 +1980,12 @@
     el.clear.textContent = d.clear;
     el.loadVosk.textContent = el.loadSherpa.textContent = el.loadWhisper.textContent = d.loadModel;
     el.clearSherpaCache.textContent = d.sherpaClearCache;
+    el.mossRun.textContent = d.mossRun;
+    el.mossSrt.textContent = d.mossSrt;
 
     for (const key of [
-      'engineLabel', 'langLabel', 'optWebspeech', 'optVosk', 'optSherpa', 'optWhisper',
+      'engineLabel', 'langLabel', 'optWebspeech', 'optVosk', 'optSherpa', 'optWhisper', 'optMoss',
+      'mossSpaceLabel', 'optMossOfficial', 'optMossLitert', 'mossFileLabel',
       'voskSourceLabel', 'voskModelLabel', 'voskFileLabel', 'optVoskBuiltin', 'optVoskFile',
       'optVoskUrl', 'sherpaBaseLabel', 'whisperModelLabel', 'vadLabel', 'optVadHigh',
       'optVadMid', 'optVadLow', 'statusEngineLabel', 'statusRuntimeLabel',
@@ -1606,12 +1998,21 @@
     $('voskHint').innerHTML = d.voskHint;
     $('sherpaHint').innerHTML = d.sherpaHint;
     $('whisperHint').innerHTML = d.whisperHint;
+    $('mossHint').innerHTML = d.mossHint;
     $('enginesList').innerHTML = d.engines.map(x => `<li>${x}</li>`).join('');
     $('riskList').innerHTML = d.risks.map(x => `<li>${x}</li>`).join('');
 
+    for (const [engine, cfg] of Object.entries(d.ecards)) {
+      const card = el.engineCards.querySelector(`.engine-card[data-engine="${engine}"]`);
+      if (!card) continue;
+      card.querySelector('.ecard-name').textContent = cfg.name;
+      card.querySelector('.ecard-tag').textContent = cfg.tag;
+      card.querySelector('.ecard-desc').textContent = cfg.desc;
+    }
+    updateMossFileText();
+
+    // updateEngine() 內部已呼叫 updateButtons() 與 save()
     updateEngine();
-    updateButtons();
-    save();
   }
 
   function save() {
@@ -1638,6 +2039,12 @@
   }
 
   el.engine.onchange = updateEngine;
+  el.engineCards.addEventListener('click', e => {
+    const card = e.target.closest('.engine-card');
+    if (!card || card.disabled) return;
+    el.engine.value = card.dataset.engine;
+    updateEngine();
+  });
   el.lang.onchange = save;
   el.sherpaBase.onchange = save;
   el.whisperModel.onchange = () => {
@@ -1664,6 +2071,28 @@
   el.loadSherpa.onclick = loadSherpa;
   el.clearSherpaCache.onclick = clearSherpaCache;
   el.loadWhisper.onclick = loadWhisper;
+  el.mossRun.onclick = runMoss;
+  el.mossSrt.onclick = exportMossSrt;
+  el.mossFile.addEventListener('change', updateMossFileText);
+  el.mossFileZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    el.mossFileZone.classList.add('over');
+  });
+  el.mossFileZone.addEventListener('dragleave', () => el.mossFileZone.classList.remove('over'));
+  el.mossFileZone.addEventListener('drop', e => {
+    e.preventDefault();
+    el.mossFileZone.classList.remove('over');
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    if (/^(audio|video)\//.test(file.type) || /\.(mp3|wav|m4a|aac|ogg|flac|opus|mp4|mov|mkv|webm|amr|wma)$/i.test(file.name)) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      el.mossFile.files = dt.files;
+      updateMossFileText();
+    } else {
+      showToast(t().mossPickFile);
+    }
+  });
   el.toggle.onclick = () => setUi(state.ui === 'zh' ? 'en' : 'zh');
 
   el.clear.onclick = () => {
@@ -1679,6 +2108,8 @@
     state.webRecognitionActive = false;
     whisper.queue = [];
     whisper.vad = null;
+    moss.segments = [];
+    el.mossSrt.disabled = true;
 
     el.placeholder.textContent = t().placeholder;
     setLevel(0);
