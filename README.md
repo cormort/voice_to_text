@@ -11,7 +11,7 @@
 - **多語言介面**：中文／英文一鍵切換
 - **匯出／複製／清空**：逐字稿可複製或匯出 .txt；MOSS 結果可輸出 .srt
 - **增量渲染**：長會議逐字稿只增量更新畫面，不整份重建
-- **PWA**：可安裝到桌面／主畫面，外殼離線快取（模型檔仍需網路下載）
+- **PWA**：可安裝到桌面／主畫面，外殼離線快取（模型檔仍需網路下載），圖示含 maskable 版本
 
 ## 引擎列表
 
@@ -47,6 +47,22 @@
 - **MOSS**：Hugging Face Space（官方 Gradio / 社群 LiteRT）批次轉寫，`parseMossGradio` 逐行解析時間戳與說話人
 - 辨識結果以 opencc-js 簡轉繁；音量偵測使用 **Web Audio API**（`AudioContext`, `AnalyserNode`）
 - 偏好設定存於 LocalStorage；本機模型檔由瀏覽器快取（Cache Storage）
+- **安全**：外部程式碼（opencc-js、vosk-browser）以 SRI 驗證完整性，並以 `Content-Security-Policy`
+  限制可載入的來源與可連線的端點；逐字稿與伺服器回應一律走 `textContent`，沒有注入面
+  （CSP 仍需 `'unsafe-inline'`／`'unsafe-eval'`，因為頁面有內嵌 script、vosk-browser 的 worker
+  與 emscripten 系的 WASM 會用到；CSP 在此主要擋的是「來源」，避免被替換的 CDN 檔案注入執行）
+- **Service Worker**：外殼採 network-first（導覽）與 cache-first（其他同源資產），
+  只快取成功的完整回應（4xx/5xx 與 206 部分內容不進快取），且不刪除模型快取
+
+## 測試
+
+三個 Node 測試直接從 `index.html` 抽出函式原始碼來跑，不需要瀏覽器或測試框架：
+
+```bash
+node test_vad.js              # VAD 分段：開頭不重複、短語音丟棄、15 秒上限、flush
+node test_sherpa_decode.js    # sherpa 解碼：partial / endpoint / 過期 session
+node test_sherpa_download.js  # 分段下載：Range、單段重試、不支援 Range 的退路
+```
 
 ## 隱私說明
 
@@ -103,7 +119,8 @@
 - 支援語言與 Web Speech 相同（中文／粵語／英日韓西法德），zh-HK 自動映射為粵語 (yue)
 - 硬體偵測：有 WebGPU 用 GPU（快），沒有自動退回 WASM（較慢但可用；WASM 用 q4 量化，
   transformers.js 4.2.0 的 WASM+q8 會因 decoder 量化錯誤崩潰，且失敗載入會毒化模型快取）
-- 技術：`@huggingface/transformers@4.2.0` + `Xenova/whisper-*` 量化模型（dtype q8）
+- 技術：`@huggingface/transformers@4.2.0` + `onnx-community/whisper-*` 量化模型（dtype q4；
+  WASM 退路同樣用 q4，因為 4.2.0 在 WASM + q8 會出現 decoder 量化錯誤）
 
 ## 本次新增 (2026-08-23) — 繁體中文輸出
 
@@ -124,3 +141,38 @@
 4. **隱私／狀態視覺化**：notice、狀態列與引擎卡片統一以 🔒／☁️ 區分本機處理與雲端處理，音訊處理位置一目了然
 5. **修正 Bug**：MOSS 模式下按空白鍵不再誤觸發 Web Speech；Whisper WASM 退回路徑改回 q4 量化（避免 transformers.js 4.2.0 的 decoder 崩潰）
 6. **效能**：逐字稿渲染改為增量 append，只更新新段落，長會議不再逐次重建整份文字
+
+## 本次修正 (2026-09-11) — 程式碼審查
+
+1. **修正 Bug（明顯影響辨識品質）**：VAD 的前置緩衝把「當前音訊塊」算進去後又 push 一次，
+   每一句開頭都會餵給 Whisper 一段重複的 128 ms 音訊 — 已修正並加上 `test_vad.js` 回歸測試
+2. **修正 Bug（Service Worker）**：`activate` 原本會刪掉「除了外殼以外的所有快取」，
+   連 `transformers-cache`（Whisper 模型）與 `sherpa-onnx-model-v1`（199 MB）都被清掉，
+   等於每次改版就讓使用者重新下載數百 MB — 現在只清理 `stt-shell-*` 自己的舊版本
+3. **修正 Bug（Service Worker）**：同源請求原本連 4xx/5xx 與 206 部分內容都寫進快取
+   （`Cache.put` 對 206 一定 reject，留下未處理的 rejection；Range 請求還可能拿到整份的
+   200 而讓 sherpa 分段下載誤判失敗）— 現在只快取成功的完整回應，且大於 64 MB 的二進位檔
+   （模型）不進外殼快取，並把寫入交給 `event.waitUntil`
+4. **修正 Bug（MOSS）**：批次轉寫沒有逾時、沒有取消、也沒有 abort — 現在有 3 分鐘停滯偵測、
+   30 分鐘絕對上限、可中途取消，且轉寫中關頁會跳出警告
+5. **修正 Bug**：換檔後「輸出 SRT」會把上一個檔案的內容寫成新檔名 — 換檔即作廢上次結果
+6. **修正 Bug**：Web Speech 致命錯誤（權限被拒、網路錯誤）只依賴 `onend` 收尾，
+   若瀏覽器沒回呼就會卡在「辨識中」且一直擋關頁 — 加上 1.5 秒逾時收尾
+7. **修正 Bug**：Vosk 內建英文模型仍會被送進 OpenCC（語言選單是隱藏的，判斷只看選單）
+8. **修正 Bug**：LocalStorage 的舊值未經驗證就套用，會讓 `state.engine` 變成空字串，
+   狀態卡與引擎卡片對不起來 — 現在會驗證；同時補上模型來源、收音靈敏度、MOSS 運算位置的記憶
+9. **安全**：新增 CSP（限制 script/connect/worker 來源）並對 opencc-js、vosk-browser 加上 SRI
+   （gtag 因為 Google 會更新檔案內容，無法使用 SRI）
+10. **效能**：逐字稿的 `copy/export` 可用性判斷改成快取，不再每個音訊塊都對整份逐字稿做
+    filter + trim；MOSS 整批結果改成一次 commit，不再每段觸發一次重排與捲動
+11. **音訊品質**：降取樣（48k → 16k）先做整數倍移動平均低通，避免高頻折疊回語音頻帶
+12. **無障礙**：逐字稿不再整個當成 live region（interim 每秒更新多次會灌爆螢幕閱讀器），
+    改成段落確定後送進隱藏 announcer 並合併播報；引擎卡片改用 `role="group"` + `aria-pressed`
+13. **PWA**：補上 maskable 圖示（原圖示的安全區只剩 2% 邊界），manifest 移除 portrait 限制
+14. **清理**：移除寫入後沒人讀的狀態（`whisper.busy`、`state.end`）、永遠不會成立的
+    `loadGeneration` 檢查、沒有 CSS 規則的 `.locked` class 與未使用的翻譯字串
+15. **修正 Bug（測試時發現，影響沒有 WebGPU 的機器）**：transformers.js 4.2.0 只要試過
+    `device: 'webgpu'` 失敗，同一個模組實例之後連 `device: 'wasm'` 都會沿用同一個失敗結果
+    （實測一律回 `no available backend found ... [webgpu]`），也就是 README 寫的「WebGPU 不可用
+    時自動退回 WASM」其實是壞的。現在改成先用 `requestAdapter()` 確認有 adapter 才試 WebGPU，
+    真的失敗時再換一份全新的模組實例重試 WASM（headless Chrome 實測 WASM 退路可正常載入）

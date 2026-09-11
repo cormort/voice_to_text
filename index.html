@@ -5,8 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#667eea">
+  <!-- 只允許實際會用到的來源。blob: 給 AudioWorklet 模組、vosk-browser 的 worker 與
+       本機 ZIP 模型；wasm-unsafe-eval 給 sherpa / onnxruntime 的 WebAssembly 編譯。
+       'unsafe-inline' 是本頁兩段內嵌 script 所需（沒有外部注入點，逐字稿一律走 textContent）；
+       'unsafe-eval' 則是 vosk-browser 的 worker 會 eval（實測拿掉後模型永遠載不進去），
+       emscripten 系的程式碼也常有此需求。CSP 在這裡主要還是擋「來源」，
+       讓被換掉的 CDN 檔案無法注入執行。 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://www.googletagmanager.com;
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: blob: https://www.googletagmanager.com https://www.google-analytics.com;
+    connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com;
+    worker-src 'self' blob:;
+    child-src 'self' blob:;
+    object-src 'none';
+    base-uri 'self';
+    form-action 'none'">
   <meta name="description" content="五引擎語音轉文字：即時辨識、MOSS 會議轉寫與 SRT 字幕輸出">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="語音轉文字">
   <link rel="manifest" href="manifest.webmanifest">
@@ -196,6 +213,10 @@
       transition: .25s; max-width: 90%; text-align: center; font-weight: 750;
     }
     #toast.show { opacity: 1; transform: translate(-50%, 0) }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
     @media(max-width:720px) {
       body { padding: 12px }
       .status-grid { grid-template-columns: 1fr 1fr }
@@ -232,14 +253,14 @@
       <div class="status-card"><div class="status-label" id="statusStateLabel">狀態</div><div class="status-value" id="statusStateValue">待命</div></div>
     </section>
 
-    <section class="transcript-container" id="transcriptContainer" aria-live="polite" aria-label="逐字稿">
+    <section class="transcript-container" id="transcriptContainer" aria-label="逐字稿">
       <pre id="transcript"><span class="placeholder" id="placeholderText"></span><span id="finalText"></span><span id="interimText" class="interim"></span></pre>
     </section>
     <div class="meter" aria-label="麥克風音量"><div id="volumeLevel"></div></div>
 
     <section class="panel settings">
       <label id="engineLabel" class="panel-label">引擎：</label>
-      <div class="engine-cards" id="engineCards" role="radiogroup" aria-label="引擎選擇">
+      <div class="engine-cards" id="engineCards" role="group" aria-label="引擎選擇">
         <button type="button" class="engine-card" data-engine="webspeech">
           <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
           <span class="ecard-desc"></span>
@@ -338,14 +359,19 @@
       <p id="privacyConclusion"></p>
     </div></details>
   </main><div id="toast" role="status"></div>
+  <!-- 逐字稿本身不做 live region（interim 每秒更新多次會灌爆螢幕閱讀器），
+       只在段落確定後把內容送進這裡 -->
+  <div id="a11yAnnouncer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js" integrity="sha384-lSi9aFkjJFq3Fe5HZNORU+TFYbMDZh6m2KHdolOWxKNew8tzqMIjj3X1e6D9htV4" crossorigin="anonymous"></script>
   <script>
 (() => {
   'use strict';
 
   const CDN = {
     vosk: 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js',
+    // 版本已鎖定，順便用 SRI 確認拿到的就是這一份（CDN 或套件被換掉時會直接載入失敗）
+    voskIntegrity: 'sha384-nqyY8clHf93uBYFkgkACShMTuvE3U57yXSJaf0Ws+XgzcoUe6OB/1BiOfHqKOWeg',
     transformers: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0'
   };
   const VOSK_MODELS = {
@@ -376,6 +402,7 @@
     control: $('controlBtn'), copy: $('copyBtn'), export: $('exportBtn'), clear: $('clearBtn'),
     placeholder: $('placeholderText'), final: $('finalText'), interim: $('interimText'),
     container: $('transcriptContainer'), volume: $('volumeLevel'), notice: $('privacyNotice'),
+    announcer: $('a11yAnnouncer'),
     statusEngine: $('statusEngineValue'), statusRuntime: $('statusRuntimeValue'),
     statusPrivacy: $('statusPrivacyValue'), statusState: $('statusStateValue'), toggle: $('uiLangToggle'),
     voskConfig: $('voskConfig'), voskSource: $('voskModelSource'), voskBuiltinRow: $('voskBuiltinRow'),
@@ -407,6 +434,9 @@
       mossFileLabel: '音訊／影片檔：', mossRun: '開始轉寫',
       mossUploading: '上傳中…', mossRunning: '轉寫中…（長錄音可能數分鐘，請勿關閉頁面）',
       mossDone: '轉寫完成', mossFailed: '轉寫失敗',
+      mossCancel: '取消轉寫', mossCancelled: '已取消轉寫。',
+      mossTimeout: '連線停滯過久或超過 30 分鐘上限，已中止轉寫。',
+      whisperQueueFull: '本機轉寫速度跟不上，已捨棄最舊的一段排隊音訊。',
       mossPickFile: '請先選擇音訊或影片檔',
       mossNoSegments: '模型未回傳分段，已保留原始輸出。', mossEmpty: '沒有取得任何內容。',
       mossColdHint: '若為久未使用，Space 可能正在喚醒，請稍後重試。',
@@ -431,7 +461,7 @@
       optVoskBuiltin: '網站內建模型', optVoskFile: '本機模型 ZIP', optVoskUrl: '自訂 URL',
       sherpaBaseLabel: '資產位置：', whisperModelLabel: '模型：', vadLabel: '收音靈敏度：',
       optVadHigh: '高', optVadMid: '中', optVadLow: '低',
-      loadModel: '載入模型', loading: '載入中…',
+      loadModel: '載入模型',
       start: '開始辨識', stop: '停止辨識', stopping: '正在完成最後一句…',
       copy: '複製內容', export: '輸出逐字稿', clear: '清空',
       statusEngineLabel: '引擎', statusRuntimeLabel: '執行環境',
@@ -459,7 +489,7 @@
       voskFileProtocol: '瀏覽器安全限制：file:// 無法載入內建相對路徑模型，請透過 localhost 或改選本機 ZIP 檔案。',
       voskNoFile: '請選擇 ZIP 模型檔', voskNoUrl: '請輸入模型 URL',
       whisperLoading: '正在釋放舊 Pipeline 並載入 Whisper 模型…',
-      sherpaLoading: '正在載入 sherpa-onnx WASM 與模型（約 212 MB，之後由瀏覽器快取）…',
+      sherpaLoading: '正在載入 sherpa-onnx WASM 與模型（約 199 MB，之後由瀏覽器快取）…',
       sherpaDownloading: '正在下載模型',
       sherpaFromCache: '已從本機快取載入模型',
       sherpaClearCache: '清除已快取模型',
@@ -501,6 +531,9 @@
       mossFileLabel: 'Audio / video file:', mossRun: 'Start transcription',
       mossUploading: 'Uploading…', mossRunning: 'Transcribing… (long recordings can take minutes, keep this page open)',
       mossDone: 'Transcription complete', mossFailed: 'Transcription failed',
+      mossCancel: 'Cancel transcription', mossCancelled: 'Transcription cancelled.',
+      mossTimeout: 'Stalled, or exceeded the 30-minute limit — aborted.',
+      whisperQueueFull: 'Local transcription cannot keep up; the oldest queued audio was dropped.',
       mossPickFile: 'Choose an audio or video file first',
       mossNoSegments: 'No segments returned; the raw output was kept.', mossEmpty: 'Nothing was returned.',
       mossColdHint: 'If unused for a while, the Space may be waking up — try again shortly.',
@@ -525,7 +558,7 @@
       optVoskBuiltin: 'Built-in models', optVoskFile: 'Local model ZIP', optVoskUrl: 'Custom URL',
       sherpaBaseLabel: 'Assets URL:', whisperModelLabel: 'Model:', vadLabel: 'Sensitivity:',
       optVadHigh: 'High', optVadMid: 'Medium', optVadLow: 'Low',
-      loadModel: 'Load model', loading: 'Loading…',
+      loadModel: 'Load model',
       start: 'Start recognition', stop: 'Stop recognition', stopping: 'Finishing final phrase…',
       copy: 'Copy', export: 'Export transcript', clear: 'Clear',
       statusEngineLabel: 'Engine', statusRuntimeLabel: 'Runtime',
@@ -553,7 +586,7 @@
       voskFileProtocol: 'Browser security: file:// cannot load the built-in relative model path. Use localhost or pick a local ZIP.',
       voskNoFile: 'Select a ZIP model file', voskNoUrl: 'Enter a model URL',
       whisperLoading: 'Releasing previous pipeline and loading Whisper…',
-      sherpaLoading: 'Loading sherpa-onnx WASM and model (~212 MB, cached afterwards)…',
+      sherpaLoading: 'Loading sherpa-onnx WASM and model (~199 MB, cached afterwards)…',
       sherpaDownloading: 'Downloading model',
       sherpaFromCache: 'Model loaded from local cache',
       sherpaClearCache: 'Clear cached model',
@@ -587,14 +620,13 @@
   };
   const state = {
     ui: 'zh', engine: 'webspeech', running: false, stopping: false,
-    start: null, end: null, segments: [], interim: '',
-    recognition: null, restartTimer: null, manualStop: false,
+    start: null, segments: [], interim: '',
+    recognition: null, restartTimer: null, webErrorTimer: null, manualStop: false,
     webGeneration: 0, webRecognitionActive: false
   };
   const t = () => T[state.ui];
   const vosk = {
-    loaded: false, model: null, recognizer: null, session: null,
-    loadPromise: null, loadGeneration: 0
+    loaded: false, model: null, recognizer: null, session: null, loadPromise: null
   };
   const sherpa = {
     module: null, recognizer: null, stream: null, session: null,
@@ -602,8 +634,8 @@
   };
   const whisper = {
     module: null, pipe: null, model: null, device: null, session: null,
-    queue: [], busy: false, drainPromise: null, sessionId: 0,
-    loadPromise: null, loadGeneration: 0, vad: null
+    queue: [], drainPromise: null, sessionId: 0, loadPromise: null, vad: null,
+    dropWarned: false
   };
   let toastTimer;
   const openccConverters = new Map();
@@ -703,8 +735,22 @@
     }
   }
 
+  // 降取樣（例如 48k → 16k）先做整數倍的移動平均當低通濾波，否則 8 kHz 以上的
+  // 頻率會折疊回語音頻帶；非整數倍（44.1k → 16k）仍走線性內插。
   function resample(input, from, to) {
     if (from === to) return input;
+
+    const factor = Math.floor(from / to);
+    if (from > to && factor >= 2) {
+      const filtered = new Float32Array(Math.floor(input.length / factor));
+      for (let i = 0; i < filtered.length; i++) {
+        let sum = 0;
+        for (let j = 0; j < factor; j++) sum += input[i * factor + j];
+        filtered[i] = sum / factor;
+      }
+      return resample(filtered, from / factor, to);
+    }
+
     const n = Math.max(1, Math.round(input.length * to / from)),
       out = new Float32Array(n), ratio = from / to;
     for (let i = 0; i < n; i++) {
@@ -721,11 +767,11 @@
   }
 
   function showToast(message) {
-    const el = $('toast');
-    el.textContent = message;
-    el.classList.add('show');
+    const toast = $('toast');
+    toast.textContent = message;
+    toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
   }
 
   function getOpenccConverter(variant) {
@@ -738,12 +784,16 @@
 
   function traditional(value) {
     if (!value || !window.OpenCC) return value;
-    // Vosk 內建中文模型與 sherpa 中英模型必定輸出簡中，語言選單對它們無效
+    // Vosk 內建模型與 sherpa / MOSS 的輸出語言由模型決定，語言選單對它們無效：
+    // 內建 cn 必定是簡中要轉，內建 en 必定是英文（不能因為選單停在 zh-TW 就送進 OpenCC）
+    const builtinVoskLang = state.engine === 'vosk' && el.voskSource.value === 'builtin'
+      ? el.voskLang.value : null;
     const forcedChinese =
       state.engine === 'moss' ||
       state.engine === 'sherpa' ||
-      (state.engine === 'vosk' && el.voskSource.value === 'builtin' && el.voskLang.value === 'cn');
-    if (!forcedChinese && !el.lang.value.startsWith('zh')) return value;
+      builtinVoskLang === 'cn';
+    const chineseSource = builtinVoskLang ? builtinVoskLang === 'cn' : el.lang.value.startsWith('zh');
+    if (!forcedChinese && !chineseSource) return value;
 
     try {
       const variant = (!forcedChinese && el.lang.value === 'zh-HK') ? 'hk' : 'twp';
@@ -759,12 +809,45 @@
     return `[${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}]`;
   }
 
+  let announceTimer = null;
+  let pendingAnnouncement = '';
+
+  // 逐字稿區本身不是 live region（interim 每秒更新多次會灌爆螢幕閱讀器），
+  // 改成段落確定後才送進隱藏的 announcer，並把短時間內的多段合併成一次播報。
+  function announce(text) {
+    if (!text) return;
+    pendingAnnouncement = pendingAnnouncement ? `${pendingAnnouncement} ${text}` : text;
+    if (announceTimer) return;
+    announceTimer = setTimeout(() => {
+      announceTimer = null;
+      el.announcer.textContent = pendingAnnouncement.slice(-400);
+      pendingAnnouncement = '';
+    }, 1500);
+  }
+
   function commit(s) {
     s = traditional((s || '').trim());
     if (!s) return;
     state.segments.push({ time: new Date(), text: s });
     state.interim = '';
     render();
+    announce(s);
+  }
+
+  // 一次寫入多段（例如 MOSS 的整份逐字稿）：只 render 一次，避免每段都重排與捲動
+  function commitBatch(lines) {
+    const written = [];
+    for (const line of lines) {
+      const text = traditional((line || '').trim());
+      if (!text) continue;
+      state.segments.push({ time: new Date(), text });
+      written.push(text);
+    }
+    if (!written.length) return;
+    state.interim = '';
+    render();
+    // 整批只播報最後一段，否則螢幕閱讀器會把整場會議唸一遍
+    announce(written[written.length - 1]);
   }
 
   function getEffectiveSegments() {
@@ -782,6 +865,21 @@
 
   let renderedSegments = 0;
   let renderedText = '';
+  let effectiveCount = 0;
+  let effectiveCountRef = null;
+  let effectiveCountLen = -1;
+
+  // render() 每個音訊塊都會被呼叫（約每秒 8 次），不該每次都對整份逐字稿做 filter + trim。
+  // segments 只會被 append 或整個換掉（begin / clear 會換成新陣列），所以用「陣列本身 +
+  // 長度」當快取鍵：只看長度的話，新的一場錄音回到 1 段時會沿用上一場的快取結果。
+  function effectiveSegmentCount() {
+    if (effectiveCountRef !== state.segments || effectiveCountLen !== state.segments.length) {
+      effectiveCount = getEffectiveSegments().length;
+      effectiveCountRef = state.segments;
+      effectiveCountLen = state.segments.length;
+    }
+    return effectiveCount;
+  }
 
   function render() {
     el.placeholder.hidden = !!(state.segments.length || state.interim);
@@ -804,7 +902,7 @@
     const interimText = state.interim ? `\n${state.interim}` : '';
     if (el.interim.textContent !== interimText) el.interim.textContent = interimText;
 
-    const hasContent = getEffectiveSegments().length > 0;
+    const hasContent = effectiveSegmentCount() > 0;
     el.copy.disabled = !hasContent;
     el.export.disabled = !hasContent;
 
@@ -823,14 +921,12 @@
 
   function begin() {
     state.start = new Date();
-    state.end = null;
     state.segments = [];
     state.interim = '';
     commit('--- Recording Start / 錄音開始 ---');
   }
 
   function finish() {
-    state.end = new Date();
     state.running = false;
     state.stopping = false;
     state.interim = '';
@@ -854,7 +950,6 @@
 
   function syncEngineCards() {
     const lock = el.engine.disabled || state.running || state.stopping || moss.running;
-    el.engineCards.classList.toggle('locked', lock);
     for (const card of el.engineCards.querySelectorAll('.engine-card')) {
       const active = card.dataset.engine === state.engine;
       card.classList.toggle('active', active);
@@ -888,7 +983,7 @@
     save();
   }
 
-  async function loadScript(src, globalName) {
+  async function loadScript(src, globalName, integrity) {
     if (globalName && window[globalName]) return window[globalName];
     if (scriptLoadPromises.has(src)) return scriptLoadPromises.get(src);
 
@@ -897,6 +992,10 @@
       script.src = src;
       script.async = false;
       script.dataset.dynamicSrc = src;
+      if (integrity) {
+        script.integrity = integrity;
+        script.crossOrigin = 'anonymous';
+      }
       script.onload = () => {
         if (globalName && !window[globalName]) {
           script.remove();
@@ -930,6 +1029,25 @@
     }
   }
 
+  // fresh=true 會用不同的 query string 取得另一份模組實例（見 loadWhisper 的退路說明）
+  async function loadTransformers(fresh = false) {
+    const module = await import(fresh ? `${CDN.transformers}?fallback=1` : CDN.transformers);
+    module.env.allowLocalModels = false;
+    module.env.useBrowserCache = true;
+    return module;
+  }
+
+  // 先確認真的拿得到 adapter 才值得試 webgpu：失敗的那一次會污染模組狀態（見上）
+  async function hasWebGpuAdapter() {
+    if (!navigator.gpu) return false;
+    try {
+      return !!(await navigator.gpu.requestAdapter());
+    } catch (error) {
+      console.warn('WebGPU adapter probe failed:', error);
+      return false;
+    }
+  }
+
   function removeVoskRecognizer() {
     const recognizerToRemove = vosk.recognizer;
     vosk.recognizer = null;
@@ -954,7 +1072,6 @@
   // ==================== Vosk offline engine ====================
   async function loadVosk() {
     if (vosk.loadPromise) return vosk.loadPromise;
-    const generation = ++vosk.loadGeneration;
 
     vosk.loadPromise = (async () => {
       el.loadVosk.disabled = true;
@@ -968,7 +1085,7 @@
       let newlyCreatedModel = null;
 
       try {
-        await loadScript(CDN.vosk, 'Vosk');
+        await loadScript(CDN.vosk, 'Vosk', CDN.voskIntegrity);
 
         const source = el.voskSource.value;
         if (source === 'builtin') {
@@ -991,14 +1108,7 @@
         vosk.loaded = false;
         await terminateVoskModel(previousModel);
 
-        if (generation !== vosk.loadGeneration) return;
-
         newlyCreatedModel = await Vosk.createModel(modelUrl);
-
-        if (generation !== vosk.loadGeneration) {
-          await terminateVoskModel(newlyCreatedModel);
-          return;
-        }
 
         vosk.model = newlyCreatedModel;
         newlyCreatedModel = null;
@@ -1009,26 +1119,22 @@
         console.error('Vosk model load failed:', error);
         await terminateVoskModel(newlyCreatedModel);
 
-        if (generation === vosk.loadGeneration) {
-          vosk.loaded = false;
-          vosk.model = null;
-          el.voskStatus.textContent = t().loadFailed + (error.message || error);
-          el.voskStatus.className = 'model-status error';
-        }
+        vosk.loaded = false;
+        vosk.model = null;
+        el.voskStatus.textContent = t().loadFailed + (error.message || error);
+        el.voskStatus.className = 'model-status error';
       } finally {
         if (revokeModelUrl && modelUrl) URL.revokeObjectURL(modelUrl);
-        if (generation === vosk.loadGeneration) {
-          el.voskBar.classList.remove('indeterminate');
-          el.voskBar.style.width = vosk.loaded ? '100%' : '0';
-          el.loadVosk.disabled = false;
-        }
+        el.voskBar.classList.remove('indeterminate');
+        el.voskBar.style.width = vosk.loaded ? '100%' : '0';
+        el.loadVosk.disabled = false;
       }
     })();
 
     try {
       await vosk.loadPromise;
     } finally {
-      if (generation === vosk.loadGeneration) vosk.loadPromise = null;
+      vosk.loadPromise = null;
     }
   }
 
@@ -1374,17 +1480,22 @@
 
   function vadPush(v, chunk, rms) {
     const ms = chunk.length / SAMPLE_RATE * 1000;
+
+    // 前置緩衝只取「這一塊之前」的音訊：先複製再更新 pre，否則同一塊會先被算進 pre、
+    // 又被 push 進 audio，每句開頭都會多出一段重複音訊（2048 samples ≈ 128 ms）
+    const preRoll = v.pre.slice();
     v.pre.push(chunk);
     let preN = v.pre.reduce((n, x) => n + x.length, 0);
-    while (preN > SAMPLE_RATE * .4) {
+    while (preN > SAMPLE_RATE * .4 && v.pre.length > 1) {
       preN -= v.pre[0].length;
       v.pre.shift();
     }
+
     if (rms >= v.threshold) {
       if (!v.speaking) {
         v.speaking = true;
-        v.audio = [...v.pre];
-        v.samples = v.audio.reduce((n, x) => n + x.length, 0);
+        v.audio = preRoll;
+        v.samples = preRoll.reduce((n, x) => n + x.length, 0);
       }
       v.silence = 0;
       v.speech += ms;
@@ -1429,7 +1540,6 @@
 
   async function loadWhisper() {
     if (whisper.loadPromise) return whisper.loadPromise;
-    const generation = ++whisper.loadGeneration;
 
     whisper.loadPromise = (async () => {
       el.loadWhisper.disabled = true;
@@ -1442,9 +1552,7 @@
       let candidateDevice = null;
 
       try {
-        whisper.module ||= await import(CDN.transformers);
-        whisper.module.env.allowLocalModels = false;
-        whisper.module.env.useBrowserCache = true;
+        whisper.module ||= await loadTransformers();
 
         const modelName = WHISPER_MODELS[el.whisperModel.value];
         if (whisper.pipe && whisper.model === modelName) {
@@ -1461,15 +1569,17 @@
         whisper.device = null;
         await disposeWhisperPipeline(previousPipeline);
 
-        if (generation !== whisper.loadGeneration) return;
-
-        if (navigator.gpu) {
+        if (await hasWebGpuAdapter()) {
           try {
             candidatePipeline = await whisper.module.pipeline(
               'automatic-speech-recognition', modelName, { device: 'webgpu', dtype: 'q4' });
             candidateDevice = 'WebGPU';
           } catch (error) {
             console.warn('WebGPU pipeline failed; falling back to WASM:', error);
+            // transformers.js 4.2.0 會把「webgpu 失敗」記在模組實例裡，之後同一個實例
+            // 連 wasm 都載不起來（實測一律回 no available backend found / [webgpu]），
+            // 所以退路必須換一份全新的模組實例，否則 WebGPU 失敗等於整個引擎不能用
+            whisper.module = await loadTransformers(true);
           }
         }
 
@@ -1479,11 +1589,6 @@
           candidatePipeline = await whisper.module.pipeline(
             'automatic-speech-recognition', modelName, { device: 'wasm', dtype: 'q4' });
           candidateDevice = 'WASM';
-        }
-
-        if (generation !== whisper.loadGeneration) {
-          await disposeWhisperPipeline(candidatePipeline);
-          return;
         }
 
         whisper.pipe = candidatePipeline;
@@ -1497,31 +1602,38 @@
         console.error('Whisper model load failed:', error);
         await disposeWhisperPipeline(candidatePipeline);
 
-        if (generation === whisper.loadGeneration) {
-          whisper.pipe = null;
-          whisper.model = null;
-          whisper.device = null;
-          el.whisperStatus.textContent = t().loadFailed + (error.message || error);
-          el.whisperStatus.className = 'model-status error';
-        }
+        whisper.pipe = null;
+        whisper.model = null;
+        whisper.device = null;
+        el.whisperStatus.textContent = t().loadFailed + (error.message || error);
+        el.whisperStatus.className = 'model-status error';
       } finally {
-        if (generation === whisper.loadGeneration) {
-          el.whisperBar.classList.remove('indeterminate');
-          el.whisperBar.style.width = whisper.pipe ? '100%' : '0';
-          el.loadWhisper.disabled = false;
-        }
+        el.whisperBar.classList.remove('indeterminate');
+        el.whisperBar.style.width = whisper.pipe ? '100%' : '0';
+        el.loadWhisper.disabled = false;
       }
     })();
 
     try {
       await whisper.loadPromise;
     } finally {
-      if (generation === whisper.loadGeneration) whisper.loadPromise = null;
+      whisper.loadPromise = null;
     }
   }
 
+  const WHISPER_MAX_QUEUED = 3;
+
   function enqueueWhisperAudio(audio) {
     whisper.queue.push({ audio, language: el.lang.value, sessionId: whisper.sessionId });
+    // 沒有回壓的話，WASM 退路（RTF 可能大於 1）會讓佇列無限成長，停止時永遠等不完；
+    // 超過上限就丟最舊的一段並提示一次
+    while (whisper.queue.length > WHISPER_MAX_QUEUED) {
+      whisper.queue.shift();
+      if (!whisper.dropWarned) {
+        whisper.dropWarned = true;
+        showToast(t().whisperQueueFull);
+      }
+    }
     void processWhisperQueue();
   }
 
@@ -1530,13 +1642,13 @@
     const processingSessionId = whisper.sessionId;
 
     whisper.drainPromise = (async () => {
-      whisper.busy = true;
       try {
         while (whisper.queue.length > 0) {
           const job = whisper.queue.shift();
           if (!job || job.sessionId !== processingSessionId) continue;
 
-          el.statusState.textContent = t().processing;
+          const pending = whisper.queue.length;
+          el.statusState.textContent = pending > 0 ? `${t().processing}（+${pending}）` : t().processing;
           try {
             const output = await whisper.pipe(job.audio, {
               language: LANG[job.language],
@@ -1553,13 +1665,13 @@
             if (msg.includes('device lost') || msg.includes('webgpu') || msg.includes('oom')) {
               whisper.pipe = null;
               whisper.model = null;
+              whisper.device = null;
               el.whisperStatus.textContent = t().whisperDeviceLost;
               el.whisperStatus.className = 'model-status error';
             }
           }
         }
       } finally {
-        whisper.busy = false;
         whisper.drainPromise = null;
         if (state.running) el.statusState.textContent = t().listening;
         if (whisper.queue.length > 0) void processWhisperQueue();
@@ -1601,6 +1713,7 @@
     state.stopping = false;
     whisper.sessionId += 1;
     whisper.queue = [];
+    whisper.dropWarned = false;
     updateButtons();
     el.engine.disabled = el.lang.disabled = true;
 
@@ -1652,6 +1765,13 @@
     }
   }
 
+  function clearWebErrorTimer() {
+    if (state.webErrorTimer) {
+      clearTimeout(state.webErrorTimer);
+      state.webErrorTimer = null;
+    }
+  }
+
   function initWebSpeech() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -1689,12 +1809,25 @@
         if (event.error === 'network') showToast(t().netError);
         else if (event.error === 'audio-capture') showToast(t().micBusy);
         else showToast(t().mic);
+
+        // onend 不一定會跟著致命錯誤來（各家瀏覽器行為不一）；逾時就自己收尾，
+        // 否則畫面會一直停在「辨識中」，beforeunload 也會一直擋關頁
+        clearWebErrorTimer();
+        state.webErrorTimer = setTimeout(() => {
+          state.webErrorTimer = null;
+          if (!state.running) return;
+          state.manualStop = true;
+          clearWebRestartTimer();
+          setLevel(0);
+          finish();
+        }, 1500);
       }
     };
 
     recognition.onend = () => {
       state.webRecognitionActive = false;
       clearWebRestartTimer();
+      clearWebErrorTimer();
 
       if (state.running && !state.manualStop) {
         const scheduledGeneration = state.webGeneration;
@@ -1724,6 +1857,7 @@
     if (!state.recognition) return showToast(t().noWebSpeech);
 
     clearWebRestartTimer();
+    clearWebErrorTimer();
     state.webGeneration += 1;
     state.webRecognitionActive = false;
 
@@ -1750,6 +1884,7 @@
     state.stopping = true;
     state.webGeneration += 1;
     clearWebRestartTimer();
+    clearWebErrorTimer();
     updateButtons();
 
     try {
@@ -1781,8 +1916,12 @@
   // 批次轉寫：整段音訊／影片上傳後，一次取回含時間戳與說話人標籤的逐字稿。
   // 音訊會離開瀏覽器送到第三方 Space，因此隱私等級與 Web Speech API 同級（雲端），
   // 不列入 privacyConclusion 的「敏感內容請改用」清單。
-  const moss = { running: false, segments: [] };
+  const moss = { running: false, segments: [], controller: null, watchdog: null, maxTimer: null, timedOut: false };
   let mossProgressTimer = null;
+  // 串流超過 3 分鐘沒有新資料就中止（Space 冷啟動可能很久，所以不能抓太緊）；
+  // 另外設一個單次執行的絕對上限，避免上傳卡死時按鈕永遠停不下來。
+  const MOSS_STALL_MS = 180000;
+  const MOSS_MAX_MS = 30 * 60 * 1000;
 
   const MOSS_SPACES = {
     official: { host: 'https://openmoss-team-moss-transcribe-diarize.hf.space', apiName: 'run_transcription', mode: 'gradio' },
@@ -1844,6 +1983,40 @@
     el.mossFileText.textContent = file ? `${file.name} (${(file.size / 1048576).toFixed(1)} MB)` : t().mossPickHint;
   }
 
+  // 換檔就作廢上一次的結果，否則「輸出 SRT」會把上一個檔案的內容寫成新檔名
+  function resetMossResult() {
+    moss.segments = [];
+    el.mossSrt.disabled = true;
+    el.mossStatus.textContent = '';
+    el.mossStatus.className = 'model-status';
+  }
+
+  function updateMossButton() {
+    el.mossRun.textContent = moss.running ? t().mossCancel : t().mossRun;
+    el.mossRun.disabled = false;
+  }
+
+  function clearMossTimers() {
+    clearTimeout(moss.watchdog);
+    clearTimeout(moss.maxTimer);
+    moss.watchdog = null;
+    moss.maxTimer = null;
+  }
+
+  // 每讀到新資料就把停滯計時器往後推；真的卡住時 abort，讓 runMoss 能收尾
+  function feedMossWatchdog() {
+    clearTimeout(moss.watchdog);
+    moss.watchdog = setTimeout(() => {
+      moss.timedOut = true;
+      moss.controller?.abort();
+    }, MOSS_STALL_MS);
+  }
+
+  function cancelMoss() {
+    if (!moss.running) return;
+    moss.controller?.abort();
+  }
+
   function mossSrtTime(seconds) {
     const raw = Math.max(0, Number(seconds) || 0);
     const totalMs = Math.round(raw * 1000);
@@ -1877,18 +2050,29 @@
 
     const space = MOSS_SPACES[el.mossSpace.value] || MOSS_SPACES.official;
     const startedAt = Date.now();
+    const controller = new AbortController();
+    moss.controller = controller;
+    moss.timedOut = false;
     moss.running = true;
     moss.segments = [];
     el.mossSrt.disabled = true;
     clearTimeout(mossProgressTimer);
-    el.mossRun.disabled = true;
+    el.mossSpace.disabled = true;
+    el.mossFile.disabled = true;
     el.engine.disabled = true;
     el.control.disabled = true;
+    updateMossButton();
     syncEngineCards();
     el.mossProgress.classList.add('visible');
     el.mossStatus.className = 'model-status';
     el.mossStatus.textContent = t().mossUploading;
     setMossProgress(null);
+    clearMossTimers();
+    // 上傳與 REST 轉寫都可能合法地跑很久，所以只用「絕對上限」；串流階段另外加停滯偵測
+    moss.maxTimer = setTimeout(() => {
+      moss.timedOut = true;
+      controller.abort();
+    }, MOSS_MAX_MS);
 
     try {
       let segments = [];
@@ -1896,7 +2080,8 @@
 
       if (space.mode === 'rest') {
         const res = await fetch(`${space.host}/api/transcribe?name=${encodeURIComponent(file.name)}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file
+          method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
+          signal: controller.signal
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -1906,22 +2091,29 @@
       } else {
         const form = new FormData();
         form.append('files', file);
-        const upload = await fetch(`${space.host}/gradio_api/upload`, { method: 'POST', body: form });
+        const upload = await fetch(`${space.host}/gradio_api/upload`, {
+          method: 'POST', body: form, signal: controller.signal
+        });
         if (!upload.ok) throw new Error(`upload HTTP ${upload.status}`);
         const uploaded = await upload.json();
         const path = Array.isArray(uploaded) ? uploaded[0] : uploaded;
         setMossProgress(20);
         el.mossStatus.textContent = t().mossRunning;
 
+        feedMossWatchdog();
         const call = await fetch(`${space.host}/gradio_api/call/${space.apiName}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: [{ path, meta: { _type: 'gradio.FileData' }, orig_name: file.name }, null] })
+          body: JSON.stringify({ data: [{ path, meta: { _type: 'gradio.FileData' }, orig_name: file.name }, null] }),
+          signal: controller.signal
         });
         if (!call.ok) throw new Error(`call HTTP ${call.status}`);
         const { event_id: eventId } = await call.json();
         setMossProgress(55);
 
-        const stream = await fetch(`${space.host}/gradio_api/call/${space.apiName}/${eventId}`);
+        feedMossWatchdog();
+        const stream = await fetch(`${space.host}/gradio_api/call/${space.apiName}/${eventId}`, {
+          signal: controller.signal
+        });
         if (!stream.ok || !stream.body) throw new Error(`stream HTTP ${stream.status}`);
         const reader = stream.body.getReader();
         const decoder = new TextDecoder();
@@ -1929,6 +2121,7 @@
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
+          feedMossWatchdog();
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           buffer = lines.pop();
@@ -1947,6 +2140,8 @@
         segments = parseMossGradio(rawText);
       }
 
+      clearTimeout(moss.watchdog);
+      moss.watchdog = null;
       setMossProgress(100);
       if (!segments.length) {
         el.mossStatus.className = 'model-status error';
@@ -1957,24 +2152,37 @@
       }
 
       const seconds = Math.round((Date.now() - startedAt) / 1000);
-      commit(`--- MOSS 轉寫：${file.name}（${segments.length} 段，耗時 ${seconds} 秒）---`);
-      for (const seg of segments) commit(mossLine(seg));
       moss.segments = segments;
       el.mossSrt.disabled = false;
+      // 一次寫入整批：逐段 commit 會每段都 render 並排一次 rAF 捲動
+      commitBatch([
+        `--- MOSS 轉寫：${file.name}（${segments.length} 段，耗時 ${seconds} 秒）---`,
+        ...segments.map(mossLine)
+      ]);
       el.mossStatus.className = 'model-status success';
       el.mossStatus.textContent = `${t().mossDone}（${segments.length} 段，${seconds} 秒）`;
       showToast(t().mossDone);
       hideMossProgressLater();
     } catch (error) {
-      console.warn('MOSS transcription failed:', error);
-      el.mossStatus.className = 'model-status error';
-      setMossProgress(0);
-      el.mossStatus.textContent = `${t().mossFailed}：${error.message}｜${t().mossColdHint}`;
+      if (error && error.name === 'AbortError') {
+        el.mossStatus.className = 'model-status';
+        setMossProgress(0);
+        el.mossStatus.textContent = moss.timedOut ? t().mossTimeout : t().mossCancelled;
+      } else {
+        console.warn('MOSS transcription failed:', error);
+        el.mossStatus.className = 'model-status error';
+        setMossProgress(0);
+        el.mossStatus.textContent = `${t().mossFailed}：${error.message}｜${t().mossColdHint}`;
+      }
       hideMossProgressLater();
     } finally {
+      clearMossTimers();
+      moss.controller = null;
       moss.running = false;
-      el.mossRun.disabled = false;
+      el.mossSpace.disabled = false;
+      el.mossFile.disabled = false;
       el.engine.disabled = false;
+      updateMossButton();
       updateButtons();
     }
   }
@@ -1991,7 +2199,7 @@
     el.clear.textContent = d.clear;
     el.loadVosk.textContent = el.loadSherpa.textContent = el.loadWhisper.textContent = d.loadModel;
     el.clearSherpaCache.textContent = d.sherpaClearCache;
-    el.mossRun.textContent = d.mossRun;
+    updateMossButton();
     el.mossSrt.textContent = d.mossSrt;
 
     for (const key of [
@@ -2033,20 +2241,40 @@
         engine: el.engine.value,
         lang: el.lang.value,
         whisper: el.whisperModel.value,
-        sherpaBase: el.sherpaBase.value.trim()
+        sherpaBase: el.sherpaBase.value.trim(),
+        voskSource: el.voskSource.value,
+        vad: el.vad.value,
+        mossSpace: el.mossSpace.value
       }));
     } catch {}
   }
 
+  const KNOWN_ENGINES = ['webspeech', 'vosk', 'sherpa', 'whisper', 'moss'];
+  const hasOption = (select, value) => Array.from(select.options).some(o => o.value === value);
+
   function load() {
     try {
       const p = JSON.parse(localStorage.getItem('stt-pref') || '{}');
-      if (p.engine) el.engine.value = p.engine;
-      if (p.lang) el.lang.value = p.lang;
-      if (p.whisper) el.whisperModel.value = p.whisper;
+      // localStorage 可能留著舊版的值；不驗證會讓 state.engine 變成空字串，
+      // 狀態卡、引擎卡片與 quickstart 就全部對不起來
+      if (KNOWN_ENGINES.includes(p.engine)) el.engine.value = p.engine;
+      if (p.lang && hasOption(el.lang, p.lang)) el.lang.value = p.lang;
+      if (p.whisper && hasOption(el.whisperModel, p.whisper)) el.whisperModel.value = p.whisper;
+      if (p.voskSource && hasOption(el.voskSource, p.voskSource)) el.voskSource.value = p.voskSource;
+      if (p.vad && hasOption(el.vad, p.vad)) el.vad.value = p.vad;
+      if (p.mossSpace && hasOption(el.mossSpace, p.mossSpace)) el.mossSpace.value = p.mossSpace;
       if (p.sherpaBase) el.sherpaBase.value = p.sherpaBase;
-      state.ui = p.ui || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
+      state.ui = (p.ui === 'zh' || p.ui === 'en')
+        ? p.ui
+        : ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
     } catch {}
+  }
+
+  function syncVoskSourceRows() {
+    const source = el.voskSource.value;
+    el.voskBuiltinRow.hidden = source !== 'builtin';
+    el.voskFileRow.hidden = source !== 'file';
+    el.voskUrlRow.hidden = source !== 'url';
   }
 
   el.engine.onchange = updateEngine;
@@ -2057,7 +2285,10 @@
     updateEngine();
   });
   el.lang.onchange = save;
+  el.vad.onchange = save;
   el.sherpaBase.onchange = save;
+  // 運算位置會影響狀態卡的「執行環境」，切換時要一起更新
+  el.mossSpace.onchange = updateEngine;
   el.whisperModel.onchange = () => {
     el.whisperStatus.textContent = t().modelChanged;
     el.whisperStatus.className = 'model-status';
@@ -2072,19 +2303,19 @@
     vosk.loaded = false;
     el.voskStatus.textContent = t().sourceChanged;
     el.voskStatus.className = 'model-status';
-    const s = el.voskSource.value;
-    el.voskBuiltinRow.hidden = s !== 'builtin';
-    el.voskFileRow.hidden = s !== 'file';
-    el.voskUrlRow.hidden = s !== 'url';
+    syncVoskSourceRows();
   };
   el.control.onclick = toggle;
   el.loadVosk.onclick = loadVosk;
   el.loadSherpa.onclick = loadSherpa;
   el.clearSherpaCache.onclick = clearSherpaCache;
   el.loadWhisper.onclick = loadWhisper;
-  el.mossRun.onclick = runMoss;
+  el.mossRun.onclick = () => (moss.running ? cancelMoss() : runMoss());
   el.mossSrt.onclick = exportMossSrt;
-  el.mossFile.addEventListener('change', updateMossFileText);
+  el.mossFile.addEventListener('change', () => {
+    updateMossFileText();
+    resetMossResult();
+  });
   el.mossFileZone.addEventListener('dragover', e => {
     e.preventDefault();
     el.mossFileZone.classList.add('over');
@@ -2095,11 +2326,13 @@
     el.mossFileZone.classList.remove('over');
     const file = e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file) return;
+    if (moss.running) return;
     if (/^(audio|video)\//.test(file.type) || /\.(mp3|wav|m4a|aac|ogg|flac|opus|mp4|mov|mkv|webm|amr|wma)$/i.test(file.name)) {
       const dt = new DataTransfer();
       dt.items.add(file);
       el.mossFile.files = dt.files;
       updateMossFileText();
+      resetMossResult();
     } else {
       showToast(t().mossPickFile);
     }
@@ -2107,14 +2340,14 @@
   el.toggle.onclick = () => setUi(state.ui === 'zh' ? 'en' : 'zh');
 
   el.clear.onclick = () => {
-    if (state.running || state.stopping || whisper.drainPromise) return showToast(t().busyClear);
+    if (state.running || state.stopping || whisper.drainPromise || moss.running) return showToast(t().busyClear);
 
     clearWebRestartTimer();
+    clearWebErrorTimer();
     removeVoskRecognizer();
     state.segments = [];
     state.interim = '';
     state.start = null;
-    state.end = null;
     state.manualStop = false;
     state.webRecognitionActive = false;
     whisper.queue = [];
@@ -2164,13 +2397,15 @@
   });
 
   window.addEventListener('beforeunload', event => {
-    if (state.running) {
+    // MOSS 是批次上傳／轉寫，跑掉就得整份重來，所以也要擋
+    if (state.running || moss.running) {
       event.preventDefault();
       event.returnValue = '';
     }
   });
 
   load();
+  syncVoskSourceRows();
   initWebSpeech();
   setUi(state.ui);
   render();
