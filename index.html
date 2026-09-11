@@ -4,7 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light">
-  <link rel="icon" href="data:,">
+  <meta name="theme-color" content="#667eea">
+  <meta name="description" content="五引擎語音轉文字：即時辨識、MOSS 會議轉寫與 SRT 字幕輸出">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="語音轉文字">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <title id="pageTitle">多國語言即時逐字稿工具</title>
   <style>
     :root {
@@ -2164,6 +2171,13 @@
   setUi(state.ui);
   render();
 })();
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch((err) => console.warn('SW registration failed:', err));
+      });
+    }
   </script>
 </body>
 </html>

@@ -1,0 +1,16 @@
+{
+  "name": "多國語言即時逐字稿工具",
+  "short_name": "語音轉文字",
+  "description": "五引擎語音轉文字：即時辨識、MOSS 會議轉寫與 SRT 字幕輸出",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#5668d8",
+  "theme_color": "#667eea",
+  "lang": "zh-TW",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
