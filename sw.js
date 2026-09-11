@@ -5,8 +5,9 @@ const CACHE = 'stt-shell-v1';
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
 const SHELL_PREFIX = 'stt-shell-';
-// 外殼快取不放大型二進位檔（內建 Vosk ZIP 44 MB、自架的 sherpa .data 199 MB）；
-// 模型檔有自己的快取（SHERPA_CACHE）或交給瀏覽器 HTTP 快取。
+// 上限 64 MB：內建 Vosk ZIP（約 44 MB）會進外殼快取，回訪者與離線都能直接用
+// （GitHub Pages 對 ZIP 只給 max-age=600，沒有這層等於每個工作階段重抓 44 MB）。
+// 自架的 sherpa .data（199 MB）超過上限，由 App 自己的 SHERPA_CACHE 管理。
 const MAX_CACHE_BYTES = 64 * 1024 * 1024;
 const ASSETS = [
   './', './manifest.webmanifest',
