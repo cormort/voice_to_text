@@ -1,15 +1,26 @@
 # 多國語言即時逐字稿工具
 
-一個使用瀏覽器 Web Speech API 的即時語音轉文字工具。
+瀏覽器端的語音轉文字工具，提供**五種辨識引擎**（Web Speech、Vosk、sherpa-onnx、Whisper、MOSS 會議轉寫）：可即時語音辨識、批次轉寫音檔／影片，並一鍵輸出標準 SRT 字幕。
 
-## 功能
+## 特色
 
-- **即時語音辨識**：支援多種語言的即時語音轉文字
-- **多語言介面**：可切換中文/英文介面
-- **音量偵測**：即時顯示麥克風音量
-- **匯出功能**：可匯出為 .txt 檔案
-- **複製功能**：可複製逐字稿內容
-- **清空功能**：可一鍵清除逐字稿
+- **五種辨識引擎**：雲端 Web Speech 與 MOSS、本機 Vosk / sherpa-onnx / Whisper（WASM / WebGPU），引擎卡片式選擇器標明隱私等級（🔒 本機／☁️ 雲端）並附快速開始引導
+- **即時語音辨識**：多語言即時轉文字，搭配音量偵測即時回饋；空白鍵快速開始／停止
+- **MOSS 會議轉寫**：拖放音訊／影片檔上傳，自動轉寫並標示說話人（S01、S02…），可一鍵匯出標準 `.srt` 字幕
+- **繁體中文輸出**：辨識結果自動簡轉繁（opencc-js）
+- **多語言介面**：中文／英文一鍵切換
+- **匯出／複製／清空**：逐字稿可複製或匯出 .txt；MOSS 結果可輸出 .srt
+- **增量渲染**：長會議逐字稿只增量更新畫面，不整份重建
+
+## 引擎列表
+
+| 引擎 | 處理位置 | 用途 |
+| ---- | ------- | ---- |
+| Web Speech | ☁️ 雲端 | 即時語音辨識 |
+| Vosk | 🔒 本機 | 即時辨識（WASM，支援上傳自訂模型） |
+| sherpa-onnx | 🔒 本機 | 即時串流辨識（WASM） |
+| Whisper | 🔒 本機 | 即時辨識（WebGPU，WASM 退路；tiny/base/small 模型） |
+| MOSS-Transcribe-Diarize | ☁️ 雲端批次 | 音訊／影片批次轉寫＋說話人分離＋SRT 匯出 |
 
 ## 支援語言
 
@@ -24,24 +35,26 @@
 
 ## 使用說明
 
-1. 允許瀏覽器存取麥克風
-2. 選擇辨識語言
-3. 點擊「開始辨識」按鈕
-4. 說話後文字會即時顯示
-5. 點擊「停止辨識」結束
-6. 可複製或匯出逐字稿
+1. 選擇辨識引擎（引擎卡片或下拉選單）；本機引擎首次使用會下載模型
+2. 即時引擎：允許瀏覽器存取麥克風 → 點「開始辨識」→ 說話後文字即時顯示 → 「停止辨識」→ 複製或匯出
+3. MOSS：拖放或點選音訊／影片檔 → 點「批次轉寫」→ 完成後輸出 SRT 字幕
 
 ## 技術說明
 
-- 使用 Web Speech API (`webkitSpeechRecognition`)
-- 音量偵測使用 Web Audio API (`AudioContext`, `AnalyserNode`)
-- 使用 LocalStorage 儲存使用者偏好設定
+- **Web Speech**：`webkitSpeechRecognition`
+- **Vosk**：`vosk-browser`（WASM）；**sherpa-onnx**：WASM 串流辨識；**Whisper**：transformers.js + WebGPU（npm CDN 載入模型，Cache Storage 快取）
+- **MOSS**：Hugging Face Space（官方 Gradio / 社群 LiteRT）批次轉寫，`parseMossGradio` 逐行解析時間戳與說話人
+- 辨識結果以 opencc-js 簡轉繁；音量偵測使用 **Web Audio API**（`AudioContext`, `AnalyserNode`）
+- 偏好設定存於 LocalStorage；本機模型檔由瀏覽器快取（Cache Storage）
 
 ## 隱私說明
 
-此工具會將語音資料傳送至 Google 伺服器處理，請勿用於敏感性內容。
+- 🔒 **本機引擎**（Vosk／sherpa／Whisper）：音訊完全不出裝置
+- ☁️ **雲端引擎**（Web Speech／MOSS）：音訊會送至第三方伺服器處理，請勿用於敏感性內容
 
-## 本次修正 (2025-05-16)
+## 歷史變更
+
+### 2025-05-16
 
 1. **提取常數**：將魔法數字統一放至 `CONFIG` 物件
    - `RESTART_DELAY_MOBILE: 200`
