@@ -192,6 +192,20 @@
     #copyBtn { background: #b87825 }
     #exportBtn { background: #16856f }
     #clearBtn { background: #c74747 }
+    /* 按下的即時回饋（放在 hover 之後，同權重時由來源順序決定勝負） */
+    button.action:active:not(:disabled) {
+      transform: translateY(1px) scale(.98); filter: brightness(.88);
+      box-shadow: 0 2px 6px #0004;
+    }
+    /* 模型面板的按鈕原本沒有底色，疊在半透明面板上完全看不出是可按的；
+       改為實心深靛藍，白字對比約 8:1 */
+    #loadVoskBtn, #loadSherpaBtn, #loadWhisperBtn { background: #2c37a4; border-color: #ffffffc4 }
+    #loadVoskBtn:hover:not(:disabled), #loadSherpaBtn:hover:not(:disabled), #loadWhisperBtn:hover:not(:disabled) { background: #3a47c4 }
+    /* 已載入（已點擊且成功）→ 綠色 + 勾勾，跟還沒按過的深靛藍一眼可分 */
+    #loadVoskBtn.done, #loadSherpaBtn.done, #loadWhisperBtn.done { background: #0e6b57; border-color: #a6f2d3 }
+    #loadVoskBtn.done:hover:not(:disabled), #loadSherpaBtn.done:hover:not(:disabled), #loadWhisperBtn.done:hover:not(:disabled) { background: #14856d }
+    #clearSherpaCacheBtn { background: #7d2f57; border-color: #ffffffc4 }
+    #clearSherpaCacheBtn:hover:not(:disabled) { background: #96386a }
     .notice {
       padding: 12px 15px; color: #161616; background: #ffd86a;
       border-radius: 10px; text-align: center; font-weight: 700; margin-bottom: 14px;
@@ -946,6 +960,33 @@
     el.statusState.textContent = state.stopping ? t().processing : (state.running ? t().listening : t().idle);
     document.title = (state.running ? '● ' : '') + t().pageTitle;
     syncEngineCards();
+    syncModelButtons();
+  }
+
+  // 模型按鈕要能一眼看出「還沒按過」與「已載入成功」，狀態直接對應各引擎目前的載入結果；
+  // 換模型／換來源、載入失敗或裝置掉線時會自動退回未載入的外觀
+  function syncModelButtons() {
+    for (const [button, done] of [
+      [el.loadVosk, vosk.loaded],
+      [el.loadSherpa, sherpaBaseMatches()],
+      [el.loadWhisper, !!whisper.pipe && whisper.model === WHISPER_MODELS[el.whisperModel.value]]
+    ]) {
+      button.classList.toggle('done', done);
+      button.textContent = done ? `✓ ${t().loadModel}` : t().loadModel;
+      if (done) button.title = t().loaded;
+      else button.removeAttribute('title');
+    }
+  }
+
+  // 跟 loadSherpa 判斷「資產位置是否與已載入的一致」用同一套規則
+  function sherpaBaseMatches() {
+    if (!sherpa.loaded || !sherpa.base) return false;
+    try {
+      const dir = new URL(el.sherpaBase.value.trim().replace(/\/?$/, '/'), document.baseURI).href;
+      return dir === sherpa.base;
+    } catch (error) {
+      return false;
+    }
   }
 
   function syncEngineCards() {
@@ -1128,6 +1169,7 @@
         el.voskBar.classList.remove('indeterminate');
         el.voskBar.style.width = vosk.loaded ? '100%' : '0';
         el.loadVosk.disabled = false;
+        syncModelButtons();
       }
     })();
 
@@ -1383,6 +1425,7 @@
         el.sherpaBar.style.width = sherpa.loaded ? '100%' : '0';
         el.loadSherpa.disabled = false;
         sherpa.loadPromise = null;
+        syncModelButtons();
       }
     })();
 
@@ -1611,6 +1654,7 @@
         el.whisperBar.classList.remove('indeterminate');
         el.whisperBar.style.width = whisper.pipe ? '100%' : '0';
         el.loadWhisper.disabled = false;
+        syncModelButtons();
       }
     })();
 
@@ -2286,24 +2330,30 @@
   });
   el.lang.onchange = save;
   el.vad.onchange = save;
-  el.sherpaBase.onchange = save;
+  el.sherpaBase.onchange = () => {
+    save();
+    syncModelButtons();
+  };
   // 運算位置會影響狀態卡的「執行環境」，切換時要一起更新
   el.mossSpace.onchange = updateEngine;
   el.whisperModel.onchange = () => {
     el.whisperStatus.textContent = t().modelChanged;
     el.whisperStatus.className = 'model-status';
     save();
+    syncModelButtons();
   };
   el.voskLang.onchange = () => {
     vosk.loaded = false;
     el.voskStatus.textContent = t().modelChanged;
     el.voskStatus.className = 'model-status';
+    syncModelButtons();
   };
   el.voskSource.onchange = () => {
     vosk.loaded = false;
     el.voskStatus.textContent = t().sourceChanged;
     el.voskStatus.className = 'model-status';
     syncVoskSourceRows();
+    syncModelButtons();
   };
   el.control.onclick = toggle;
   el.loadVosk.onclick = loadVosk;
