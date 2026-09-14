@@ -42,7 +42,7 @@ git rm --cached models/*.zip && printf 'models/*.zip\n' >> .gitignore
 | --- | --- | --- |
 | Whisper | ✅ 真實百分比 | 走 `whisper-worker.js` 的 `progress_callback`，狀態列會顯示 `53%（decoder_model_merged_q4.onnx）` |
 | Vosk | ⚠️ 無 | 模型由 `vosk-browser` 在自己的 Worker 內抓取，外部拿不到進度 |
-| sherpa | ⚠️ 無 | `.data` 由 App 自己抓，可改用 `fetch` + `ReadableStream` 累計位元組做百分比 |
+| sherpa | ✅ 真實百分比與 MB | 自行 `fetch` 190 MB 的 `.data` 並累計位元組（狀態列會顯示 `Downloading 64.0 / 189.8 MB（33.7%）`） |
 
 ## 三條還沒做的路線
 

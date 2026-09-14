@@ -11,8 +11,12 @@
        'unsafe-eval' 則是 vosk-browser 的 worker 會 eval（實測拿掉後模型永遠載不進去），
        emscripten 系的程式碼也常有此需求。CSP 在這裡主要還是擋「來源」，
        讓被換掉的 CDN 檔案無法注入執行。 -->
+  <!-- CSP 註記：sherpa 的膠水層（sherpa-onnx-asr.js、sherpa-onnx-wasm-main-asr.js）
+       是用 script 標籤從 Hugging Face 載入的，所以 script-src 必須允許 HF；只寫在
+       connect-src 不夠 —— 實測預設資產位置會被 CSP 直接擋掉、sherpa 完全載不起來
+       （Load failed: Script load failed）。hf.co 是 .wasm/.data 實際的 CDN 主機。 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co;
     style-src 'self' 'unsafe-inline';
     img-src 'self' data: blob:;
     connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space;
