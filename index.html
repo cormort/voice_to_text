@@ -11,8 +11,12 @@
        'unsafe-eval' 則是 vosk-browser 的 worker 會 eval（實測拿掉後模型永遠載不進去），
        emscripten 系的程式碼也常有此需求。CSP 在這裡主要還是擋「來源」，
        讓被換掉的 CDN 檔案無法注入執行。 -->
+  <!-- CSP 註記：sherpa 的膠水層（sherpa-onnx-asr.js、sherpa-onnx-wasm-main-asr.js）
+       是用 script 標籤從 Hugging Face 載入的，所以 script-src 必須允許 HF；只寫在
+       connect-src 不夠 —— 實測預設資產位置會被 CSP 直接擋掉、sherpa 完全載不起來
+       （Load failed: Script load failed）。hf.co 是 .wasm/.data 實際的 CDN 主機。 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co;
     style-src 'self' 'unsafe-inline';
     img-src 'self' data: blob:;
     connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space;
@@ -402,6 +406,9 @@
   const SAMPLE_RATE = 16000;
   const SHERPA_DATA_FILE = 'sherpa-onnx-wasm-main-asr.data';
   const SHERPA_CACHE = 'sherpa-onnx-model-v1';
+  // Vosk 的模型也自己抓（才有下載進度，見 fetchVoskPackage）。獨立快取名稱，
+  // 不與 service worker 的外殼快取混在一起，清外殼時不會連 42 MB 的模型一起清掉。
+  const VOSK_CACHE = 'vosk-model-v1';
   const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   const WEB_RESTART_DELAY = IS_MOBILE ? 200 : 500;
 
@@ -1089,6 +1096,76 @@
     }
   }
 
+  // ==================== sherpa-onnx Worker（把串流解碼移出主執行緒）====================
+  // 為什麼：原本同步解碼在主執行緒，實測 15 秒串流有 44 個長任務、最長 111 ms（占 18.9%），
+  // 會有可見掉幀。下載與快取仍留在主執行緒（進度條與 Cache Storage 行為不變），
+  // 位元組以 transferable 交給 Worker（零拷貝）。
+  let sherpaWorker = null;
+  let sherpaWorkerPending = null;      // load/flush 這種「一次一答」的等待
+  const sherpaWorkerHandlers = new Set();
+
+  function ensureSherpaWorker() {
+    if (sherpaWorker) return sherpaWorker;
+    try {
+      sherpaWorker = new Worker('sherpa-worker.js');   // classic worker：要用 importScripts 載入膠水層
+    } catch (error) {
+      console.warn('sherpa worker unavailable; staying on the main thread:', error);
+      sherpaWorker = null;
+      return null;
+    }
+    sherpaWorker.onmessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === 'status') { el.sherpaStatus.textContent = msg.status; return; }
+      if (msg.type === 'error') {
+        console.warn('[sherpa-worker]', msg.phase, msg.message);
+        if (sherpaWorkerPending) { const p = sherpaWorkerPending; sherpaWorkerPending = null; p.reject(new Error(msg.message)); }
+        for (const handler of sherpaWorkerHandlers) handler(msg);
+        return;
+      }
+      if (sherpaWorkerPending && (msg.type === 'ready' || msg.type === 'final' || msg.type === 'started')) {
+        const p = sherpaWorkerPending;
+        sherpaWorkerPending = null;
+        p.resolve(msg);
+        if (msg.type !== 'final') return;      // ready/started 不必再轉給結果處理器
+      }
+      for (const handler of sherpaWorkerHandlers) handler(msg);
+    };
+    sherpaWorker.onerror = (event) => {
+      console.warn('sherpa worker crashed:', event.message || event);
+      if (sherpaWorkerPending) { const p = sherpaWorkerPending; sherpaWorkerPending = null; p.reject(new Error(event.message || 'worker crash')); }
+      try { sherpaWorker.terminate(); } catch (error) { /* 已經死了 */ }
+      sherpaWorker = null;
+    };
+    return sherpaWorker;
+  }
+
+  function sherpaWorkerAsk(payload, transfer) {
+    const worker = ensureSherpaWorker();
+    if (!worker) return Promise.reject(new Error('worker unavailable'));
+    if (sherpaWorkerPending) return Promise.reject(new Error('worker busy'));
+    return new Promise((resolve, reject) => {
+      sherpaWorkerPending = { resolve, reject };
+      try {
+        worker.postMessage(payload, transfer || []);
+      } catch (error) {
+        sherpaWorkerPending = null;
+        reject(error);
+      }
+    });
+  }
+
+  function sherpaWorkerSend(payload, transfer) {
+    const worker = ensureSherpaWorker();
+    if (!worker) return false;
+    try {
+      worker.postMessage(payload, transfer || []);
+      return true;
+    } catch (error) {
+      console.warn('sherpa worker postMessage failed:', error);
+      return false;
+    }
+  }
+
   // ==================== Whisper Worker（把推論移出主執行緒）====================
   // 為什麼：pipeline 在主執行緒跑時，單一 chunk（chunk_length_s: 15）在 WASM 後端
   // 實測阻塞主執行緒 12,295 ms、占串流時間 49.6% —— 整頁凍結、按鈕沒反應。
@@ -1190,6 +1267,47 @@
   }
 
   // ==================== Vosk offline engine ====================
+  // vosk-browser 的 createModel 會在自己的 Worker 內抓模型，外部拿不到任何進度 ——
+  // 42 MB 的內建模型只看到一個轉圈動畫。這裡改成自己抓（有 MB 與百分比、可進 Cache
+  // Storage），再用 blob: URL 交給 createModel —— 使用者自選檔案那條路徑本來就是傳
+  // blob: URL，所以這是它既有支援的形式。
+  async function fetchVoskPackage(url) {
+    let cache = null;
+    try {
+      cache = await caches.open(VOSK_CACHE);
+    } catch (error) {
+      console.warn('Cache Storage unavailable:', error);
+    }
+
+    if (cache) {
+      const hit = await cache.match(url);
+      if (hit) {
+        el.voskBar.classList.remove('indeterminate');
+        el.voskBar.style.width = '100%';
+        el.voskStatus.textContent = `${t().voskLoading}（本地快取）`;
+        return hit.arrayBuffer();
+      }
+    }
+
+    const bytes = await downloadInChunks(url, (loaded, total) => {
+      const pct = Math.round((loaded / total) * 100);
+      el.voskBar.classList.remove('indeterminate');
+      el.voskBar.style.width = `${pct}%`;
+      el.voskStatus.textContent =
+        `${t().voskLoading} ${(loaded / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB（${pct}%）`;
+    });
+
+    if (cache) {
+      try {
+        await cache.put(url, new Response(bytes, { headers: { 'Content-Type': 'application/zip' } }));
+      } catch (error) {
+        console.warn('Caching the Vosk model failed:', error);
+      }
+    }
+
+    return bytes.buffer;
+  }
+
   async function loadVosk() {
     if (vosk.loadPromise) return vosk.loadPromise;
 
@@ -1208,17 +1326,24 @@
         await loadScript(CDN.vosk, 'Vosk', CDN.voskIntegrity);
 
         const source = el.voskSource.value;
-        if (source === 'builtin') {
-          if (window.location.protocol === 'file:') throw new Error(t().voskFileProtocol);
-          modelUrl = VOSK_MODELS[el.voskLang.value];
-        } else if (source === 'file') {
+        if (source === 'builtin' || source === 'url') {
+          let target;
+          if (source === 'builtin') {
+            if (window.location.protocol === 'file:') throw new Error(t().voskFileProtocol);
+            target = VOSK_MODELS[el.voskLang.value];
+          } else {
+            target = el.voskUrl.value.trim();
+            if (!target) throw new Error(t().voskNoUrl);
+          }
+          // 自己抓才有進度；抓完用 blob: URL 交給 vosk-browser
+          const packageData = await fetchVoskPackage(target);
+          modelUrl = URL.createObjectURL(new Blob([packageData]));
+          revokeModelUrl = true;
+        } else {
           const file = el.voskFile.files[0];
           if (!file) throw new Error(t().voskNoFile);
           modelUrl = URL.createObjectURL(file);
           revokeModelUrl = true;
-        } else {
-          modelUrl = el.voskUrl.value.trim();
-          if (!modelUrl) throw new Error(t().voskNoUrl);
         }
 
         removeVoskRecognizer();
@@ -1335,7 +1460,8 @@
 
   // 單一個 199 MB 的 fetch 只要閃斷一次就全部作廢，改成分段抓、逐段重試。
   // ponytail: 段落只存在記憶體，重整頁面仍會從頭開始；要跨重整續傳再說。
-  async function downloadInChunks(url) {
+  // onProgress 預設寫 sherpa 的進度條；Vosk 的模型下載也重用這支（見 fetchVoskPackage）
+  async function downloadInChunks(url, onProgress = setSherpaProgress) {
     const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
     if (!probe.ok) throw new Error(`${probe.status}: ${url}`);
 
@@ -1345,7 +1471,7 @@
       : 0;
 
     // 伺服器不支援 Range 就退回單次串流下載
-    if (!total) return streamWhole(url);
+    if (!total) return streamWhole(url, onProgress);
 
     const bytes = new Uint8Array(total);
     let loaded = 0;
@@ -1355,13 +1481,13 @@
       const part = await fetchRange(url, start, end);
       bytes.set(new Uint8Array(part), start);
       loaded += part.byteLength;
-      setSherpaProgress(loaded, total);
+      onProgress(loaded, total);
     }
 
     return bytes;
   }
 
-  async function streamWhole(url) {
+  async function streamWhole(url, onProgress = setSherpaProgress) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`${response.status}: ${url}`);
 
@@ -1375,7 +1501,7 @@
       if (done) break;
       chunks.push(value);
       loaded += value.length;
-      setSherpaProgress(loaded, total);
+      onProgress(loaded, total);
     }
 
     const bytes = new Uint8Array(loaded);
@@ -1464,6 +1590,43 @@
       el.sherpaStatus.className = 'model-status';
 
       try {
+        // 首選：Worker。190 MB 的下載與快取仍走 fetchSherpaPackage（進度條不變），
+        // 下載完的位元組用 transferable 交進去。
+        if (ensureSherpaWorker()) {
+          let glueUrls = null;
+          try {
+            // 兩支膠水層由頁面抓成文字再建立 blob: URL —— 跨網域的 importScripts 會失敗
+            // （實測 HF 的 .js 用 importScripts 載不起來），blob: 則在 CSP 允許清單內。
+            const glue = await Promise.all([
+              fetch(dir + 'sherpa-onnx-asr.js').then(r => { if (!r.ok) throw new Error('glue1 HTTP ' + r.status); return r.text(); }),
+              fetch(dir + 'sherpa-onnx-wasm-main-asr.js').then(r => { if (!r.ok) throw new Error('glue2 HTTP ' + r.status); return r.text(); })
+            ]);
+            glueUrls = glue.map(src => URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+
+            const packageData = await fetchSherpaPackage(dir + SHERPA_DATA_FILE);
+            el.sherpaStatus.textContent = t().sherpaLoading;
+            await sherpaWorkerAsk({
+              type: 'load', dir, glueUrls, package: packageData, sampleRate: SAMPLE_RATE
+            }, [packageData]);
+            sherpa.workerMode = true;
+            sherpa.recognizer = null;
+            sherpa.module = null;
+            sherpa.loaded = true;
+            sherpa.base = dir;
+            el.sherpaStatus.textContent = t().loaded;
+            el.sherpaStatus.className = 'model-status success';
+            return;
+          } catch (workerError) {
+            console.warn('sherpa worker path failed; falling back to the main thread:', workerError);
+            try { sherpaWorker?.terminate(); } catch (error) { /* 已經死了 */ }
+            sherpaWorker = null;
+            sherpa.workerMode = false;
+          } finally {
+            // Worker 在 load 階段就同步 importScripts 完兩支膠水層，之後可以安全撤銷
+            for (const url of glueUrls || []) { try { URL.revokeObjectURL(url); } catch (error) { /* 已撤銷 */ } }
+          }
+        }
+
         await loadScript(dir + 'sherpa-onnx-asr.js', 'createOnlineRecognizer');
 
         // 自行取得 199 MB 的 .data 並存進 Cache Storage，再用 getPreloadedPackage
@@ -1534,7 +1697,7 @@
   }
 
   async function startSherpa() {
-    if (!sherpa.loaded || !sherpa.recognizer) return showToast(t().loadFirst);
+    if (!sherpa.loaded || (!sherpa.recognizer && !sherpa.workerMode)) return showToast(t().loadFirst);
 
     begin();
     state.running = true;
@@ -1545,6 +1708,32 @@
     el.engine.disabled = el.lang.disabled = true;
 
     try {
+      if (sherpa.workerMode) {
+        // 結果一律由 Worker 推回來：endpoint 就 commit，其餘更新即時字幕
+        const handler = (msg) => {
+          if (msg.sessionId !== sessionId || !state.running) return;
+          if (msg.type === 'result' && !msg.started) {
+            const text = traditional(msg.text || '');
+            if (msg.endpoint) {
+              if (text) { state.interim = ''; commit(text); return; }
+            }
+            state.interim = text;
+            render();
+          }
+        };
+        sherpaWorkerHandlers.add(handler);
+        sherpa.workerHandler = handler;
+        sherpa.stream = { worker: true };          // 只作為「已在錄音」的旗標
+        await sherpaWorkerAsk({ type: 'start', sessionId });
+        sherpa.session = new AudioCapture(chunk => {
+          if (!state.running || state.stopping) return;
+          if (sessionId !== sherpa.sessionId || !sherpa.stream) return;
+          const copy = chunk.slice();
+          sherpaWorkerSend({ type: 'feed', sessionId, audio: copy }, [copy.buffer]);
+        }, setLevel);
+        await sherpa.session.start();
+        return;
+      }
       sherpa.stream = sherpa.recognizer.createStream();
       sherpa.session = new AudioCapture(chunk => {
         if (!state.running || state.stopping) return;
@@ -1572,7 +1761,14 @@
 
     const sessionId = sherpa.sessionId;
     try {
-      if (sherpa.stream && sherpa.recognizer) {
+      if (sherpa.workerMode) {
+        // Worker 模式：請 Worker 補靜音收尾並回傳最後結果（0.4 秒靜音那段邏輯在 Worker 內）
+        const final = await sherpaWorkerAsk({ type: 'flush', sessionId });
+        if (sessionId === sherpa.sessionId) {
+          const text = traditional(final?.text || '');
+          if (text) { state.interim = ''; commit(text); }
+        }
+      } else if (sherpa.stream && sherpa.recognizer) {
         // 補 0.4 秒靜音，讓模型吐出最後一段尚未收尾的語音
         sherpa.stream.acceptWaveform(SAMPLE_RATE, new Float32Array(Math.round(SAMPLE_RATE * 0.4)));
         sherpa.stream.inputFinished();
@@ -1584,7 +1780,13 @@
     } catch (error) {
       console.warn('sherpa flush failed:', error);
     } finally {
-      try { sherpa.stream?.free(); } catch (error) { console.warn(error); }
+      if (sherpa.workerMode) {
+        // 收掉這個 session 的結果處理器，並請 Worker 釋放 stream（避免累積）
+        if (sherpa.workerHandler) { sherpaWorkerHandlers.delete(sherpa.workerHandler); sherpa.workerHandler = null; }
+        sherpaWorkerSend({ type: 'free' });
+      } else {
+        try { sherpa.stream?.free(); } catch (error) { console.warn(error); }
+      }
       sherpa.stream = null;
       await sherpa.session?.stop();
       sherpa.session = null;
