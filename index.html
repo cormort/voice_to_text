@@ -406,6 +406,9 @@
   const SAMPLE_RATE = 16000;
   const SHERPA_DATA_FILE = 'sherpa-onnx-wasm-main-asr.data';
   const SHERPA_CACHE = 'sherpa-onnx-model-v1';
+  // Vosk 的模型也自己抓（才有下載進度，見 fetchVoskPackage）。獨立快取名稱，
+  // 不與 service worker 的外殼快取混在一起，清外殼時不會連 42 MB 的模型一起清掉。
+  const VOSK_CACHE = 'vosk-model-v1';
   const IS_MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   const WEB_RESTART_DELAY = IS_MOBILE ? 200 : 500;
 
@@ -1264,6 +1267,47 @@
   }
 
   // ==================== Vosk offline engine ====================
+  // vosk-browser 的 createModel 會在自己的 Worker 內抓模型，外部拿不到任何進度 ——
+  // 42 MB 的內建模型只看到一個轉圈動畫。這裡改成自己抓（有 MB 與百分比、可進 Cache
+  // Storage），再用 blob: URL 交給 createModel —— 使用者自選檔案那條路徑本來就是傳
+  // blob: URL，所以這是它既有支援的形式。
+  async function fetchVoskPackage(url) {
+    let cache = null;
+    try {
+      cache = await caches.open(VOSK_CACHE);
+    } catch (error) {
+      console.warn('Cache Storage unavailable:', error);
+    }
+
+    if (cache) {
+      const hit = await cache.match(url);
+      if (hit) {
+        el.voskBar.classList.remove('indeterminate');
+        el.voskBar.style.width = '100%';
+        el.voskStatus.textContent = `${t().voskLoading}（本地快取）`;
+        return hit.arrayBuffer();
+      }
+    }
+
+    const bytes = await downloadInChunks(url, (loaded, total) => {
+      const pct = Math.round((loaded / total) * 100);
+      el.voskBar.classList.remove('indeterminate');
+      el.voskBar.style.width = `${pct}%`;
+      el.voskStatus.textContent =
+        `${t().voskLoading} ${(loaded / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB（${pct}%）`;
+    });
+
+    if (cache) {
+      try {
+        await cache.put(url, new Response(bytes, { headers: { 'Content-Type': 'application/zip' } }));
+      } catch (error) {
+        console.warn('Caching the Vosk model failed:', error);
+      }
+    }
+
+    return bytes.buffer;
+  }
+
   async function loadVosk() {
     if (vosk.loadPromise) return vosk.loadPromise;
 
@@ -1282,17 +1326,24 @@
         await loadScript(CDN.vosk, 'Vosk', CDN.voskIntegrity);
 
         const source = el.voskSource.value;
-        if (source === 'builtin') {
-          if (window.location.protocol === 'file:') throw new Error(t().voskFileProtocol);
-          modelUrl = VOSK_MODELS[el.voskLang.value];
-        } else if (source === 'file') {
+        if (source === 'builtin' || source === 'url') {
+          let target;
+          if (source === 'builtin') {
+            if (window.location.protocol === 'file:') throw new Error(t().voskFileProtocol);
+            target = VOSK_MODELS[el.voskLang.value];
+          } else {
+            target = el.voskUrl.value.trim();
+            if (!target) throw new Error(t().voskNoUrl);
+          }
+          // 自己抓才有進度；抓完用 blob: URL 交給 vosk-browser
+          const packageData = await fetchVoskPackage(target);
+          modelUrl = URL.createObjectURL(new Blob([packageData]));
+          revokeModelUrl = true;
+        } else {
           const file = el.voskFile.files[0];
           if (!file) throw new Error(t().voskNoFile);
           modelUrl = URL.createObjectURL(file);
           revokeModelUrl = true;
-        } else {
-          modelUrl = el.voskUrl.value.trim();
-          if (!modelUrl) throw new Error(t().voskNoUrl);
         }
 
         removeVoskRecognizer();
@@ -1409,7 +1460,8 @@
 
   // 單一個 199 MB 的 fetch 只要閃斷一次就全部作廢，改成分段抓、逐段重試。
   // ponytail: 段落只存在記憶體，重整頁面仍會從頭開始；要跨重整續傳再說。
-  async function downloadInChunks(url) {
+  // onProgress 預設寫 sherpa 的進度條；Vosk 的模型下載也重用這支（見 fetchVoskPackage）
+  async function downloadInChunks(url, onProgress = setSherpaProgress) {
     const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
     if (!probe.ok) throw new Error(`${probe.status}: ${url}`);
 
@@ -1419,7 +1471,7 @@
       : 0;
 
     // 伺服器不支援 Range 就退回單次串流下載
-    if (!total) return streamWhole(url);
+    if (!total) return streamWhole(url, onProgress);
 
     const bytes = new Uint8Array(total);
     let loaded = 0;
@@ -1429,13 +1481,13 @@
       const part = await fetchRange(url, start, end);
       bytes.set(new Uint8Array(part), start);
       loaded += part.byteLength;
-      setSherpaProgress(loaded, total);
+      onProgress(loaded, total);
     }
 
     return bytes;
   }
 
-  async function streamWhole(url) {
+  async function streamWhole(url, onProgress = setSherpaProgress) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`${response.status}: ${url}`);
 
@@ -1449,7 +1501,7 @@
       if (done) break;
       chunks.push(value);
       loaded += value.length;
-      setSherpaProgress(loaded, total);
+      onProgress(loaded, total);
     }
 
     const bytes = new Uint8Array(loaded);
