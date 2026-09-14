@@ -1839,14 +1839,20 @@
       v.silence += ms;
       v.audio.push(chunk);
       v.samples += chunk.length;
-      if (v.silence >= 800 || v.samples >= SAMPLE_RATE * 15) {
-        const audio = concat(v.audio, v.samples);
-        const valid = v.speech >= 800;
-        v.speaking = false;
-        v.silence = v.speech = v.samples = 0;
-        v.audio = [];
-        return valid ? audio : null;
-      }
+    }
+
+    // 收段條件必須在兩條分支「之後」判斷。原本 15 秒上限只寫在靜音分支裡，所以只有
+    // 「說完停下來」才會被檢查；一路說不停（每塊都過門檻）時它永遠輪不到 —— 實測
+    // 60 秒連續語音切出 0 段、60 秒音訊全積在 v.audio，Whisper 那邊等於完全沒有輸出。
+    // 從上限切出來時 v.speaking 會歸零，下一塊若仍在說話會帶 0.4 秒 preRoll 重新起段，
+    // 剛好給切點一點重疊，不會把字切一半。
+    if (v.speaking && (v.silence >= 800 || v.samples >= SAMPLE_RATE * 15)) {
+      const audio = concat(v.audio, v.samples);
+      const valid = v.speech >= 800;
+      v.speaking = false;
+      v.silence = v.speech = v.samples = 0;
+      v.audio = [];
+      return valid ? audio : null;
     }
     return null;
   }

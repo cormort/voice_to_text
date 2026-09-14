@@ -69,4 +69,13 @@ assert.strictEqual(occurrences(r.flushed, 42), 1, 'flush 出來的音訊同樣�
 r = run([...silence(6), ...speech(3)]);
 assert.strictEqual(r.flushed, null, '不足 800 ms 的殘段不應 flush');
 
-console.log('vadPush/vadFlush: 5 checks passed');
+// 6) 一路說不停（完全沒有靜音塊）時，15 秒上限也要切段。
+//    這格原本沒測到：check 4 的腳本結尾有一塊靜音，走的是靜音分支。
+r = run([...silence(6), ...speech(470)]);   // 約 60 秒連續語音
+assert.ok(r.utterances.length >= 3, `連續語音應被 15 秒上限切成多段，實得 ${r.utterances.length}`);
+for (const u of r.utterances) {
+  assert.ok(u.length <= SAMPLE_RATE * 16, '每段不應遠超過 15 秒上限');
+}
+assert.ok(r.samples <= SAMPLE_RATE * 16, `緩衝不應無限成長，實得 ${(r.samples / SAMPLE_RATE).toFixed(1)} 秒`);
+
+console.log('vadPush/vadFlush: 6 checks passed');
