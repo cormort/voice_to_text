@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE = 'stt-shell-v1';
+const CACHE = 'stt-shell-v2';
 // 只清「自己的」外殼快取版本。transformers-cache（Whisper 模型）與
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
@@ -13,7 +13,8 @@ const ASSETS = [
   './', './manifest.webmanifest',
   './icon-192.png', './icon-512.png',
   './icon-maskable-192.png', './icon-maskable-512.png',
-  './apple-touch-icon.png'
+  './apple-touch-icon.png',
+  './whisper-worker.js'
 ];
 
 self.addEventListener('install', (event) => {
