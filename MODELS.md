@@ -8,45 +8,66 @@
 | 引擎 | 首次下載 | 來源 | 之後 |
 | --- | --- | --- | --- |
 | Web Speech | 0 | 瀏覽器/Google 雲端 | 不需模型 |
-| Vosk | **81 MB**（cn 42 MB + en 40 MB，zip） | **本 repo 的 git**（`models/*.zip`） | Service Worker 外殼快取（上限 64 MB） |
+| Vosk | **81 MB**（cn 42 MB + en 40 MB，zip） | **本 repo 的 git**（`models/*.zip`） | `VOSK_CACHE`（Cache Storage） |
 | sherpa-onnx | **約 199 MB**（`.wasm` + `.data`） | Hugging Face（`cormort/sherpa-zh-en-streaming`） | `SHERPA_CACHE`（Cache Storage） |
 | Whisper | tiny/base/small × q4（實測 base 載入 10.5–12 s） | HF（transformers.js） | 瀏覽器模型快取 |
 | MOSS | 0 | 雲端 HF Space | — |
 
-### 為什麼 Vosk 的 zip 放在 git 裡是個問題
-- repo 因此是 **82 MB**：clone、GitHub Pages 部署、CI 都快不起來。
-- GitHub Pages 對 `.zip` 只給 `max-age=600`，所以 sw.js 必須自己再包一層外殼快取
-  （`MAX_CACHE_BYTES = 64 MB` 就是為它設的）。
-- 已經有現成的替代模式：sherpa 的資產放在 HF、用 Cache Storage 管，Vosk 可以照做。
+### 把 Vosk 的 zip 搬到 HF —— 目前評估是「先不要做」
 
-### 搬到 HF 的步驟（需要在你的 HF 帳號操作，我無法代做）
+搬走唯一買到的東西是 **clone / CI / Pages 部署變快**；使用者端一毛都沒省（還是要抓 81 MB）。
+而要真的省到，代價比想像中大，所以這條先擱著，等 clone 或部署真的慢到有感再說。
+
+**代價：`git rm --cached` 不會讓 repo 變小。** 兩個 blob 是在 `6bb5145` 進來的，之後永遠留在
+歷史裡：
+
+```
+41.9 MB  models/vosk-model-small-cn-0.22.zip
+39.3 MB  models/vosk-model-small-en-us-0.15.zip
+```
+
+`git rm --cached` 只是讓「之後的 commit」不再帶它們，`.git` 仍是 82 MB，每次 clone 照抓。
+要降到 ~0.5 MB 必須用 `git filter-repo` 改寫歷史再 force-push —— 那會弄壞所有既有的 clone
+與未合併的 PR，是另一個層級的決定，不是收尾步驟。
+
+**另外，原本寫的「sw.js 靠 64 MB 外殼快取硬扛」是誤解。** `MAX_CACHE_BYTES`（`sw.js:11`）是
+「超過就不要快取」的上限保護，不是為 zip 設的機制；而且單顆 zip 是 42/40 MB，本來就在上限內。
+自從 `48e98e5` 之後，Vosk 的 zip 改由 `fetchVoskPackage` 用 Range 分段抓、存進自己的
+`VOSK_CACHE`，根本不會經過外殼快取。
+
+### 真的要搬的時候，步驟是（需要在你的 HF 帳號操作）
 ```sh
 # 1) 建一個模型 repo（或用現有的），把兩個 zip 傳上去
 huggingface-cli upload cormort/vosk-models-zh-en models/vosk-model-small-cn-0.22.zip .
 huggingface-cli upload cormort/vosk-models-zh-en models/vosk-model-small-en-us-0.15.zip .
 
-# 2) index.html 的內建模型路徑改成 HF resolve 網址（約 392 行）
+# 2) index.html 的 VOSK_MODELS 路徑改成 HF resolve 網址
 #    cn: 'https://huggingface.co/cormort/vosk-models-zh-en/resolve/main/vosk-model-small-cn-0.22.zip'
 #    en: 'https://huggingface.co/cormort/vosk-models-zh-en/resolve/main/vosk-model-small-en-us-0.15.zip'
 
 # 3) 確認 CSP 的 connect-src 已含 huggingface.co（目前有）
-# 4) 從 git 移除 zip 並加進 .gitignore，repo 由 82 MB 降到 ~0.5 MB
+
+# 4) 停止追蹤（注意：這一步「不會」讓 repo 變小，只是不再新增）
 git rm --cached models/*.zip && printf 'models/*.zip\n' >> .gitignore
+
+# 5) 真正要省空間才做這步 —— 改寫歷史並 force-push，會弄壞所有既有 clone
+#    pip install git-filter-repo
+git filter-repo --path models/vosk-model-small-cn-0.22.zip \
+                --path models/vosk-model-small-en-us-0.15.zip --invert-paths
+git push --force origin main
 ```
-> 注意：搬移後第一次載入仍要抓 81 MB，但那是「使用者端一次」而不是「每次 clone／每次部署」。
-> 若希望第一次也更快，得換更小的模型（見下方路線）。
 
 ## 下載進度回報的現狀
 
 | 引擎 | 進度 | 說明 |
 | --- | --- | --- |
 | Whisper | ✅ 真實百分比 | 走 `whisper-worker.js` 的 `progress_callback`，狀態列會顯示 `53%（decoder_model_merged_q4.onnx）` |
-| Vosk | ⚠️ 無 | 模型由 `vosk-browser` 在自己的 Worker 內抓取，外部拿不到進度 |
+| Vosk | ✅ 真實百分比與 MB | `48e98e5` 起改由 `fetchVoskPackage` 自行分段下載（狀態列會顯示 `21.4 / 41.9 MB（51%）`），抓完用 blob: URL 交給 `createModel` |
 | sherpa | ✅ 真實百分比與 MB | 自行 `fetch` 190 MB 的 `.data` 並累計位元組（狀態列會顯示 `Downloading 64.0 / 189.8 MB（33.7%）`） |
 
 ## 三條還沒做的路線
 
-### 1. SenseVoice（本機批次，準確率大勝 Vosk small）
+### 1. SenseVoice（本機批次）—— 評估後決定不做
 Tencent 的 AuK 專案內附的本地 ASR 就是 **SenseVoiceSmall**（README：「omit these to use local
 SenseVoiceSmall」）。它的價值在**檔案／批次轉寫**：準確率遠高於 `vosk-model-small-*`，而且仍在
 本機（可取代或補強 MOSS 雲端那條，保住隱私）。
@@ -57,6 +78,11 @@ SenseVoiceSmall」）。它的價值在**檔案／批次轉寫**：準確率遠�
   sherpa-onnx 的 WASM 建置流程把 SenseVoice 的 onnx 用 `--preload-file` 包一份新的 `.data`，
   再上傳到 HF，然後用設定頁既有的「資產位置」欄位指過去。**這一步需要 emscripten 建置環境**，
   不是改幾行 JS 就能完成。
+
+**結論：不做。** 代價是要長期養一套 C++／emscripten 建置流程，外加另一份約 200 MB 的 HF 資產
+要託管與維護；買到的是一個**非串流的批次引擎**。但批次這格已經有 MOSS（雲端），而「本機、準確率
+勝過 Vosk small」這格 Whisper small 已經站著了。它唯一補的洞其實沒有空著，投入與回報不成比例。
+哪天 Whisper 在批次品質上真的不夠用，再回來看這條。
 
 ### 2. 更大的 Whisper 模型（現在才可行）
 Worker 化之後，模型推論不再阻塞主執行緒 —— 這解鎖了以前不敢用的選項：
