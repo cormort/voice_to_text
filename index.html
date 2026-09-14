@@ -708,6 +708,10 @@
       this.silent.connect(this.context.destination);
 
       this.node.port.onmessage = e => {
+        // 收尾競態：stop() 會把 this.context 設回 null，但 worklet 可能還有一則訊息在路上
+        // （實測在「停止後立刻關閉頁面」時會炸 Cannot read properties of null (reading
+        // 'sampleRate')）。這一則直接丟掉即可，音訊已經沒有意義了。
+        if (!this.context) return;
         const input = e.data;
         let sum = 0;
         for (let i = 0; i < input.length; i++) sum += input[i] * input[i];

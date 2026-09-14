@@ -13,6 +13,19 @@
 - **增量渲染**：長會議逐字稿只增量更新畫面，不整份重建
 - **PWA**：可安裝到桌面／主畫面，外殼離線快取（模型檔仍需網路下載），圖示含 maskable 版本
 
+## 效能量測
+
+```sh
+node test_speech_perf.js                                        # 量 Vosk 與 Whisper
+PERF_ENGINES=vosk,sherpa,whisper,webspeech,moss node test_speech_perf.js
+PERF_MAX_BLOCK_MS=200 node test_speech_perf.js                  # 當 CI 門檻
+```
+
+把 `say` 產生的中文語音餵進 Chromium 的假麥克風，量每個引擎**阻塞主執行緒多久**
+（`PerformanceObserver('longtask')`）。這支量到的關鍵數字：Whisper 在 WASM 後端、Worker 化
+之前，單一 chunk 阻塞 **12,295 ms**（占 25 秒串流的 49.6%）；Worker 化之後為 **0 ms**。
+模型下載量、來源與後續路線見 [MODELS.md](MODELS.md)。
+
 ## 引擎列表
 
 | 引擎 | 處理位置 | 用途 |
