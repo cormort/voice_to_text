@@ -251,7 +251,6 @@
       #transcript { font-size: 11pt }
     }
   </style>
-  </script>
 </head>
 <body>
   <div class="topbar"><button id="uiLangToggle" type="button">Switch to English</button></div>
@@ -535,7 +534,7 @@
         '任何涉及<strong>個人隱私</strong>的對話（例如與醫師、律師）。',
         '任何包含<strong>敏感個資</strong>的內容（身分證號、密碼等）。'
       ],
-      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx 或 Whisper。本頁使用 Google Analytics 統計造訪次數，但不會上傳逐字稿或麥克風音訊。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
+      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx 或 Whisper。本頁不含任何分析或追蹤程式，也不會上傳逐字稿或麥克風音訊。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
     },
     en: {
       pageTitle: 'Multilingual Real-time Transcription', title: 'Multilingual Real-time Transcription',
@@ -632,7 +631,7 @@
         'Conversations involving <strong>personal privacy</strong> (e.g. doctors, lawyers).',
         'Any content with <strong>sensitive personal data</strong> (ID numbers, passwords).'
       ],
-      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx or Whisper. This page uses Google Analytics for visit counts only; transcripts and microphone audio are never uploaded. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
+      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx or Whisper. This page carries no analytics or tracking, and transcripts and microphone audio are never uploaded. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
     }
   };
   const state = {
@@ -1135,6 +1134,17 @@
       if (sherpaWorkerPending) { const p = sherpaWorkerPending; sherpaWorkerPending = null; p.reject(new Error(event.message || 'worker crash')); }
       try { sherpaWorker.terminate(); } catch (error) { /* 已經死了 */ }
       sherpaWorker = null;
+      // Worker 死了 = 那份 199 MB 的模型也沒了。若不把 loaded 清掉，UI 還寫著「已載入」，
+      // 下一次 start 會對著一個全新的、沒有 recognizer 的 Worker 發 start，錯誤訊息完全看不懂。
+      if (sherpa.workerMode) {
+        sherpa.workerMode = false;
+        sherpa.loaded = false;
+        sherpa.stream = null;
+        if (sherpa.workerHandler) { sherpaWorkerHandlers.delete(sherpa.workerHandler); sherpa.workerHandler = null; }
+        el.sherpaStatus.textContent = t().loadFailed + (event.message || 'worker crash');
+        el.sherpaStatus.className = 'model-status error';
+        syncModelButtons();
+      }
     };
     return sherpaWorker;
   }
@@ -1892,20 +1902,33 @@
         await disposeWhisperPipeline(previousPipeline);
 
         // 首選：Worker。WebGPU/WASM 的選擇與退路都在 Worker 內（見 whisper-worker.js）
+        // 失敗要能退回主執行緒：Worker 建得起來不代表它載得動（CDN 被擋、import 失敗、
+        // 舊瀏覽器不支援 module worker）。沒有這層 try/catch 的話，這些情況會直接判整個
+        // 引擎死亡，而主執行緒路徑（這個 commit 之前唯一的路徑）其實還有機會成功。
         if (ensureWhisperWorker()) {
-          const ready = await whisperWorkerRequest({
-            type: 'load', model: modelName, preferWebGpu: await hasWebGpuAdapter()
-          });
-          whisper.pipe = whisperWorkerPipeline;
-          whisper.model = modelName;
-          whisper.device = ready.device;
-          el.whisperStatus.textContent = `${t().loaded}（${whisper.device}）`;
-          el.whisperStatus.className = 'model-status success';
-          if (state.engine === 'whisper') el.statusRuntime.textContent = whisper.device;
-          return;
+          try {
+            const ready = await whisperWorkerRequest({
+              type: 'load', model: modelName, preferWebGpu: await hasWebGpuAdapter()
+            });
+            whisper.pipe = whisperWorkerPipeline;
+            whisper.model = modelName;
+            whisper.device = ready.device;
+            el.whisperStatus.textContent = `${t().loaded}（${whisper.device}）`;
+            el.whisperStatus.className = 'model-status success';
+            if (state.engine === 'whisper') el.statusRuntime.textContent = whisper.device;
+            return;
+          } catch (workerError) {
+            console.warn('Whisper worker path failed; falling back to the main thread:', workerError);
+            try { whisperWorker?.terminate(); } catch (error) { /* 已經死了 */ }
+            whisperWorker = null;
+            whisperWorkerPending.clear();
+            whisper.pipe = null;
+            el.whisperBar.classList.add('indeterminate');
+            el.whisperBar.style.width = '';
+          }
         }
 
-        // 後備：主執行緒（Worker 不可用時的原本路徑）
+        // 後備：主執行緒（Worker 不可用或載入失敗時的原本路徑）
         whisper.module ||= await loadTransformers();
 
         if (await hasWebGpuAdapter()) {
@@ -2004,9 +2027,9 @@
           } catch (error) {
             console.error('Whisper inference failed:', error);
             showToast(t().whisperFailed + (error.message || error));
+            // Worker 路徑會直接帶 deviceLost 旗標；主執行緒路徑只能看訊息內容
             const msg = String(error?.message || '').toLowerCase();
-            void error?.deviceLost;   // Worker 路徑會帶這個標記（下面用訊息內容判斷，兩者都通）
-            if (msg.includes('device lost') || msg.includes('webgpu') || msg.includes('oom')) {
+            if (error?.deviceLost || msg.includes('device lost') || msg.includes('webgpu') || msg.includes('oom')) {
               whisper.pipe = null;
               whisper.model = null;
               whisper.device = null;
