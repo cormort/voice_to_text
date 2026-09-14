@@ -1093,6 +1093,76 @@
     }
   }
 
+  // ==================== sherpa-onnx Worker（把串流解碼移出主執行緒）====================
+  // 為什麼：原本同步解碼在主執行緒，實測 15 秒串流有 44 個長任務、最長 111 ms（占 18.9%），
+  // 會有可見掉幀。下載與快取仍留在主執行緒（進度條與 Cache Storage 行為不變），
+  // 位元組以 transferable 交給 Worker（零拷貝）。
+  let sherpaWorker = null;
+  let sherpaWorkerPending = null;      // load/flush 這種「一次一答」的等待
+  const sherpaWorkerHandlers = new Set();
+
+  function ensureSherpaWorker() {
+    if (sherpaWorker) return sherpaWorker;
+    try {
+      sherpaWorker = new Worker('sherpa-worker.js');   // classic worker：要用 importScripts 載入膠水層
+    } catch (error) {
+      console.warn('sherpa worker unavailable; staying on the main thread:', error);
+      sherpaWorker = null;
+      return null;
+    }
+    sherpaWorker.onmessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === 'status') { el.sherpaStatus.textContent = msg.status; return; }
+      if (msg.type === 'error') {
+        console.warn('[sherpa-worker]', msg.phase, msg.message);
+        if (sherpaWorkerPending) { const p = sherpaWorkerPending; sherpaWorkerPending = null; p.reject(new Error(msg.message)); }
+        for (const handler of sherpaWorkerHandlers) handler(msg);
+        return;
+      }
+      if (sherpaWorkerPending && (msg.type === 'ready' || msg.type === 'final' || msg.type === 'started')) {
+        const p = sherpaWorkerPending;
+        sherpaWorkerPending = null;
+        p.resolve(msg);
+        if (msg.type !== 'final') return;      // ready/started 不必再轉給結果處理器
+      }
+      for (const handler of sherpaWorkerHandlers) handler(msg);
+    };
+    sherpaWorker.onerror = (event) => {
+      console.warn('sherpa worker crashed:', event.message || event);
+      if (sherpaWorkerPending) { const p = sherpaWorkerPending; sherpaWorkerPending = null; p.reject(new Error(event.message || 'worker crash')); }
+      try { sherpaWorker.terminate(); } catch (error) { /* 已經死了 */ }
+      sherpaWorker = null;
+    };
+    return sherpaWorker;
+  }
+
+  function sherpaWorkerAsk(payload, transfer) {
+    const worker = ensureSherpaWorker();
+    if (!worker) return Promise.reject(new Error('worker unavailable'));
+    if (sherpaWorkerPending) return Promise.reject(new Error('worker busy'));
+    return new Promise((resolve, reject) => {
+      sherpaWorkerPending = { resolve, reject };
+      try {
+        worker.postMessage(payload, transfer || []);
+      } catch (error) {
+        sherpaWorkerPending = null;
+        reject(error);
+      }
+    });
+  }
+
+  function sherpaWorkerSend(payload, transfer) {
+    const worker = ensureSherpaWorker();
+    if (!worker) return false;
+    try {
+      worker.postMessage(payload, transfer || []);
+      return true;
+    } catch (error) {
+      console.warn('sherpa worker postMessage failed:', error);
+      return false;
+    }
+  }
+
   // ==================== Whisper Worker（把推論移出主執行緒）====================
   // 為什麼：pipeline 在主執行緒跑時，單一 chunk（chunk_length_s: 15）在 WASM 後端
   // 實測阻塞主執行緒 12,295 ms、占串流時間 49.6% —— 整頁凍結、按鈕沒反應。
@@ -1468,6 +1538,43 @@
       el.sherpaStatus.className = 'model-status';
 
       try {
+        // 首選：Worker。190 MB 的下載與快取仍走 fetchSherpaPackage（進度條不變），
+        // 下載完的位元組用 transferable 交進去。
+        if (ensureSherpaWorker()) {
+          let glueUrls = null;
+          try {
+            // 兩支膠水層由頁面抓成文字再建立 blob: URL —— 跨網域的 importScripts 會失敗
+            // （實測 HF 的 .js 用 importScripts 載不起來），blob: 則在 CSP 允許清單內。
+            const glue = await Promise.all([
+              fetch(dir + 'sherpa-onnx-asr.js').then(r => { if (!r.ok) throw new Error('glue1 HTTP ' + r.status); return r.text(); }),
+              fetch(dir + 'sherpa-onnx-wasm-main-asr.js').then(r => { if (!r.ok) throw new Error('glue2 HTTP ' + r.status); return r.text(); })
+            ]);
+            glueUrls = glue.map(src => URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+
+            const packageData = await fetchSherpaPackage(dir + SHERPA_DATA_FILE);
+            el.sherpaStatus.textContent = t().sherpaLoading;
+            await sherpaWorkerAsk({
+              type: 'load', dir, glueUrls, package: packageData, sampleRate: SAMPLE_RATE
+            }, [packageData]);
+            sherpa.workerMode = true;
+            sherpa.recognizer = null;
+            sherpa.module = null;
+            sherpa.loaded = true;
+            sherpa.base = dir;
+            el.sherpaStatus.textContent = t().loaded;
+            el.sherpaStatus.className = 'model-status success';
+            return;
+          } catch (workerError) {
+            console.warn('sherpa worker path failed; falling back to the main thread:', workerError);
+            try { sherpaWorker?.terminate(); } catch (error) { /* 已經死了 */ }
+            sherpaWorker = null;
+            sherpa.workerMode = false;
+          } finally {
+            // Worker 在 load 階段就同步 importScripts 完兩支膠水層，之後可以安全撤銷
+            for (const url of glueUrls || []) { try { URL.revokeObjectURL(url); } catch (error) { /* 已撤銷 */ } }
+          }
+        }
+
         await loadScript(dir + 'sherpa-onnx-asr.js', 'createOnlineRecognizer');
 
         // 自行取得 199 MB 的 .data 並存進 Cache Storage，再用 getPreloadedPackage
@@ -1538,7 +1645,7 @@
   }
 
   async function startSherpa() {
-    if (!sherpa.loaded || !sherpa.recognizer) return showToast(t().loadFirst);
+    if (!sherpa.loaded || (!sherpa.recognizer && !sherpa.workerMode)) return showToast(t().loadFirst);
 
     begin();
     state.running = true;
@@ -1549,6 +1656,32 @@
     el.engine.disabled = el.lang.disabled = true;
 
     try {
+      if (sherpa.workerMode) {
+        // 結果一律由 Worker 推回來：endpoint 就 commit，其餘更新即時字幕
+        const handler = (msg) => {
+          if (msg.sessionId !== sessionId || !state.running) return;
+          if (msg.type === 'result' && !msg.started) {
+            const text = traditional(msg.text || '');
+            if (msg.endpoint) {
+              if (text) { state.interim = ''; commit(text); return; }
+            }
+            state.interim = text;
+            render();
+          }
+        };
+        sherpaWorkerHandlers.add(handler);
+        sherpa.workerHandler = handler;
+        sherpa.stream = { worker: true };          // 只作為「已在錄音」的旗標
+        await sherpaWorkerAsk({ type: 'start', sessionId });
+        sherpa.session = new AudioCapture(chunk => {
+          if (!state.running || state.stopping) return;
+          if (sessionId !== sherpa.sessionId || !sherpa.stream) return;
+          const copy = chunk.slice();
+          sherpaWorkerSend({ type: 'feed', sessionId, audio: copy }, [copy.buffer]);
+        }, setLevel);
+        await sherpa.session.start();
+        return;
+      }
       sherpa.stream = sherpa.recognizer.createStream();
       sherpa.session = new AudioCapture(chunk => {
         if (!state.running || state.stopping) return;
@@ -1576,7 +1709,14 @@
 
     const sessionId = sherpa.sessionId;
     try {
-      if (sherpa.stream && sherpa.recognizer) {
+      if (sherpa.workerMode) {
+        // Worker 模式：請 Worker 補靜音收尾並回傳最後結果（0.4 秒靜音那段邏輯在 Worker 內）
+        const final = await sherpaWorkerAsk({ type: 'flush', sessionId });
+        if (sessionId === sherpa.sessionId) {
+          const text = traditional(final?.text || '');
+          if (text) { state.interim = ''; commit(text); }
+        }
+      } else if (sherpa.stream && sherpa.recognizer) {
         // 補 0.4 秒靜音，讓模型吐出最後一段尚未收尾的語音
         sherpa.stream.acceptWaveform(SAMPLE_RATE, new Float32Array(Math.round(SAMPLE_RATE * 0.4)));
         sherpa.stream.inputFinished();
@@ -1588,7 +1728,13 @@
     } catch (error) {
       console.warn('sherpa flush failed:', error);
     } finally {
-      try { sherpa.stream?.free(); } catch (error) { console.warn(error); }
+      if (sherpa.workerMode) {
+        // 收掉這個 session 的結果處理器，並請 Worker 釋放 stream（避免累積）
+        if (sherpa.workerHandler) { sherpaWorkerHandlers.delete(sherpa.workerHandler); sherpa.workerHandler = null; }
+        sherpaWorkerSend({ type: 'free' });
+      } else {
+        try { sherpa.stream?.free(); } catch (error) { console.warn(error); }
+      }
       sherpa.stream = null;
       await sherpa.session?.stop();
       sherpa.session = null;

@@ -55,7 +55,12 @@ function serve() {
     if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       res.writeHead(404); res.end('nope'); return;
     }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'content-type': MIME[path.extname(file)] || 'application/octet-stream',
+      // no-store：否則瀏覽器（或持久化的 profile）會餵回舊的 index.html／worker，
+      // 量到的就是上一版的程式 —— 實際踩過這個陷阱。
+      'cache-control': 'no-store'
+    });
     fs.createReadStream(file).pipe(res);
   });
   return new Promise((resolve) => server.listen(PORT, '127.0.0.1', () => resolve(server)));
