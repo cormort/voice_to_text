@@ -26,6 +26,27 @@ PERF_MAX_BLOCK_MS=200 node test_speech_perf.js                  # 當 CI 門檻
 之前，單一 chunk 阻塞 **12,295 ms**（占 25 秒串流的 49.6%）；Worker 化之後為 **0 ms**。
 模型下載量、來源與後續路線見 [MODELS.md](MODELS.md)。
 
+## Worker 退路測試
+
+```sh
+node test_worker_fallback.js
+```
+
+Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理**」不完整 —— 正常操作下永遠
+看不到，所以這支測試刻意模擬：
+
+- **Whisper**：worker 回報載入失敗（例如 worker 內的 CDN import 被擋）→ 必須**退回主執行緒**
+  並仍能載入；少了這層退路，這些情況會直接判整個引擎死亡。
+- **sherpa**：worker 崩潰（載入中／**載入成功之後**）→ UI 不可謊報「已載入」、載入鈕必須恢復
+  可用，且要退回主執行緒。
+
+判斷「有沒有退回主執行緒」用請求的 `resourceType`：worker 路徑用 `fetch` 抓膠水層，
+主執行緒路徑用 `<script>` 載入。為了不真的下載 190 MB，sherpa 的案例會先在 Cache Storage
+種一份假的 `.data`。
+
+> 對照修正前的版本（`git worktree add /tmp/x 9715e64`）跑同一支測試會紅 4 項，可用來確認
+> 這支測試真的有牙齒 —— 不是只有「會過」。
+
 ## 引擎列表
 
 | 引擎 | 處理位置 | 用途 |
