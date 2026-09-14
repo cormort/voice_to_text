@@ -12,10 +12,10 @@
        emscripten 系的程式碼也常有此需求。CSP 在這裡主要還是擋「來源」，
        讓被換掉的 CDN 檔案無法注入執行。 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://www.googletagmanager.com;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net;
     style-src 'self' 'unsafe-inline';
-    img-src 'self' data: blob: https://www.googletagmanager.com https://www.google-analytics.com;
-    connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com;
+    img-src 'self' data: blob:;
+    connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space;
     worker-src 'self' blob:;
     child-src 'self' blob:;
     object-src 'none';
@@ -247,13 +247,6 @@
       #transcript { font-size: 11pt }
     }
   </style>
-  <!-- Google tag (gtag.js) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-GHGBM401HN');
   </script>
 </head>
 <body>
@@ -377,7 +370,10 @@
        只在段落確定後把內容送進這裡 -->
   <div id="a11yAnnouncer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js" integrity="sha384-lSi9aFkjJFq3Fe5HZNORU+TFYbMDZh6m2KHdolOWxKNew8tzqMIjj3X1e6D9htV4" crossorigin="anonymous"></script>
+  <!-- cn2t = 簡→繁 preset（含 hk/tw/twp 目標）。這個 App 只用 from:'cn'，用 preset 在語意上
+       比 full.js 精確；實測檔案只小 59 KB（1035 vs 1094 KB，gzip 後差距更小），
+       所以這是「意圖清楚」而不是顯著的體積優化。 -->
+  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/cn2t.js" integrity="sha384-9JmxkgxoKE5gP14V/eBemUAwCKh8QSb5IFEJje/JNxxh8cn9hKsIs/q5Ho+mfVau" crossorigin="anonymous"></script>
   <script>
 (() => {
   'use strict';
@@ -712,6 +708,10 @@
       this.silent.connect(this.context.destination);
 
       this.node.port.onmessage = e => {
+        // 收尾競態：stop() 會把 this.context 設回 null，但 worklet 可能還有一則訊息在路上
+        // （實測在「停止後立刻關閉頁面」時會炸 Cannot read properties of null (reading
+        // 'sampleRate')）。這一則直接丟掉即可，音訊已經沒有意義了。
+        if (!this.context) return;
         const input = e.data;
         let sum = 0;
         for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
@@ -1087,6 +1087,85 @@
       console.warn('WebGPU adapter probe failed:', error);
       return false;
     }
+  }
+
+  // ==================== Whisper Worker（把推論移出主執行緒）====================
+  // 為什麼：pipeline 在主執行緒跑時，單一 chunk（chunk_length_s: 15）在 WASM 後端
+  // 實測阻塞主執行緒 12,295 ms、占串流時間 49.6% —— 整頁凍結、按鈕沒反應。
+  // Worker 版本讓主執行緒只做訊息搬運；音訊用 transferable 傳（零拷貝）。
+  // 若 Worker 建不起來（舊瀏覽器／CSP／檔案缺失），自動退回原本的主執行緒路徑。
+  const whisperWorkerPipeline = {
+    dispose: () => whisperWorkerRequest({ type: 'dispose' }).catch(() => {})
+  };
+  let whisperWorker = null;
+  let whisperWorkerSeq = 0;
+  const whisperWorkerPending = new Map();
+
+  function ensureWhisperWorker() {
+    if (whisperWorker) return whisperWorker;
+    try {
+      whisperWorker = new Worker('whisper-worker.js', { type: 'module' });
+    } catch (error) {
+      console.warn('Whisper worker unavailable; falling back to main thread:', error);
+      whisperWorker = null;
+      return null;
+    }
+    whisperWorker.onmessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === 'progress') { updateWhisperProgress(msg); return; }
+      const pending = whisperWorkerPending.get(msg.id);
+      if (!pending) return;
+      whisperWorkerPending.delete(msg.id);
+      if (msg.type === 'error') {
+        const error = new Error(msg.message || 'whisper worker error');
+        error.phase = msg.phase;
+        error.deviceLost = !!msg.deviceLost;
+        pending.reject(error);
+      } else {
+        pending.resolve(msg);
+      }
+    };
+    whisperWorker.onerror = (event) => {
+      // Worker 自己掛掉（例如 CDN import 失敗）：讓等待中的請求失敗，
+      // 下一輪會自動退回主執行緒路徑
+      console.warn('Whisper worker crashed:', event.message || event);
+      for (const [, pending] of whisperWorkerPending) pending.reject(new Error(event.message || 'worker crash'));
+      whisperWorkerPending.clear();
+      try { whisperWorker.terminate(); } catch (error) { /* 已經死了 */ }
+      whisperWorker = null;
+    };
+    return whisperWorker;
+  }
+
+  function whisperWorkerRequest(payload, transfer) {
+    const worker = ensureWhisperWorker();
+    if (!worker) return Promise.reject(new Error('worker unavailable'));
+    const id = ++whisperWorkerSeq;
+    return new Promise((resolve, reject) => {
+      whisperWorkerPending.set(id, { resolve, reject });
+      try {
+        worker.postMessage({ ...payload, id, libUrl: CDN.transformers }, transfer || []);
+      } catch (error) {
+        whisperWorkerPending.delete(id);
+        reject(error);
+      }
+    });
+  }
+
+  // 真實下載進度：把 indeterminate 動畫換成百分比（模型檔大時差很多）
+  function updateWhisperProgress(msg) {
+    if (msg.pct == null) return;
+    const file = String(msg.file || '').split('/').pop();
+    el.whisperBar.classList.remove('indeterminate');
+    el.whisperBar.style.width = `${msg.pct}%`;
+    el.whisperStatus.textContent = `${t().whisperLoading} ${msg.pct}%${file ? '（' + file + '）' : ''}`;
+  }
+
+  async function whisperWorkerTranscribe(audio, language) {
+    const copy = audio.slice();   // 原陣列留給主執行緒，transfer 的是這份副本
+    return whisperWorkerRequest(
+      { type: 'transcribe', audio: copy, language: LANG[language], chunkLength: 15, stride: 2 },
+      [copy.buffer]);
   }
 
   function removeVoskRecognizer() {
@@ -1595,8 +1674,6 @@
       let candidateDevice = null;
 
       try {
-        whisper.module ||= await loadTransformers();
-
         const modelName = WHISPER_MODELS[el.whisperModel.value];
         if (whisper.pipe && whisper.model === modelName) {
           el.whisperStatus.textContent = `${t().loaded}（${whisper.device}）`;
@@ -1611,6 +1688,23 @@
         whisper.model = null;
         whisper.device = null;
         await disposeWhisperPipeline(previousPipeline);
+
+        // 首選：Worker。WebGPU/WASM 的選擇與退路都在 Worker 內（見 whisper-worker.js）
+        if (ensureWhisperWorker()) {
+          const ready = await whisperWorkerRequest({
+            type: 'load', model: modelName, preferWebGpu: await hasWebGpuAdapter()
+          });
+          whisper.pipe = whisperWorkerPipeline;
+          whisper.model = modelName;
+          whisper.device = ready.device;
+          el.whisperStatus.textContent = `${t().loaded}（${whisper.device}）`;
+          el.whisperStatus.className = 'model-status success';
+          if (state.engine === 'whisper') el.statusRuntime.textContent = whisper.device;
+          return;
+        }
+
+        // 後備：主執行緒（Worker 不可用時的原本路徑）
+        whisper.module ||= await loadTransformers();
 
         if (await hasWebGpuAdapter()) {
           try {
@@ -1694,18 +1788,22 @@
           const pending = whisper.queue.length;
           el.statusState.textContent = pending > 0 ? `${t().processing}（+${pending}）` : t().processing;
           try {
-            const output = await whisper.pipe(job.audio, {
-              language: LANG[job.language],
-              task: 'transcribe',
-              chunk_length_s: 15,
-              stride_length_s: 2
-            });
+            // Worker 路徑：推論不在主執行緒，UI 不會被 12 秒的 chunk 卡住
+            const output = whisper.pipe === whisperWorkerPipeline
+              ? await whisperWorkerTranscribe(job.audio, job.language)
+              : await whisper.pipe(job.audio, {
+                  language: LANG[job.language],
+                  task: 'transcribe',
+                  chunk_length_s: 15,
+                  stride_length_s: 2
+                });
             const text = String(output?.text || '').trim();
             if (job.sessionId === whisper.sessionId && text) commit(text);
           } catch (error) {
             console.error('Whisper inference failed:', error);
             showToast(t().whisperFailed + (error.message || error));
             const msg = String(error?.message || '').toLowerCase();
+            void error?.deviceLost;   // Worker 路徑會帶這個標記（下面用訊息內容判斷，兩者都通）
             if (msg.includes('device lost') || msg.includes('webgpu') || msg.includes('oom')) {
               whisper.pipe = null;
               whisper.model = null;
