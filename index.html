@@ -762,11 +762,16 @@
 
     const factor = Math.floor(from / to);
     if (from > to && factor >= 2) {
-      const filtered = new Float32Array(Math.floor(input.length / factor));
+      // 長度用 ceil 而不是 floor：floor 會把每一塊尾端的 input.length % factor 個 sample
+      // 丟掉，而且是「每一塊都丟」—— 48k→16k、2048 samples 時 factor 是 3，2046 之後那
+      // 2 個 sample 每塊都不見，約 0.1% 的音訊、一小時累積約 3.5 秒的細碎缺口。
+      // ponytail: 尾端不足一組就用實際有的 sample 取平均，不跨塊接續 —— 接續要多帶一份
+      // 狀態與生命週期，為了 0.1% 不值得；邊界那一格平均的樣本較少，影響可忽略。
+      const filtered = new Float32Array(Math.ceil(input.length / factor));
       for (let i = 0; i < filtered.length; i++) {
-        let sum = 0;
-        for (let j = 0; j < factor; j++) sum += input[i * factor + j];
-        filtered[i] = sum / factor;
+        let sum = 0, n = 0;
+        for (let j = 0; j < factor && i * factor + j < input.length; j++, n++) sum += input[i * factor + j];
+        filtered[i] = sum / n;
       }
       return resample(filtered, from / factor, to);
     }
@@ -2683,6 +2688,7 @@
     el.voskStatus.className = 'model-status';
     syncVoskSourceRows();
     syncModelButtons();
+    save();   // save() 有存 voskSource，但少了這行就只有「之後又改了別的設定」時才會寫進去
   };
   el.control.onclick = toggle;
   el.loadVosk.onclick = loadVosk;

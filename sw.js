@@ -5,9 +5,10 @@ const CACHE = 'stt-shell-v3';
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
 const SHELL_PREFIX = 'stt-shell-';
-// 上限 64 MB：內建 Vosk ZIP（約 44 MB）會進外殼快取，回訪者與離線都能直接用
-// （GitHub Pages 對 ZIP 只給 max-age=600，沒有這層等於每個工作階段重抓 44 MB）。
-// 自架的 sherpa .data（199 MB）超過上限，由 App 自己的 SHERPA_CACHE 管理。
+// 上限 64 MB：單一回應超過就不放進外殼快取，避免一個大檔把配額吃光。
+// 注意這裡「不是」為內建 Vosk ZIP 設的 —— 48e98e5 之後 ZIP 由 index.html 的
+// fetchVoskPackage 以 Range 分段下載並存進 VOSK_CACHE，帶 Range 的請求本來就不會
+// 進外殼快取（見下方 isCacheable）。sherpa 的 .data（199 MB）同理走 SHERPA_CACHE。
 const MAX_CACHE_BYTES = 64 * 1024 * 1024;
 const ASSETS = [
   './', './manifest.webmanifest',
@@ -63,6 +64,11 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   // 外部 CDN（模型下載、transformers 等）不做快取，避免大檔把配額塞滿
   if (url.origin !== self.location.origin) return;
+
+  // 帶 Range 的請求一律走網路。caches.match() 不看 headers，會拿「整份 200」來回答
+  // 部分內容的請求，呼叫端（index.html 的 fetchRange）等的是 206，就會整個解析錯。
+  // 寫入端的 isCacheable 已經擋掉 Range，讀取端也要擋，否則兩邊的假設對不起來。
+  if (request.headers.has('range')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(
