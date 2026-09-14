@@ -12,10 +12,10 @@
        emscripten 系的程式碼也常有此需求。CSP 在這裡主要還是擋「來源」，
        讓被換掉的 CDN 檔案無法注入執行。 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://www.googletagmanager.com;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net;
     style-src 'self' 'unsafe-inline';
-    img-src 'self' data: blob: https://www.googletagmanager.com https://www.google-analytics.com;
-    connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com;
+    img-src 'self' data: blob:;
+    connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space;
     worker-src 'self' blob:;
     child-src 'self' blob:;
     object-src 'none';
@@ -247,13 +247,6 @@
       #transcript { font-size: 11pt }
     }
   </style>
-  <!-- Google tag (gtag.js) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-GHGBM401HN');
   </script>
 </head>
 <body>
@@ -377,7 +370,10 @@
        只在段落確定後把內容送進這裡 -->
   <div id="a11yAnnouncer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js" integrity="sha384-lSi9aFkjJFq3Fe5HZNORU+TFYbMDZh6m2KHdolOWxKNew8tzqMIjj3X1e6D9htV4" crossorigin="anonymous"></script>
+  <!-- cn2t = 簡→繁 preset（含 hk/tw/twp 目標）。這個 App 只用 from:'cn'，用 preset 在語意上
+       比 full.js 精確；實測檔案只小 59 KB（1035 vs 1094 KB，gzip 後差距更小），
+       所以這是「意圖清楚」而不是顯著的體積優化。 -->
+  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/cn2t.js" integrity="sha384-9JmxkgxoKE5gP14V/eBemUAwCKh8QSb5IFEJje/JNxxh8cn9hKsIs/q5Ho+mfVau" crossorigin="anonymous"></script>
   <script>
 (() => {
   'use strict';
