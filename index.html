@@ -513,6 +513,7 @@
       sherpaCacheEmpty: '沒有已快取的模型。',
       sherpaCacheFailed: '寫入快取失敗（可能是儲存空間不足），本次仍可使用，但下次需重新下載。',
       sherpaNoBase: '請先填入 sherpa 資產位置（sherpa-onnx-asr.js 所在目錄）。',
+      sherpaFeedFailed: '語音辨識核心持續回報錯誤，已停止收音。請重新整理頁面後再試。',
       sherpaReloadNeeded: 'sherpa WASM 已載入，變更資產位置需重新整理頁面。',
       webNotice: 'Web Speech API 可能將音訊傳送至瀏覽器或語音服務供應商，請勿處理機密或敏感資料。',
       localNotice: '語音辨識在本機執行。外部程式與模型若尚未快取，載入時仍會連線下載。',
@@ -610,6 +611,7 @@
       sherpaCacheEmpty: 'No cached model found.',
       sherpaCacheFailed: 'Caching failed (likely out of storage). Usable now, but it will download again next time.',
       sherpaNoBase: 'Enter the sherpa assets URL (the directory holding sherpa-onnx-asr.js).',
+      sherpaFeedFailed: 'The recognition core kept reporting errors, so listening stopped. Please reload the page and try again.',
       sherpaReloadNeeded: 'sherpa WASM already loaded. Reload the page to change the assets URL.',
       webNotice: 'Web Speech API may send audio to the browser or speech service provider. Do not use it for sensitive information.',
       localNotice: 'Recognition runs locally. External libraries and models are still downloaded if not cached.',
@@ -1122,6 +1124,17 @@
       if (msg.type === 'status') { el.sherpaStatus.textContent = msg.status; return; }
       if (msg.type === 'error') {
         console.warn('[sherpa-worker]', msg.phase, msg.message);
+        // 餵音階段的錯誤過去只印 console.warn，UI 上一點線索都沒有 ——
+        // 使用者看到的就只是「音量 bar 有動、字幕永遠不出來」（實測踩過：
+        // worker 的 getResult 少帶 stream，每個音塊都丟 TypeError，全程靜默）。
+        // 連續幾次就出聲並收掉 session，不要讓 UI 繼續假裝在聽。
+        if (msg.phase === 'feed' || msg.phase === 'flush') {
+          sherpa.feedErrors = (sherpa.feedErrors || 0) + 1;
+          if (sherpa.feedErrors === 5) {
+            showToast(t().sherpaFeedFailed);
+            stopSherpa();
+          }
+        }
         if (sherpaWorkerPending) { const p = sherpaWorkerPending; sherpaWorkerPending = null; p.reject(new Error(msg.message)); }
         for (const handler of sherpaWorkerHandlers) handler(msg);
         return;
@@ -1718,6 +1731,7 @@
     state.running = true;
     state.stopping = false;
     sherpa.sessionId += 1;
+    sherpa.feedErrors = 0;      // 每次起跑重新計算（見 worker error 分支）
     const sessionId = sherpa.sessionId;
     updateButtons();
     el.engine.disabled = el.lang.disabled = true;

@@ -31,7 +31,11 @@ let baseDir = null;
 let sampleRate = 16000;
 
 const post = (msg, transfer) => self.postMessage(msg, transfer || []);
-const textOf = (r) => String(r?.getResult?.()?.text || '').trim();
+// 取目前結果。**必須把 stream 傳進去**：官方膠水層的簽名是 getResult(stream)，
+// 它會讀 stream.handle（`_SherpaOnnxGetOnlineStreamResultAsJson(this.handle, stream.handle)`），
+// 不帶參數就是每個音訊塊都丟 TypeError，而主執行緒對 feed 階段的 error 訊息沒有處理器
+// （只認 ready/final/started），所以錯誤完全靜默 —— 症狀就是「音量 bar 有動、字幕永遠不出來」。
+const textOf = (recognizer, stream) => String(recognizer?.getResult?.(stream)?.text || '').trim();
 
 self.onmessage = async (event) => {
   const msg = event.data || {};
@@ -88,7 +92,7 @@ self.onmessage = async (event) => {
     try {
       stream.acceptWaveform(sampleRate, msg.audio);
       while (recognizer.isReady(stream)) recognizer.decode(stream);
-      let text = textOf(recognizer);
+      let text = textOf(recognizer, stream);
       let endpoint = false;
       if (recognizer.isEndpoint(stream)) {
         endpoint = true;
@@ -108,7 +112,7 @@ self.onmessage = async (event) => {
       stream.acceptWaveform(sampleRate, new Float32Array(Math.round(sampleRate * 0.4)));
       stream.inputFinished();
       while (recognizer.isReady(stream)) recognizer.decode(stream);
-      post({ type: 'final', sessionId: msg.sessionId, text: textOf(recognizer) });
+      post({ type: 'final', sessionId: msg.sessionId, text: textOf(recognizer, stream) });
     } catch (error) {
       post({ type: 'error', phase: 'flush', message: String(error && error.message || error) });
       post({ type: 'final', sessionId: msg.sessionId, text: '' });

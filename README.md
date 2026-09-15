@@ -90,13 +90,40 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 
 ## 測試
 
-三個 Node 測試直接從 `index.html` 抽出函式原始碼來跑，不需要瀏覽器或測試框架：
+這幾支 Node 測試不需要瀏覽器或測試框架（`index.html` 的測試直接抽出函式原始碼來跑）：
 
 ```bash
-node test_vad.js              # VAD 分段：開頭不重複、短語音丟棄、15 秒上限、flush
-node test_sherpa_decode.js    # sherpa 解碼：partial / endpoint / 過期 session
-node test_sherpa_download.js  # 分段下載：Range、單段重試、不支援 Range 的退路
+node test_vad.js                  # VAD 分段：開頭不重複、短語音丟棄、15 秒上限、flush
+node test_sherpa_decode.js        # sherpa 解碼：partial / endpoint / 過期 session（主執行緒路徑）
+node test_sherpa_download.js      # 分段下載：Range、單段重試、不支援 Range 的退路
+node test_resample.js             # 降取樣：整數倍移動平均、非整數倍內插
+node test_sherpa_worker_api.js    # worker 訊息協定（不需要模型，見下）
 ```
+
+需要瀏覽器的（需要 playwright）：
+
+```bash
+PW_MODULE=/path/to/playwright/index.js node test_worker_fallback.js   # 引擎的 Worker 退路與狀態清理
+```
+
+### 為什麼要有 `test_sherpa_worker_api.js`
+
+Worker 化把同一組 sherpa API 變成**兩份實作**（`index.html` 的主執行緒路徑與 `sherpa-worker.js`），
+兩邊只要有一個參數對不上就會壞掉，而且壞得很安靜 —— 實際發生過：官方膠水層的簽名是
+`getResult(stream)`（內部讀 `stream.handle`），worker 卻寫成 `recognizer.getResult()`，
+於是**每一個音訊塊都丟 TypeError**；worker 把錯誤包成 `{type:'error', phase:'feed'}` 傳回主執行緒，
+而主執行緒的等待器只認 `ready/final/started`，這個訊息沒有任何人處理 ——
+症狀就是「**音量 bar 有動、字幕永遠不出來**」。
+
+這支測試用一個**假膠水層**在 Node 裡跑真正的 `sherpa-worker.js`：假 recognizer 的
+`getResult(stream)` 會像真的一樣讀 `stream.handle`（沒帶參數就丟 TypeError），
+所以「忘記帶 stream」會直接紅燈，**不必下載 200 MB 的模型**。它同時驗證
+`start` 必回 `started`（主執行緒的等待器只認這個）、feed 會回非空 `result`、
+flush 會補 0.4 秒靜音並回 `final`、free 會回 `freed`。
+
+> ⚠️ **改動 `sherpa-worker.js` 或任何 `sw.js` 的 `ASSETS` 成員時，必須一起升 `sw.js` 的 `CACHE` 版號。**
+> worker 檔由 service worker 以 **cache-first** 供應，而瀏覽器只比對 `sw.js` 本身的位元來決定要不要更新 SW ——
+> 只改 worker 不改 `sw.js`，`install` 不會重跑、`cache.addAll` 不會重抓，既有使用者會永遠拿到舊 worker。
 
 ## 隱私說明
 
