@@ -90,6 +90,12 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
   限制可載入的來源與可連線的端點；逐字稿與伺服器回應一律走 `textContent`，沒有注入面
   （CSP 仍需 `'unsafe-inline'`／`'unsafe-eval'`，因為頁面有內嵌 script、vosk-browser 的 worker
   與 emscripten 系的 WASM 會用到；CSP 在此主要擋的是「來源」，避免被替換的 CDN 檔案注入執行）
+- **Google Analytics**：頁面載入 GA4（`G-GHGBM401HN`）統計瀏覽量。它**刻意沒有 SRI**
+  （Google 會更新該檔內容，綁 `integrity` 會讓 GA 靜默失效），安全邊界交給 CSP ——
+  `script-src` 只放行 `www.googletagmanager.com`、`connect-src`／`img-src` 只放行
+  `*.google-analytics.com` 與 `*.analytics.google.com`，其餘指令沒有放寬。頁面只送
+  `gtag('config')`，沒有自訂事件，逐字稿與音訊不會進 GA；使用者自行阻擋該網域不影響任何功能。
+  這條一致性（CSP 放行 ↔ 聲明揭露）由 `test_ga_csp.js` 守住。
 - **Service Worker**：外殼採 network-first（導覽）與 cache-first（其他同源資產），
   只快取成功的完整回應（4xx/5xx 與 206 部分內容不進快取），且不刪除模型快取
 
@@ -104,6 +110,7 @@ node test_sherpa_download.js      # 分段下載：Range、單段重試、不支
 node test_resample.js             # 降取樣：整數倍移動平均、非整數倍內插
 node test_sherpa_worker_api.js    # worker 訊息協定（不需要模型，見下）
 node test_whistle_worker_api.js   # Whistle：呼叫層參數、worker 協定、UI 接線（不需要模型）
+node test_ga_csp.js               # GA 與 CSP／隱私聲明的一致性（放行清單、沒有過度放寬、聲明不實）
 ```
 
 需要 16.9 MB 模型檔的（沒有模型會自動跳過，不會讓 CI 紅）：
@@ -309,3 +316,34 @@ Worker 裡它用 `self.location.href`（站台根目錄）去抓 `needle.wasm`�
 啟動時炸 `expected magic word 00 61 73 6d, found 3c 21 44 4f`（`3c 21 44 4f` = `<!DO`）。
 修法是兩條路徑都把 wasm 位元組用 `wasmBinary` 直接餵進去，並且在
 `test_whistle_worker_api.js` 加上回歸斷言。
+
+### 同一天：開通 Google Analytics 並更正隱私聲明（與 Whistle 同一個 PR）
+
+`main` 上的 `348c0fb` 加了 GA4 追蹤碼，但**它從來沒有生效**：頁面的 CSP 沒有放行
+`www.googletagmanager.com`，gtag.js 被自己的 CSP 擋掉。實測證據
+（Chromium、`securitypolicyviolation`）：
+
+```
+{"blocked":"https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN",
+ "directive":"script-src-elem"}
+資源紀錄 transferSize = 0（檔案從頭到尾沒下載）
+```
+
+修法與取捨：
+
+1. **只放行 GA 真正需要的三個來源**，其餘不放寬：
+   - `script-src` 加 `https://www.googletagmanager.com`（gtag.js 本體）
+   - `connect-src` 加 `https://*.google-analytics.com`、`https://*.analytics.google.com`（GA4 beacon）
+   - `img-src` 加 `https://*.google-analytics.com`（不能用 `sendBeacon`／`fetch` 時的 pixel 退路）
+   `default-src`／`object-src`／`base-uri` 全部維持原樣。
+2. **`integrity`（SRI）刻意不加**：Google 會更新 gtag.js 的內容，綁上去會在某天讓 GA
+   靜默失效，而且失敗沒有任何畫面提示。這一條寫進 index.html 的註解，避免以後有人「順手補上」。
+3. **隱私聲明同步更正**：原本寫「本頁不含任何分析或追蹤程式」——裝了 GA 之後這句話就是不實陳述。
+   中英文都改成明示揭露：GA 只用來看瀏覽量與一般流量資訊（來源、裝置、大致地區），
+   逐字稿、麥克風音訊與辨識結果不會上傳、也不會送進 GA，並且說明「自行阻擋
+   googletagmanager.com 不影響任何功能」。
+4. **新增 `test_ga_csp.js`**：把「CSP 有放行 ↔ 沒有過度放寬 ↔ 聲明與事實一致」三件事釘在一起。
+   這個坑兩個方向都會踩：CSP 收緊時忘了 GA（GA 無聲失效），或為了 GA 放寬成 `*`（來源限制形同虛設）。
+
+驗證（Chromium，本機 server）：`securitypolicyviolation` 事件 0 筆、gtag.js 有實際下載、
+GA4 `/g/collect` beacon 有送出、六個引擎切換與 Whistle 載入不受影響。

@@ -15,17 +15,25 @@
        是用 script 標籤從 Hugging Face 載入的，所以 script-src 必須允許 HF；只寫在
        connect-src 不夠 —— 實測預設資產位置會被 CSP 直接擋掉、sherpa 完全載不起來
        （Load failed: Script load failed）。hf.co 是 .wasm/.data 實際的 CDN 主機。 -->
+  <!-- CSP 註記（Google Analytics）：原本的 CSP 沒有放行 gtag.js，**實測它被自己的 CSP
+       擋掉**（securitypolicyviolation：script-src-elem、transferSize 0），也就是頁面上的
+       GA 追蹤碼等於沒在跑。現在只放行 GA 真正會用到的三個來源：
+         script-src   www.googletagmanager.com   —— gtag.js 本體
+         connect-src  *.google-analytics.com     —— GA4 的 /g/collect beacon
+                      *.analytics.google.com     —— GA 後台網域（部分地區走這裡）
+         img-src      *.google-analytics.com     —— 不能用 sendBeacon／fetch 時的 pixel 退路
+       其餘指令沒有放寬（object-src 仍是 none，也沒有開放任意第三方來源）。 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://www.googletagmanager.com;
     style-src 'self' 'unsafe-inline';
-    img-src 'self' data: blob:;
-    connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space;
+    img-src 'self' data: blob: https://*.google-analytics.com https://*.analytics.google.com;
+    connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space https://*.google-analytics.com https://*.analytics.google.com;
     worker-src 'self' blob:;
     child-src 'self' blob:;
     object-src 'none';
     base-uri 'self';
     form-action 'none'">
-  <meta name="description" content="五引擎語音轉文字：即時辨識、MOSS 會議轉寫與 SRT 字幕輸出">
+  <meta name="description" content="六引擎語音轉文字：即時辨識、MOSS 會議轉寫與 SRT 字幕輸出">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -252,7 +260,14 @@
     }
   </style>
 
-<!-- Google tag (gtag.js) -->
+<!-- Google tag (gtag.js) —— G-GHGBM401HN
+     兩件事要注意：
+     1. 這裡**沒有 SRI**（其他外部程式都有）：Google 會持續更新這支檔案內容，綁 integrity
+        會在某天直接讓 GA 停止載入，而且失敗是靜默的。安全邊界靠上面的 CSP 放行清單。
+     2. 它需要 CSP 的 script-src 放行 www.googletagmanager.com、connect-src 放行
+        *.google-analytics.com —— 少了任何一個，GA 就會被自己的 CSP 擋掉（實測踩過：
+        securitypolicyviolation script-src-elem、transferSize 0，表面上「有裝 GA」但完全沒資料）。
+     本頁只送 gtag('config')，沒有自訂事件；逐字稿與音訊不會進 GA。 -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -588,7 +603,7 @@
         '任何涉及<strong>個人隱私</strong>的對話（例如與醫師、律師）。',
         '任何包含<strong>敏感個資</strong>的內容（身分證號、密碼等）。'
       ],
-      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx、Whistle 或 Whisper。本頁不含任何分析或追蹤程式，也不會上傳逐字稿或麥克風音訊。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
+      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx、Whistle 或 Whisper。本頁使用 Google Analytics（GA4）統計瀏覽量與一般流量資訊（來源、裝置、大致地區）；逐字稿、麥克風音訊與辨識結果一律不會上傳，也不會送進 GA。不想被統計的話，用瀏覽器或擴充套件阻擋 googletagmanager.com 即可，功能完全不受影響。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
     },
     en: {
       pageTitle: 'Multilingual Real-time Transcription', title: 'Multilingual Real-time Transcription',
@@ -703,7 +718,7 @@
         'Conversations involving <strong>personal privacy</strong> (e.g. doctors, lawyers).',
         'Any content with <strong>sensitive personal data</strong> (ID numbers, passwords).'
       ],
-      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx, Whistle or Whisper. This page carries no analytics or tracking, and transcripts and microphone audio are never uploaded. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
+      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx, Whistle or Whisper. This page uses Google Analytics (GA4) to count page views and ordinary traffic information (referrer, device, approximate region). Transcripts, microphone audio and recognition results are never uploaded and never sent to GA. Blocking googletagmanager.com in your browser or an extension does not affect any feature. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
     }
   };
   const state = {
