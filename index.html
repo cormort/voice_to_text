@@ -287,6 +287,10 @@
           <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
           <span class="ecard-desc"></span>
         </button>
+        <button type="button" class="engine-card" data-engine="whistle">
+          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+          <span class="ecard-desc"></span>
+        </button>
         <button type="button" class="engine-card" data-engine="moss">
           <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
           <span class="ecard-desc"></span>
@@ -297,6 +301,7 @@
         <option value="vosk" id="optVosk">Vosk（本機離線）</option>
         <option value="sherpa" id="optSherpa">sherpa-onnx（本機串流）</option>
         <option value="whisper" id="optWhisper">Whisper（本機 WebGPU/WASM）</option>
+        <option value="whistle" id="optWhistle">Whistle（本機，16.9 MB）</option>
         <option value="moss" id="optMoss">MOSS 會議轉寫（雲端 Space，批次）</option>
       </select>
       <div class="field" id="languageField"><label for="languageSelector" id="langLabel">辨識語言：</label><select id="languageSelector">
@@ -338,6 +343,13 @@
       <div class="row"><button class="action" id="loadWhisperBtn" type="button">載入模型</button></div>
       <div class="progress" id="whisperProgress"><div id="whisperProgressBar"></div></div><div class="model-status" id="whisperStatus"></div>
       <p class="hint" id="whisperHint"></p>
+    </section>
+
+    <section class="panel engine-config" id="whistleConfig">
+      <div class="row"><label for="whistleModelUrl" id="whistleUrlLabel">模型網址：</label><input id="whistleModelUrl" type="url" value="https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/whistle.cact"></div>
+      <div class="row"><button class="action" id="loadWhistleBtn" type="button">載入模型</button><button class="action" id="clearWhistleCacheBtn" type="button">清除已快取模型</button></div>
+      <div class="progress" id="whistleProgress"><div id="whistleProgressBar"></div></div><div class="model-status" id="whistleStatus"></div>
+      <p class="hint" id="whistleHint"></p>
     </section>
 
     <section class="panel engine-config" id="mossConfig">
@@ -402,6 +414,17 @@
     'en-US': 'en', 'en-GB': 'en', 'ja-JP': 'ja',
     'ko-KR': 'ko', 'es-ES': 'es', 'fr-FR': 'fr', 'de-DE': 'de'
   };
+  // Whistle（Cactus Compute）：16.9 MB 的 .cact 語音模型 + 同源的 needle WASM 引擎。
+  // 引擎比模型小兩個數量級（986 KB），所以引擎進 repo、模型留在 HF 讓使用者自己換。
+  const WHISTLE_MODEL_URL = 'https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact';
+  const WHISTLE_GLUE = 'needle/needle.js';
+  const WHISTLE_WASM = new URL('needle/needle.wasm', document.baseURI).href;
+  const WHISTLE_CACHE = 'whistle-model-v1';
+  // needle.h：language 只認這七個字串或 NULL。其他語言（含中文、日文、韓文）
+  // 一律送 NULL 讓引擎自己偵測，硬送 'zh' 不是「猜錯」而是「不存在的代碼」。
+  const WHISTLE_LANGS = {
+    'en-US': 'en', 'en-GB': 'en', 'es-ES': 'es', 'fr-FR': 'fr', 'de-DE': 'de'
+  };
   const SAMPLE_RATE = 16000;
   const SHERPA_DATA_FILE = 'sherpa-onnx-wasm-main-asr.data';
   const SHERPA_CACHE = 'sherpa-onnx-model-v1';
@@ -431,6 +454,10 @@
     whisperConfig: $('whisperConfig'), whisperModel: $('whisperModelSelect'), vad: $('vadSensitivity'),
     loadWhisper: $('loadWhisperBtn'), whisperProgress: $('whisperProgress'), whisperBar: $('whisperProgressBar'),
     whisperStatus: $('whisperStatus'),
+    whistleConfig: $('whistleConfig'), whistleUrl: $('whistleModelUrl'),
+    loadWhistle: $('loadWhistleBtn'), clearWhistleCache: $('clearWhistleCacheBtn'),
+    whistleProgress: $('whistleProgress'), whistleBar: $('whistleProgressBar'),
+    whistleStatus: $('whistleStatus'),
     mossConfig: $('mossConfig'), mossSpace: $('mossSpaceSelect'), mossFile: $('mossFile'),
     mossFileZone: $('mossFileZone'), mossFileText: $('mossFileText'),
     mossRun: $('mossRunBtn'), mossSrt: $('mossSrtBtn'),
@@ -445,6 +472,7 @@
       engineLabel: '引擎：', langLabel: '辨識語言：',
       optWebspeech: 'Web Speech API（雲端）', optVosk: 'Vosk（本機離線）',
       optSherpa: 'sherpa-onnx（本機串流）', optWhisper: 'Whisper（本機 WebGPU/WASM）',
+      optWhistle: 'Whistle（本機，16.9 MB 輕量模型）',
       optMoss: 'MOSS 會議轉寫（雲端 Space，批次）', mossSpaceLabel: '運算位置：',
       optMossOfficial: 'Hugging Face 官方 Space（較快）', optMossLitert: '社群 LiteRT Space（回傳繁中）',
       mossFileLabel: '音訊／影片檔：', mossRun: '開始轉寫',
@@ -463,6 +491,7 @@
         webspeech: { name: 'Web Speech', tag: '☁️ 雲端', desc: '免下載模型，瀏覽器即時辨識' },
         vosk: { name: 'Vosk', tag: '🔒 本機', desc: '低資源離線即時，適合舊裝置' },
         sherpa: { name: 'sherpa-onnx', tag: '🔒 本機', desc: '真串流低延遲，中英即時字幕' },
+        whistle: { name: 'Whistle', tag: '🔒 本機', desc: '16.9 MB 極輕量，歐語離線' },
         whisper: { name: 'Whisper', tag: '🔒 本機', desc: '多語言最佳，WebGPU / WASM 離線' },
         moss: { name: 'MOSS 會議轉寫', tag: '☁️ 雲端批次', desc: '整段音訊 → 時間戳 + 說話人逐字稿' }
       },
@@ -470,6 +499,7 @@
         webspeech: '直接按「<b>開始辨識</b>」即可，語音會送往雲端處理。',
         vosk: '先在上方 Vosk 面板按「<b>載入模型</b>」（內建中文約 44 MB），再按「<b>開始辨識</b>」。',
         sherpa: '在 sherpa 面板填入資產位置後按「<b>載入模型</b>」（首次約 199 MB，之後有快取），再開始辨識。',
+        whistle: '在 Whistle 面板按「<b>載入模型</b>」（首次只下載 <b>16.9 MB</b>，之後有快取），再開始辨識。說英文、德文、法文、西文、義大利文、荷蘭文或波蘭文；<b>Whistle 不支援中文</b>。',
         whisper: '先按「<b>載入模型</b>」（第一次會下載，依模型大小約數十 MB 起），再開始辨識；WebGPU 不可用時自動退回 WASM。',
         moss: '把錄音或影片<b>拖放到下方面板</b>（或點選檔案），按「<b>開始轉寫</b>」；回傳含時間戳與說話人的逐字稿，可再<b>輸出 SRT 字幕</b>。'
       },
@@ -519,14 +549,28 @@
       localNotice: '語音辨識在本機執行。外部程式與模型若尚未快取，載入時仍會連線下載。',
       voskHint: '內建模型路徑為 <code>models/vosk-model-small-cn-0.22.zip</code> 與 <code>models/vosk-model-small-en-us-0.15.zip</code>。也可自行下載其他模型：<a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a>',
       sherpaHint: '填入放置 <code>sherpa-onnx-asr.js</code>、<code>sherpa-onnx-wasm-main-asr.js</code>、<code>.wasm</code> 與 <code>.data</code> 的目錄網址（結尾需含 <code>/</code>），或用相對路徑 <code>sherpa/</code>。模型為中英雙語串流 Zipformer，辨識語言由模型決定，與上方語言選單無關。首次載入約 199 MB，之後存於瀏覽器 Cache Storage，重開頁面不需重抓。',
+      whistleUrlLabel: '模型網址：',
+      whistleClearCache: '清除已快取模型',
+      whistleLoading: '正在載入 Whistle 引擎與模型（16.9 MB）…',
+      whistleDownloading: '正在下載模型',
+      whistleFromCache: '已從本機快取載入模型',
+      whistleCacheCleared: '已清除快取模型，重新整理頁面後會重新下載。',
+      whistleCacheEmpty: '沒有已快取的模型。',
+      whistleCacheFailed: '寫入快取失敗（可能是儲存空間不足），本次仍可使用，但下次需重新下載。',
+      whistleNoUrl: '請先填入 Whistle 模型網址（.cact 檔）。',
+      whistleFailed: 'Whistle 辨識失敗：',
+      whistleQueueFull: '本機轉寫速度跟不上，已捨棄最舊的一段排隊音訊。',
+      whistleNoSpeech: 'Whistle 沒有聽出任何內容（它只支援英、德、法、西、義、荷、波七種語言，中文與日韓不在此列）。',
+      whistleHint: 'Whistle 由 Cactus Compute 發佈（Apache-2.0），<b>整顆模型只有 16.9 MB</b>，在本機以 WASM 執行、不上傳音訊。支援英、德、法、西、義、荷、波七種語言（語言自動偵測，也可用上方語言選單指定）；<b>不支援中文、日文、韓文</b>，需要中文請改用 sherpa-onnx 或 Whisper。運作方式是<b>停頓分句</b>：偵測到約 0.8 秒靜音或滿 15 秒才送出轉寫，所以字幕會比 sherpa 的真串流慢一到兩秒。模型網址可換成自架位置；清除快取後重新整理頁面即會重新下載。',
       whisperHint: 'Whisper 使用停頓分句。首次載入會下載模型並使用瀏覽器快取；WebGPU 不可用時自動改用 WASM。停止辨識時會等待最後一句處理完成。',
       mossHint: '把整段會議錄音或影片丟進來，一次取回含時間戳與說話人標籤（<code>[S01]</code>、<code>[S02]</code>…）的逐字稿。<strong>音訊會上傳到公開的 Hugging Face Space</strong>，不是本機處理，請勿用於機密內容。官方 Space 較快但輸出簡體（本頁會自動轉成台灣繁中）；社群 LiteRT Space 較慢，但直接回傳繁中，且 <code>[S01]</code> 標籤每 90 秒會重新編號。單次建議 30 分鐘以內，檔案越大上傳越久。',
       privacySummary: '使用須知與隱私聲明',
-      howItWorks: '本工具提供五種語音辨識引擎，音訊的處理位置依引擎而不同，請依內容敏感度選擇：',
-      enginesTitle: '五種引擎', engines: [
+      howItWorks: '本工具提供六種語音辨識引擎，音訊的處理位置依引擎而不同，請依內容敏感度選擇：',
+      enginesTitle: '六種引擎', engines: [
         'Web Speech API：免下載模型，但音訊處理方式由瀏覽器供應商決定，可能上傳至雲端。',
         'Vosk：模型載入後在本機即時辨識，資源需求低，適合舊設備。',
         'sherpa-onnx：本機真正串流辨識，延遲最低，中英雙語，適合長時間會議即時字幕。',
+        'Whistle：本機 16.9 MB 極輕量模型（Cactus Compute），首次下載量只有 sherpa 的十二分之一，支援英德法西義荷波七種語言，<strong>不支援中文</strong>，且為停頓分句而非真串流。',
         'Whisper：本機分句辨識，多語言能力最佳，但需要較高運算資源。',
         'MOSS-Transcribe-Diarize：雲端 Space 的批次轉寫，能同時輸出說話人分離與時間戳，適合會後整理多人逐字稿；<strong>音訊會上傳第三方</strong>，不適合敏感內容。'
       ],
@@ -535,7 +579,7 @@
         '任何涉及<strong>個人隱私</strong>的對話（例如與醫師、律師）。',
         '任何包含<strong>敏感個資</strong>的內容（身分證號、密碼等）。'
       ],
-      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx 或 Whisper。本頁不含任何分析或追蹤程式，也不會上傳逐字稿或麥克風音訊。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
+      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx、Whistle 或 Whisper。本頁不含任何分析或追蹤程式，也不會上傳逐字稿或麥克風音訊。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
     },
     en: {
       pageTitle: 'Multilingual Real-time Transcription', title: 'Multilingual Real-time Transcription',
@@ -543,6 +587,7 @@
       engineLabel: 'Engine:', langLabel: 'Language:',
       optWebspeech: 'Web Speech API (cloud)', optVosk: 'Vosk (local, offline)',
       optSherpa: 'sherpa-onnx (local, streaming)', optWhisper: 'Whisper (local, WebGPU/WASM)',
+      optWhistle: 'Whistle (local, 16.9 MB lightweight model)',
       optMoss: 'MOSS meeting transcription (cloud Space, batch)', mossSpaceLabel: 'Compute location:',
       optMossOfficial: 'Official Hugging Face Space (faster)', optMossLitert: 'Community LiteRT Space (returns Traditional Chinese)',
       mossFileLabel: 'Audio / video file:', mossRun: 'Start transcription',
@@ -561,6 +606,7 @@
         webspeech: { name: 'Web Speech', tag: '☁️ Cloud', desc: 'No model download, browser realtime' },
         vosk: { name: 'Vosk', tag: '🔒 Local', desc: 'Low-resource offline, good for older devices' },
         sherpa: { name: 'sherpa-onnx', tag: '🔒 Local', desc: 'True streaming, lowest latency, zh-en live captions' },
+        whistle: { name: 'Whistle', tag: '🔒 Local', desc: '16.9 MB ultra-light, European languages offline' },
         whisper: { name: 'Whisper', tag: '🔒 Local', desc: 'Best multilingual, offline WebGPU / WASM' },
         moss: { name: 'MOSS Transcription', tag: '☁️ Cloud batch', desc: 'Whole recording → timestamps + speaker diarization' }
       },
@@ -568,6 +614,7 @@
         webspeech: 'Press <b>Start recognition</b> — audio goes to the cloud.',
         vosk: 'Click <b>Load model</b> in the Vosk panel first (built-in Chinese ~44 MB), then <b>Start recognition</b>.',
         sherpa: 'Fill in the assets URL, click <b>Load model</b> (~199 MB first time, then cached), then start.',
+        whistle: 'Click <b>Load model</b> in the Whistle panel (only <b>16.9 MB</b> the first time, then cached), then start. Speak English, German, French, Spanish, Italian, Dutch or Polish — <b>Whistle does not support Chinese</b>.',
         whisper: 'Click <b>Load model</b> first (downloads once), then start; falls back to WASM without WebGPU.',
         moss: '<b>Drop the recording or video</b> below (or pick a file), press <b>Start transcription</b>; you can then <b>export SRT subtitles</b>.'
       },
@@ -617,14 +664,28 @@
       localNotice: 'Recognition runs locally. External libraries and models are still downloaded if not cached.',
       voskHint: 'Built-in models: <code>models/vosk-model-small-cn-0.22.zip</code> and <code>models/vosk-model-small-en-us-0.15.zip</code>. More models: <a href="https://alphacephei.com/vosk/models" target="_blank" rel="noopener">alphacephei.com/vosk/models</a>',
       sherpaHint: 'Enter the directory URL holding <code>sherpa-onnx-asr.js</code>, <code>sherpa-onnx-wasm-main-asr.js</code>, the <code>.wasm</code> and <code>.data</code> files (trailing <code>/</code> required), or the relative path <code>sherpa/</code>. The model is a bilingual zh-en streaming Zipformer; the language selector above does not apply. The first load fetches ~199 MB, then keeps it in Cache Storage so reopening the page needs no re-download.',
+      whistleUrlLabel: 'Model URL:',
+      whistleClearCache: 'Clear cached model',
+      whistleLoading: 'Loading the Whistle engine and model (16.9 MB)…',
+      whistleDownloading: 'Downloading model',
+      whistleFromCache: 'Model loaded from local cache',
+      whistleCacheCleared: 'Cached model cleared. It will download again after a reload.',
+      whistleCacheEmpty: 'No cached model found.',
+      whistleCacheFailed: 'Caching failed (likely out of storage). Usable now, but it will download again next time.',
+      whistleNoUrl: 'Enter the Whistle model URL (the .cact file) first.',
+      whistleFailed: 'Whistle inference failed: ',
+      whistleQueueFull: 'Local transcription cannot keep up; the oldest queued audio was dropped.',
+      whistleNoSpeech: 'Whistle heard nothing. It only supports English, German, French, Spanish, Italian, Dutch and Polish — Chinese, Japanese and Korean are not supported.',
+      whistleHint: 'Whistle is published by Cactus Compute (Apache-2.0) and the <b>whole model is 16.9 MB</b>. It runs locally in WASM; audio never leaves the device. It supports English, German, French, Spanish, Italian, Dutch and Polish (language is auto-detected, or force it with the selector above); <b>Chinese, Japanese and Korean are not supported</b> — use sherpa-onnx or Whisper for those. It works in <b>pause-based segments</b>: a segment is transcribed after ~0.8 s of silence or 15 s of continuous speech, so captions trail sherpa\'s true streaming by a second or two. You can point the model URL at your own host; clearing the cache makes it download again after a reload.',
       whisperHint: 'Whisper segments on pauses. The model downloads once and is cached by the browser; it falls back to WASM when WebGPU is unavailable. Stopping waits for the final phrase.',
       mossHint: 'Drop in a whole meeting recording or video and get back a transcript with timestamps and anonymous speaker labels (<code>[S01]</code>, <code>[S02]</code>…). <strong>The audio is uploaded to a public Hugging Face Space</strong> — this is not local processing, so do not use it for confidential content. The official Space is faster but returns Simplified Chinese (this page converts it to Traditional); the community LiteRT Space is slower but returns Traditional Chinese directly, and its <code>[S01]</code> labels restart every 90 seconds. Keep single files under ~30 minutes; larger uploads take longer.',
       privacySummary: 'Usage and privacy',
-      howItWorks: 'This tool offers five recognition engines. Where the audio is processed depends on the engine — choose according to how sensitive the content is:',
-      enginesTitle: 'The five engines', engines: [
+      howItWorks: 'This tool offers six recognition engines. Where the audio is processed depends on the engine — choose according to how sensitive the content is:',
+      enginesTitle: 'The six engines', engines: [
         'Web Speech API: no model download, but the browser vendor decides how audio is handled and it may go to the cloud.',
         'Vosk: runs locally once loaded, low resource use, good for older devices.',
         'sherpa-onnx: true local streaming recognition, lowest latency, bilingual zh-en, best for live meeting captions.',
+        'Whistle: an ultra-light 16.9 MB local model (Cactus Compute) — a twelfth of sherpa\'s first download — for English, German, French, Spanish, Italian, Dutch and Polish. It does <strong>not</strong> support Chinese, and it segments on pauses rather than streaming truly.',
         'Whisper: local phrase-based recognition, best multilingual quality, needs more compute.',
         'MOSS-Transcribe-Diarize: batch transcription in a cloud Space with speaker diarization and timestamps, good for post-meeting multi-speaker transcripts; <strong>audio is uploaded to a third party</strong>, so not for sensitive content.'
       ],
@@ -633,7 +694,7 @@
         'Conversations involving <strong>personal privacy</strong> (e.g. doctors, lawyers).',
         'Any content with <strong>sensitive personal data</strong> (ID numbers, passwords).'
       ],
-      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx or Whisper. This page carries no analytics or tracking, and transcripts and microphone audio are never uploaded. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
+      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx, Whistle or Whisper. This page carries no analytics or tracking, and transcripts and microphone audio are never uploaded. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
     }
   };
   const state = {
@@ -654,6 +715,10 @@
     module: null, pipe: null, model: null, device: null, session: null,
     queue: [], drainPromise: null, sessionId: 0, loadPromise: null, vad: null,
     dropWarned: false
+  };
+  const whistle = {
+    module: null, loaded: false, loadPromise: null, url: null, session: null,
+    queue: [], drainPromise: null, sessionId: 0, vad: null, workerMode: false, dropWarned: false
   };
   let toastTimer;
   const openccConverters = new Map();
@@ -982,7 +1047,8 @@
     for (const [button, done] of [
       [el.loadVosk, vosk.loaded],
       [el.loadSherpa, sherpaBaseMatches()],
-      [el.loadWhisper, !!whisper.pipe && whisper.model === WHISPER_MODELS[el.whisperModel.value]]
+      [el.loadWhisper, !!whisper.pipe && whisper.model === WHISPER_MODELS[el.whisperModel.value]],
+      [el.loadWhistle, whistle.loaded && whistle.url === el.whistleUrl.value.trim()]
     ]) {
       button.classList.toggle('done', done);
       button.textContent = done ? `✓ ${t().loadModel}` : t().loadModel;
@@ -1017,6 +1083,7 @@
     el.voskConfig.classList.toggle('visible', state.engine === 'vosk');
     el.sherpaConfig.classList.toggle('visible', state.engine === 'sherpa');
     el.whisperConfig.classList.toggle('visible', state.engine === 'whisper');
+    el.whistleConfig.classList.toggle('visible', state.engine === 'whistle');
     el.mossConfig.classList.toggle('visible', state.engine === 'moss');
     // Vosk 與 sherpa 的語言由模型決定，隱藏語言選單
     el.languageField.style.display = (state.engine === 'vosk' || state.engine === 'sherpa' || state.engine === 'moss') ? 'none' : '';
@@ -1025,10 +1092,11 @@
     const icon = local ? '🔒 ' : '☁️ ';
     el.notice.textContent = icon + (state.engine === 'moss' ? t().mossNotice : (local ? t().localNotice : t().webNotice));
     el.notice.className = 'notice ' + (local ? 'local' : 'partial');
-    el.statusEngine.textContent = { webspeech: 'Web Speech API', vosk: 'Vosk', sherpa: 'sherpa-onnx', whisper: 'Whisper', moss: 'MOSS-Transcribe-Diarize' }[state.engine];
+    el.statusEngine.textContent = { webspeech: 'Web Speech API', vosk: 'Vosk', sherpa: 'sherpa-onnx', whisper: 'Whisper', whistle: 'Whistle (Cactus)', moss: 'MOSS-Transcribe-Diarize' }[state.engine];
     el.statusRuntime.textContent = {
       webspeech: t().browserService, vosk: 'WASM / CPU', sherpa: 'WASM / CPU',
       whisper: whisper.device || 'WebGPU / WASM',
+      whistle: 'WASM / CPU',
       moss: el.mossSpace.value === 'litert' ? 'HF Space / LiteRT' : 'HF Space / CPU'
     }[state.engine];
     el.statusPrivacy.textContent = icon + (local ? t().localProcessing : t().cloudProcessing);
@@ -2149,6 +2217,383 @@
     finish();
   }
 
+  // ==================== Whistle（Cactus Compute，16.9 MB 本機模型）====================
+  // 定位：首次下載量只有 sherpa 的 1/12（16.9 MB vs 199 MB）、Whisper small 的 1/14，
+  // 支援英德法西義荷波七種語言，不支援中文。解碼走 Worker（WASM RTF 約 0.3）。
+  //
+  // 為什麼用「停頓分句」而不是引擎內建的 needle_stream_transcribe_process：
+  // 那支 API 每一輪都會把整個緩衝重新轉寫一次，成本隨緩衝長度成長 —— 本機實測
+  // 餵 1 秒音訊、緩衝 10 秒時單輪要 3.4 秒，30 秒時要 1.4–7 秒，也就是跟不上即時
+  // （36 秒音訊共花 113 秒，RTF 3.2）。分段後每段獨立轉寫，總成本是線性的（RTF 0.3），
+  // 代價是字幕比真串流慢一到兩秒。既有的 sherpa 才是真串流，兩者定位互補。
+  let whistleWorker = null;
+  let whistleWorkerSeq = 0;
+  const whistleWorkerPending = new Map();
+
+  function ensureWhistleWorker() {
+    if (whistleWorker) return whistleWorker;
+    try {
+      whistleWorker = new Worker('whistle-worker.js');   // classic worker：worker 內用 importScripts
+    } catch (error) {
+      console.warn('Whistle worker unavailable; falling back to the main thread:', error);
+      whistleWorker = null;
+      return null;
+    }
+    whistleWorker.onmessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === 'error') {
+        console.warn('[whistle-worker]', msg.phase, msg.message);
+        const waiting = msg.id != null ? whistleWorkerPending.get(msg.id) : null;
+        if (waiting) {
+          whistleWorkerPending.delete(msg.id);
+          waiting.reject(Object.assign(new Error(msg.message), { phase: msg.phase }));
+        } else if (msg.id == null) {
+          // 沒有 id 的錯誤只會是 load 階段（見 whistle-worker.js）→ 收掉等待者，
+          // 讓 loadWhistle 能接手走主執行緒退路
+          for (const [, p] of whistleWorkerPending) p.reject(Object.assign(new Error(msg.message), { phase: msg.phase }));
+          whistleWorkerPending.clear();
+        }
+        return;
+      }
+      const pending = whistleWorkerPending.get(msg.type === 'ready' ? 'load' : msg.id);
+      if (pending) {
+        whistleWorkerPending.delete(msg.type === 'ready' ? 'load' : msg.id);
+        pending.resolve(msg);
+      }
+    };
+    whistleWorker.onerror = (event) => {
+      console.warn('Whistle worker crashed:', event.message || event);
+      for (const [, p] of whistleWorkerPending) p.reject(new Error(event.message || 'worker crash'));
+      whistleWorkerPending.clear();
+      try { whistleWorker.terminate(); } catch (error) { /* 已經死了 */ }
+      whistleWorker = null;
+      // Worker 死了 = 那份模型也沒了；不清掉 loaded 的話 UI 會一直寫「已就緒」
+      if (whistle.workerMode) {
+        whistle.workerMode = false;
+        whistle.loaded = false;
+        el.whistleStatus.textContent = t().loadFailed + (event.message || 'worker crash');
+        el.whistleStatus.className = 'model-status error';
+        syncModelButtons();
+      }
+    };
+    return whistleWorker;
+  }
+
+  function whistleWorkerRequest(payload, transfer) {
+    const worker = ensureWhistleWorker();
+    if (!worker) return Promise.reject(new Error('worker unavailable'));
+    const key = payload.id || 'load';
+    return new Promise((resolve, reject) => {
+      whistleWorkerPending.set(key, { resolve, reject });
+      try {
+        worker.postMessage(payload, transfer || []);
+      } catch (error) {
+        whistleWorkerPending.delete(key);
+        reject(error);
+      }
+    });
+  }
+
+  function setWhistleProgress(loaded, total) {
+    const mb = n => (n / 1048576).toFixed(1);
+    if (total) {
+      el.whistleBar.classList.remove('indeterminate');
+      el.whistleBar.style.width = `${(loaded / total * 100).toFixed(1)}%`;
+      el.whistleStatus.textContent =
+        `${t().whistleDownloading} ${mb(loaded)} / ${mb(total)} MB（${(loaded / total * 100).toFixed(1)}%）`;
+    } else {
+      el.whistleStatus.textContent = `${t().whistleDownloading} ${mb(loaded)} MB`;
+    }
+  }
+
+  // 回傳 .cact 的 ArrayBuffer：優先讀 Cache Storage，沒有才下載並存起來。
+  // 快取鍵就是模型網址 —— 換網址等於換模型，自然會重新下載。
+  async function fetchWhistleModel(url) {
+    let cache = null;
+    try {
+      cache = await caches.open(WHISTLE_CACHE);
+    } catch (error) {
+      console.warn('Cache Storage unavailable:', error);
+    }
+
+    if (cache) {
+      const hit = await cache.match(url);
+      if (hit) {
+        el.whistleStatus.textContent = t().whistleFromCache;
+        el.whistleBar.classList.remove('indeterminate');
+        el.whistleBar.style.width = '100%';
+        return hit.arrayBuffer();
+      }
+    }
+
+    const bytes = await downloadInChunks(url, setWhistleProgress);
+
+    if (cache) {
+      try {
+        await cache.put(url, new Response(bytes, {
+          headers: { 'Content-Type': 'application/octet-stream' }
+        }));
+      } catch (error) {
+        console.warn('Caching the Whistle model failed:', error);
+        showToast(t().whistleCacheFailed);
+      }
+    }
+
+    return bytes.buffer;
+  }
+
+  async function clearWhistleCache() {
+    if (whistle.drainPromise || whistle.queue.length > 0) {
+      showToast(t().busyClear);
+      return;
+    }
+    try {
+      const deleted = await caches.delete(WHISTLE_CACHE);
+      // 與 sherpa 的清除鈕一致：只清快取，不動已經載入記憶體的模型 ——
+      // 這次仍可繼續用，重新整理頁面後才會重新下載。
+      el.whistleStatus.textContent = deleted ? t().whistleCacheCleared : t().whistleCacheEmpty;
+      el.whistleStatus.className = 'model-status';
+      el.whistleBar.style.width = '0';
+    } catch (error) {
+      console.error('Clearing the Whistle cache failed:', error);
+      showToast(t().whistleCacheFailed);
+    }
+  }
+
+  async function loadWhistle() {
+    if (whistle.loadPromise) return whistle.loadPromise;
+
+    const url = el.whistleUrl.value.trim();
+    if (!url) {
+      el.whistleStatus.textContent = t().whistleNoUrl;
+      el.whistleStatus.className = 'model-status error';
+      return;
+    }
+    if (whistle.loaded) {
+      if (whistle.url !== url) {
+        el.whistleStatus.textContent = t().sourceChanged;
+        el.whistleStatus.className = 'model-status error';
+        return;
+      }
+      el.whistleStatus.textContent = t().loaded;
+      el.whistleStatus.className = 'model-status success';
+      return;
+    }
+
+    whistle.loadPromise = (async () => {
+      el.loadWhistle.disabled = true;
+      el.whistleProgress.classList.add('visible');
+      el.whistleBar.classList.add('indeterminate');
+      el.whistleStatus.textContent = t().whistleLoading;
+      el.whistleStatus.className = 'model-status';
+
+      try {
+        // 首選：Worker。16.9 MB 的下載與快取留在主執行緒（進度條不變），
+        // 位元組用 transferable 交進去。
+        if (ensureWhistleWorker()) {
+          try {
+            const model = await fetchWhistleModel(url);
+            el.whistleStatus.textContent = t().whistleLoading;
+            const ready = await whistleWorkerRequest(
+              { type: 'load', wasmUrl: WHISTLE_WASM, model }, [model]);
+            whistle.workerMode = true;
+            whistle.module = null;
+            whistle.loaded = true;
+            whistle.url = url;
+            el.whistleStatus.textContent = `${t().loaded}（WASM / CPU）`;
+            el.whistleStatus.className = 'model-status success';
+            if (ready.models !== 2) console.warn('Whistle 載入的不是語音模型（needle_models =', ready.models, '）');
+            return;
+          } catch (workerError) {
+            // Worker 建得起來不代表它載得動（CSP、舊瀏覽器、wasm 檔缺失）。沒有這層退路，
+            // 這些情況會直接判整個引擎死亡，而主執行緒其實還有機會成功。
+            console.warn('Whistle worker path failed; falling back to the main thread:', workerError);
+            try { whistleWorker?.terminate(); } catch (error) { /* 已經死了 */ }
+            whistleWorker = null;
+            whistleWorkerPending.clear();
+            whistle.workerMode = false;
+            el.whistleBar.classList.add('indeterminate');
+            el.whistleBar.style.width = '';
+          }
+        }
+
+        // 後備：主執行緒。上面的 model 位元組已經 transfer 給死掉的 worker（detached），
+        // 所以這裡要重新取一份 —— 有快取時就是快取命中，不會重抓 16.9 MB。
+        await loadScript('whistle-engine.js', 'WhistleEngine');
+        await loadScript(WHISTLE_GLUE, 'createNeedle');
+        // wasm 也用 wasmBinary 直接餵：這份 needle.js 沒有 Module.locateFile 入口，
+        // 主執行緒只是「剛好」因為膠水層就在 needle/ 目錄下才抓對路徑（換路徑就會壞）
+        const wasm = await fetch(WHISTLE_WASM).then(response => {
+          if (!response.ok) throw new Error(`needle.wasm HTTP ${response.status}`);
+          return response.arrayBuffer();
+        });
+        whistle.module = await window.createNeedle({ wasmBinary: wasm });
+        const model = await fetchWhistleModel(url);
+        el.whistleStatus.textContent = t().whistleLoading;
+        window.WhistleEngine.loadModel(whistle.module, model);
+        whistle.loaded = true;
+        whistle.url = url;
+        el.whistleStatus.textContent = `${t().loaded}（主執行緒）`;
+        el.whistleStatus.className = 'model-status success';
+      } catch (error) {
+        console.error('Whistle load failed:', error);
+        whistle.loaded = false;
+        whistle.module = null;
+        el.whistleStatus.textContent = t().loadFailed + (error.message || error);
+        el.whistleStatus.className = 'model-status error';
+      } finally {
+        el.whistleBar.classList.remove('indeterminate');
+        el.whistleBar.style.width = whistle.loaded ? '100%' : '0';
+        el.loadWhistle.disabled = false;
+        syncModelButtons();
+      }
+    })();
+
+    try {
+      await whistle.loadPromise;
+    } finally {
+      whistle.loadPromise = null;
+    }
+  }
+
+  const WHISTLE_MAX_QUEUED = 3;
+
+  function whistleLanguage() {
+    // 七種語言之外的選擇一律自動偵測（送 'zh' 不是猜錯，是引擎不存在的代碼）
+    return WHISTLE_LANGS[el.lang.value] || null;
+  }
+
+  function enqueueWhistleAudio(audio) {
+    whistle.queue.push({ audio, language: whistleLanguage(), sessionId: whistle.sessionId });
+    // 回壓：WASM 的 RTF 約 0.3，但仍比真串流慢；佇列無限成長會讓「停止」等不完
+    while (whistle.queue.length > WHISTLE_MAX_QUEUED) {
+      whistle.queue.shift();
+      if (!whistle.dropWarned) {
+        whistle.dropWarned = true;
+        showToast(t().whistleQueueFull);
+      }
+    }
+    void processWhistleQueue();
+  }
+
+  async function whistleTranscribe(audio, language) {
+    if (whistle.workerMode) {
+      const id = ++whistleWorkerSeq;
+      const copy = audio.slice();
+      const result = await whistleWorkerRequest(
+        { type: 'transcribe', id, audio: copy, language }, [copy.buffer]);
+      return result;
+    }
+    return window.WhistleEngine.transcribe(whistle.module, audio, language);
+  }
+
+  function processWhistleQueue() {
+    if (whistle.drainPromise) return whistle.drainPromise;
+    const processingSessionId = whistle.sessionId;
+
+    whistle.drainPromise = (async () => {
+      try {
+        while (whistle.queue.length > 0) {
+          const job = whistle.queue.shift();
+          if (!job || job.sessionId !== processingSessionId) continue;
+
+          const pending = whistle.queue.length;
+          el.statusState.textContent = pending > 0 ? `${t().processing}（+${pending}）` : t().processing;
+          try {
+            const output = await whistleTranscribe(job.audio, job.language);
+            const text = String(output?.text || '').trim();
+            // Whistle 沒有中文輸出，所以不做簡轉繁（歐洲語言的文字本來就不該進 OpenCC）
+            if (job.sessionId === whistle.sessionId && text) commit(text);
+          } catch (error) {
+            console.error('Whistle inference failed:', error);
+            showToast(t().whistleFailed + (error.message || error));
+          }
+        }
+      } finally {
+        whistle.drainPromise = null;
+        if (state.running) el.statusState.textContent = t().listening;
+        if (whistle.queue.length > 0) void processWhistleQueue();
+      }
+    })();
+
+    return whistle.drainPromise;
+  }
+
+  async function waitForWhistleDrain() {
+    while (whistle.drainPromise || whistle.queue.length > 0) {
+      await (whistle.drainPromise || processWhistleQueue());
+    }
+  }
+
+  async function startWhistle() {
+    if (!whistle.loaded || (!whistle.workerMode && !whistle.module)) return showToast(t().loadFirst);
+
+    if (whistle.drainPromise || whistle.queue.length > 0) {
+      state.stopping = true;
+      updateButtons();
+      el.statusState.textContent = t().processing;
+      try {
+        await waitForWhistleDrain();
+      } catch (error) {
+        console.error('Failed to drain the previous Whistle session:', error);
+        state.stopping = false;
+        updateButtons();
+        return;
+      }
+      state.stopping = false;
+    }
+
+    begin();
+    state.running = true;
+    state.stopping = false;
+    whistle.sessionId += 1;
+    whistle.queue = [];
+    whistle.dropWarned = false;
+    updateButtons();
+    el.engine.disabled = el.lang.disabled = true;
+
+    // 與 Whisper 同一套 VAD：0.8 秒靜音或滿 15 秒切一段（15 秒 < 引擎的 30 秒上限，
+    // 每段獨立轉寫時間約 4.6 秒，佇列吃得下）
+    const vad = createVad();
+    whistle.vad = vad;
+
+    try {
+      whistle.session = new AudioCapture((chunk, rms) => {
+        if (!state.running || state.stopping) return;
+        const utterance = vadPush(vad, chunk, rms);
+        state.interim = vad.speaking ? t().capturing : '';
+        render();
+        if (utterance) enqueueWhistleAudio(utterance);
+      }, setLevel);
+      await whistle.session.start();
+    } catch (error) {
+      console.error(error);
+      showToast(t().mic);
+      await stopWhistle();
+    }
+  }
+
+  async function stopWhistle() {
+    if (state.stopping) return;
+    state.stopping = true;
+    state.running = false;
+    updateButtons();
+
+    const finalAudio = whistle.vad ? vadFlush(whistle.vad) : null;
+    if (finalAudio) enqueueWhistleAudio(finalAudio);
+
+    try {
+      await whistle.session?.stop();
+    } catch (error) {
+      console.warn('Whistle audio session cleanup failed:', error);
+    } finally {
+      whistle.session = null;
+    }
+
+    await waitForWhistleDrain();
+    finish();
+  }
+
   // ==================== Web Speech API engine ====================
   function clearWebRestartTimer() {
     if (state.restartTimer) {
@@ -2293,6 +2738,7 @@
     vosk: { start: startVosk, stop: stopVosk },
     sherpa: { start: startSherpa, stop: stopSherpa },
     whisper: { start: startWhisper, stop: stopWhisper },
+    whistle: { start: startWhistle, stop: stopWhistle },
     webspeech: { start: startWeb, stop: stopWeb },
     moss: { start: () => showToast(t().mossBatchMode), stop: () => {} }
   };
@@ -2589,19 +3035,20 @@
     el.copy.textContent = d.copy;
     el.export.textContent = d.export;
     el.clear.textContent = d.clear;
-    el.loadVosk.textContent = el.loadSherpa.textContent = el.loadWhisper.textContent = d.loadModel;
+    el.loadVosk.textContent = el.loadSherpa.textContent = el.loadWhisper.textContent = el.loadWhistle.textContent = d.loadModel;
     el.clearSherpaCache.textContent = d.sherpaClearCache;
+    el.clearWhistleCache.textContent = d.whistleClearCache;
     updateMossButton();
     el.mossSrt.textContent = d.mossSrt;
 
     for (const key of [
-      'engineLabel', 'langLabel', 'optWebspeech', 'optVosk', 'optSherpa', 'optWhisper', 'optMoss',
+      'engineLabel', 'langLabel', 'optWebspeech', 'optVosk', 'optSherpa', 'optWhisper', 'optWhistle', 'optMoss',
       'mossSpaceLabel', 'optMossOfficial', 'optMossLitert', 'mossFileLabel',
       'voskSourceLabel', 'voskModelLabel', 'voskFileLabel', 'optVoskBuiltin', 'optVoskFile',
       'optVoskUrl', 'sherpaBaseLabel', 'whisperModelLabel', 'vadLabel', 'optVadHigh',
       'optVadMid', 'optVadLow', 'statusEngineLabel', 'statusRuntimeLabel',
       'statusPrivacyLabel', 'statusStateLabel', 'privacySummary',
-      'enginesTitle', 'riskTitle', 'privacyConclusion'
+      'whistleUrlLabel', 'enginesTitle', 'riskTitle', 'privacyConclusion'
     ]) {
       $(key).textContent = d[key];
     }
@@ -2609,6 +3056,7 @@
     $('voskHint').innerHTML = d.voskHint;
     $('sherpaHint').innerHTML = d.sherpaHint;
     $('whisperHint').innerHTML = d.whisperHint;
+    $('whistleHint').innerHTML = d.whistleHint;
     $('mossHint').innerHTML = d.mossHint;
     $('enginesList').innerHTML = d.engines.map(x => `<li>${x}</li>`).join('');
     $('riskList').innerHTML = d.risks.map(x => `<li>${x}</li>`).join('');
@@ -2634,6 +3082,7 @@
         lang: el.lang.value,
         whisper: el.whisperModel.value,
         sherpaBase: el.sherpaBase.value.trim(),
+        whistleUrl: el.whistleUrl.value.trim(),
         voskSource: el.voskSource.value,
         vad: el.vad.value,
         mossSpace: el.mossSpace.value
@@ -2641,7 +3090,7 @@
     } catch {}
   }
 
-  const KNOWN_ENGINES = ['webspeech', 'vosk', 'sherpa', 'whisper', 'moss'];
+  const KNOWN_ENGINES = ['webspeech', 'vosk', 'sherpa', 'whisper', 'whistle', 'moss'];
   const hasOption = (select, value) => Array.from(select.options).some(o => o.value === value);
 
   function load() {
@@ -2656,6 +3105,7 @@
       if (p.vad && hasOption(el.vad, p.vad)) el.vad.value = p.vad;
       if (p.mossSpace && hasOption(el.mossSpace, p.mossSpace)) el.mossSpace.value = p.mossSpace;
       if (p.sherpaBase) el.sherpaBase.value = p.sherpaBase;
+      if (p.whistleUrl) el.whistleUrl.value = p.whistleUrl;
       state.ui = (p.ui === 'zh' || p.ui === 'en')
         ? p.ui
         : ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
@@ -2709,6 +3159,17 @@
   el.loadSherpa.onclick = loadSherpa;
   el.clearSherpaCache.onclick = clearSherpaCache;
   el.loadWhisper.onclick = loadWhisper;
+  el.loadWhistle.onclick = loadWhistle;
+  el.clearWhistleCache.onclick = clearWhistleCache;
+  el.whistleUrl.onchange = () => {
+    // 換模型網址等於換模型：只更新按鈕狀態，實際重新載入由「載入模型」按鈕負責
+    if (whistle.loaded && whistle.url !== el.whistleUrl.value.trim()) {
+      el.whistleStatus.textContent = t().sourceChanged;
+      el.whistleStatus.className = 'model-status';
+    }
+    save();
+    syncModelButtons();
+  };
   el.mossRun.onclick = () => (moss.running ? cancelMoss() : runMoss());
   el.mossSrt.onclick = exportMossSrt;
   el.mossFile.addEventListener('change', () => {

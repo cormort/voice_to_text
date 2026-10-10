@@ -11,6 +11,7 @@
 | Vosk | **81 MB**（cn 42 MB + en 40 MB，zip） | **本 repo 的 git**（`models/*.zip`） | `VOSK_CACHE`（Cache Storage） |
 | sherpa-onnx | **約 199 MB**（`.wasm` + `.data`） | Hugging Face（`cormort/sherpa-zh-en-streaming`） | `SHERPA_CACHE`（Cache Storage） |
 | Whisper | tiny/base/small × q4（實測 base 載入 10.5–12 s） | HF（transformers.js） | 瀏覽器模型快取 |
+| Whistle | **16.9 MB**（模型）＋ 986 KB（引擎，隨站台） | HF（`Cactus-Compute/whistle`） | `WHISTLE_CACHE`（Cache Storage） |
 | MOSS | 0 | 雲端 HF Space | — |
 
 ### 把 Vosk 的 zip 搬到 HF —— 目前評估是「先不要做」
@@ -64,6 +65,50 @@ git push --force origin main
 | Whisper | ✅ 真實百分比 | 走 `whisper-worker.js` 的 `progress_callback`，狀態列會顯示 `53%（decoder_model_merged_q4.onnx）` |
 | Vosk | ✅ 真實百分比與 MB | `48e98e5` 起改由 `fetchVoskPackage` 自行分段下載（狀態列會顯示 `21.4 / 41.9 MB（51%）`），抓完用 blob: URL 交給 `createModel` |
 | sherpa | ✅ 真實百分比與 MB | 自行 `fetch` 190 MB 的 `.data` 並累計位元組（狀態列會顯示 `Downloading 64.0 / 189.8 MB（33.7%）`） |
+| Whistle | ✅ 真實百分比與 MB | 與 sherpa 同一支 `downloadInChunks`（單一 16.9 MB 檔案，狀態列會顯示 `正在下載模型 8.4 / 16.1 MB（52.1%）`），存進 `WHISTLE_CACHE` |
+
+## Whistle（16.9 MB）—— 已納入，數字與取捨都在這裡
+
+Cactus Compute 的 [Whistle](https://cactuscompute.com/blog/whistle)（Apache-2.0）是**目前本專案
+下載量最小的本機引擎**：一顆 16.9 MB 的 `.cact` 檔 + 同源的 986 KB `needle` WASM 引擎
+（`needle/needle.js` + `needle/needle.wasm`，進 Service Worker 外殼快取）。
+七種語言：英、德、法、西、義、荷、波。**沒有中文。**
+
+### 實測（本機 Node 26 / Chrome，真模型，`test_whistle_engine.js`）
+
+| 音訊長度 | 一次轉寫耗時 | RTF | time to first token |
+| --- | --- | --- | --- |
+| 3 s | 0.98 s | 0.33 | 368 ms |
+| 5 s | 1.36 s | 0.27 | 497 ms |
+| 10 s | 2.92 s | 0.29 | 1,015 ms |
+| 15 s | 4.57 s | 0.30 | 1,594 ms |
+| 20 s | 6.85 s | 0.34 | 2,131 ms |
+| 30 s（引擎上限） | 10.62 s | 0.35 | 3,426 ms |
+
+瀏覽器裡（真的 Worker、真的 Service Worker 快取）：引擎初始化 + 模型載入 **58 ms**、
+3.03 秒英文音訊轉寫 **947 ms**，逐字稿與詞級時間戳都正確。
+
+### 為什麼用 VAD 分段，而不是引擎內建的串流 API
+
+`needle.h` 有 `needle_stream_transcribe_process`（可選的即時介面），但實測**跟不上即時**：
+它每一輪都把整個緩衝重新轉寫，成本隨緩衝成長。餵 1 秒音訊、緩衝 10 秒時單輪要 3.4 秒，
+緩衝 30 秒時單輪 1.4–7 秒；36 秒音訊總共花 **113.7 秒（RTF 3.2）**。這不是接線問題，
+是那個 API 的設計（區域一致性合議／local agreement）配上 WASM 速度的必然結果。
+
+所以 Whistle 走**與 Whisper 同一套 VAD 分段**（0.8 秒靜音或滿 15 秒切一段），
+每段獨立轉寫：成本線性、RTF 約 0.3，代價是字幕比 sherpa 的真串流慢一到兩秒。
+定位上兩者互補：**要真串流低延遲（中英）用 sherpa，要極小下載量（歐語）用 Whistle。**
+
+### 一個只有真瀏覽器才抓得到的 bug
+
+這份 `needle.js` 建置**沒有** `Module.locateFile` 入口（整支膠水層只有一個內部
+`locateFile(path){return scriptDirectory+path}`），Worker 裡的 `scriptDirectory` 取自
+`self.location.href` = 站台根目錄，於是它去抓 `<站台根>/needle.wasm`，抓到 HTML 後炸
+`Aborted(CompileError: … expected magic word 00 61 73 6d, found 3c 21 44 4f)`（`<!DO`）。
+Node 的假 module 測試不會經過路徑推導，所以是**在瀏覽器裡用真 UI 載入模型時才發現**的
+（畫面顯示「模型已就緒（主執行緒）」＝ Worker 失敗、退路接手）。修法：兩條路徑都用
+`wasmBinary` 把位元組直接餵給引擎，並在 `test_whistle_worker_api.js` 留下回歸斷言。
+
 
 ## 三條還沒做的路線
 

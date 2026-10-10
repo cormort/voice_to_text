@@ -1,10 +1,10 @@
 # 多國語言即時逐字稿工具
 
-瀏覽器端的語音轉文字工具，提供**五種辨識引擎**（Web Speech、Vosk、sherpa-onnx、Whisper、MOSS 會議轉寫）：可即時語音辨識、批次轉寫音檔／影片，並一鍵輸出標準 SRT 字幕。
+瀏覽器端的語音轉文字工具，提供**六種辨識引擎**（Web Speech、Vosk、sherpa-onnx、Whisper、Whistle、MOSS 會議轉寫）：可即時語音辨識、批次轉寫音檔／影片，並一鍵輸出標準 SRT 字幕。
 
 ## 特色
 
-- **五種辨識引擎**：雲端 Web Speech 與 MOSS、本機 Vosk / sherpa-onnx / Whisper（WASM / WebGPU），引擎卡片式選擇器標明隱私等級（🔒 本機／☁️ 雲端）並附快速開始引導
+- **六種辨識引擎**：雲端 Web Speech 與 MOSS、本機 Vosk / sherpa-onnx / Whisper / Whistle（WASM / WebGPU），引擎卡片式選擇器標明隱私等級（🔒 本機／☁️ 雲端）並附快速開始引導
 - **即時語音辨識**：多語言即時轉文字，搭配音量偵測即時回饋；空白鍵快速開始／停止
 - **MOSS 會議轉寫**：拖放音訊／影片檔上傳，自動轉寫並標示說話人（S01、S02…），可一鍵匯出標準 `.srt` 字幕
 - **繁體中文輸出**：辨識結果自動簡轉繁（opencc-js）
@@ -55,6 +55,7 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 | Vosk | 🔒 本機 | 即時辨識（WASM，支援上傳自訂模型） |
 | sherpa-onnx | 🔒 本機 | 即時串流辨識（WASM） |
 | Whisper | 🔒 本機 | 即時辨識（WebGPU，WASM 退路；tiny/base/small 模型） |
+| Whistle | 🔒 本機 | 即時辨識（WASM，16.9 MB 輕量模型；英德法西義荷波） |
 | MOSS-Transcribe-Diarize | ☁️ 雲端批次 | 音訊／影片批次轉寫＋說話人分離＋SRT 匯出 |
 
 ## 支援語言
@@ -68,6 +69,9 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 - Français
 - Deutsch
 
+> ⚠️ **Whistle 只支援英、德、法、西、義、荷、波七種語言，沒有中文、日文、韓文。**
+> 需要中文即時字幕請選 sherpa-onnx，需要中文批次高準確度請選 Whisper 或 MOSS。
+
 ## 使用說明
 
 1. 選擇辨識引擎（引擎卡片或下拉選單）；本機引擎首次使用會下載模型
@@ -78,6 +82,7 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 
 - **Web Speech**：`webkitSpeechRecognition`
 - **Vosk**：`vosk-browser`（WASM）；**sherpa-onnx**：WASM 串流辨識；**Whisper**：transformers.js + WebGPU（npm CDN 載入模型，Cache Storage 快取）
+- **Whistle**：Cactus Compute 的 `needle` 引擎（WASM，repo 內 `needle/`，Apache-2.0）+ 16.9 MB 的 `whistle.cact`（Hugging Face，Cache Storage 快取 `whistle-model-v1`）。解碼在 `whistle-worker.js`，呼叫層 `whistle-engine.js` 由 Worker 與主執行緒退路共用一份
 - **MOSS**：Hugging Face Space（官方 Gradio / 社群 LiteRT）批次轉寫，`parseMossGradio` 逐行解析時間戳與說話人
 - 辨識結果以 opencc-js 簡轉繁；音量偵測使用 **Web Audio API**（`AudioContext`, `AnalyserNode`）
 - 偏好設定存於 LocalStorage；本機模型檔由瀏覽器快取（Cache Storage）
@@ -98,6 +103,14 @@ node test_sherpa_decode.js        # sherpa 解碼：partial / endpoint / 過期 
 node test_sherpa_download.js      # 分段下載：Range、單段重試、不支援 Range 的退路
 node test_resample.js             # 降取樣：整數倍移動平均、非整數倍內插
 node test_sherpa_worker_api.js    # worker 訊息協定（不需要模型，見下）
+node test_whistle_worker_api.js   # Whistle：呼叫層參數、worker 協定、UI 接線（不需要模型）
+```
+
+需要 16.9 MB 模型檔的（沒有模型會自動跳過，不會讓 CI 紅）：
+
+```bash
+curl -L -o whistle.cact https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact
+node test_whistle_engine.js        # 真模型轉寫：逐字稿、詞級時間戳、RTF
 ```
 
 需要瀏覽器的（需要 playwright）：
@@ -121,13 +134,37 @@ Worker 化把同一組 sherpa API 變成**兩份實作**（`index.html` 的主�
 `start` 必回 `started`（主執行緒的等待器只認這個）、feed 會回非空 `result`、
 flush 會補 0.4 秒靜音並回 `final`、free 會回 `freed`。
 
-> ⚠️ **改動 `sherpa-worker.js` 或任何 `sw.js` 的 `ASSETS` 成員時，必須一起升 `sw.js` 的 `CACHE` 版號。**
+### 為什麼要有 `test_whistle_worker_api.js`
+
+Whistle 的解碼細節有一堆「寫錯會安靜壞掉」的地方，測試用**假 module**（不必下載 16.9 MB）
+把它們釘住：
+
+- `needle_load` 的長度參數是 `unsigned long long`（wasm 的 i64）→ 傳 Number 直接丟
+  `TypeError: Cannot convert 16919407 to a BigInt`，模型永遠載不起來
+- `needle_transcribe` 的語言只認 `en/de/fr/es/it/nl/pl` 或 `NULL`，其他代碼要送 `NULL` 自動偵測
+- 超過 30 秒要自己裁；`word_timestamps` 不開就沒有詞級時間戳
+- worker 的 `error` 一定要帶 `id`，否則主執行緒的 Promise 永遠不 settle（畫面卡在「處理中」）
+
+另外它還守著兩條**實測踩出來的**規則：
+
+1. **解碼只有一份實作**：`needle` 的底層 API 只出現在 `whistle-engine.js`，`index.html`
+   與 `whistle-worker.js` 都透過它 —— 直接比對 `index.html` 裡有沒有 `_needle_transcribe(`，
+   避免重演 sherpa「兩份實作參數對不上、字幕永遠空白」那個 bug 類型。
+2. **wasm 要用 `wasmBinary` 餵，不能靠路徑推導**：這份 `needle.js` 建置**沒有**
+   `Module.locateFile` 入口，Worker 裡它會用 `self.location.href`（站台根目錄）去抓
+   `needle.wasm`，抓到 HTML 的症狀是啟動時
+   `Aborted(CompileError: … expected magic word 00 61 73 6d, found 3c 21 44 4f)` ——
+   `3c 21 44 4f` 就是 `<!DO`。這個 bug 是**在瀏覽器裡用真的 UI 載入模型時才發現的**
+   （Node 的假 module 測試不會經過路徑推導）。
+
+> ⚠️ **改動 `sherpa-worker.js`、`whistle-worker.js`、`whistle-engine.js`、`needle/` 或任何
+> `sw.js` 的 `ASSETS` 成員時，必須一起升 `sw.js` 的 `CACHE` 版號。**
 > worker 檔由 service worker 以 **cache-first** 供應，而瀏覽器只比對 `sw.js` 本身的位元來決定要不要更新 SW ——
 > 只改 worker 不改 `sw.js`，`install` 不會重跑、`cache.addAll` 不會重抓，既有使用者會永遠拿到舊 worker。
 
 ## 隱私說明
 
-- 🔒 **本機引擎**（Vosk／sherpa／Whisper）：音訊完全不出裝置
+- 🔒 **本機引擎**（Vosk／sherpa／Whisper／Whistle）：音訊完全不出裝置
 - ☁️ **雲端引擎**（Web Speech／MOSS）：音訊會送至第三方伺服器處理，請勿用於敏感性內容
 
 ## 歷史變更
@@ -237,3 +274,38 @@ flush 會補 0.4 秒靜音並回 `final`、free 會回 `freed`。
     （實測一律回 `no available backend found ... [webgpu]`），也就是 README 寫的「WebGPU 不可用
     時自動退回 WASM」其實是壞的。現在改成先用 `requestAdapter()` 確認有 adapter 才試 WebGPU，
     真的失敗時再換一份全新的模組實例重試 WASM（headless Chrome 實測 WASM 退路可正常載入）
+## 本次新增 (2026-10-10) — Whistle：16.9 MB 的本機輕量引擎
+
+參考 Cactus Compute 的 [Whistle: Speech to Text in 16.9 MB](https://cactuscompute.com/blog/whistle)，
+把第六個引擎接進本專案。**它是本專案第一個「下載量只有兩位數 MB」的本機引擎**
+（Vosk 81 MB、sherpa 199 MB、Whisper small 240 MB），但**不支援中文**、也不是真串流。
+
+- 模型：`whistle.cact` 16.9 MB（Hugging Face `Cactus-Compute/whistle`，Apache-2.0），
+  首次載入後存進 Cache Storage（`whistle-model-v1`），可自訂模型網址或清除快取
+- 引擎：Cactus 的 `needle` WASM（`needle/needle.js` 63 KB + `needle/needle.wasm` 923 KB，
+  同源、進 Service Worker 外殼快取），解碼在 `whistle-worker.js`，主執行緒只做訊息搬運
+- 辨識：英、德、法、西、義、荷、波七種語言（自動偵測或用語言選單指定），
+  附**詞級時間戳**（start／end／probability，目前 UI 只顯示文字，資料已從引擎取回）
+- 分段方式：與 Whisper 同一套 VAD（0.8 秒靜音或滿 15 秒切一段），每段獨立轉寫
+- 為什麼不用引擎內建的串流 API（`needle_stream_transcribe_process`）：它每一輪都把整個
+  緩衝重新轉寫，成本隨緩衝成長 —— 本機實測 36 秒音訊共花 113 秒（RTF 3.2），跟不上即時。
+  分段後是線性成本（RTF 0.3）。詳細數字見 [MODELS.md](MODELS.md)
+
+### 實測（本機 Chrome / Node，真模型）
+
+| 項目 | 數字 |
+| --- | --- |
+| 模型下載 | 16,919,407 bytes（16.9 MB） |
+| 引擎初始化 + 模型載入 | 58 ms（瀏覽器 Worker） |
+| 3 秒英文音訊轉寫 | 947 ms（RTF 0.31，ttft 363 ms） |
+| 30 秒英文音訊轉寫 | 10.6 s（RTF 0.35） |
+| 逐字稿正確性 | 「Turn off the kitchen lights and set a timer for ten minutes.」→ 完全正確（`10` 數字化） |
+
+### 這個功能在瀏覽器裡抓到的一個 bug（Node 測試抓不到）
+
+第一次用真的 UI 載入模型時，狀態顯示的是「模型已就緒（**主執行緒**）」——
+Worker 路徑其實失敗了，退路接手。原因：這份 `needle.js` 建置沒有 `Module.locateFile` 入口，
+Worker 裡它用 `self.location.href`（站台根目錄）去抓 `needle.wasm`，抓到 HTML，
+啟動時炸 `expected magic word 00 61 73 6d, found 3c 21 44 4f`（`3c 21 44 4f` = `<!DO`）。
+修法是兩條路徑都把 wasm 位元組用 `wasmBinary` 直接餵進去，並且在
+`test_whistle_worker_api.js` 加上回歸斷言。
