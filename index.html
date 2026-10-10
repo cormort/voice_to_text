@@ -34,6 +34,10 @@
     base-uri 'self';
     form-action 'none'">
   <meta name="description" content="六引擎語音轉文字：即時辨識、MOSS 會議轉寫與 SRT 字幕輸出">
+  <!-- 第一次下載模型或引擎前先建好連線：DNS + TCP + TLS 在手機上要 200–400 ms，
+       而 HF 的 resolve 還會再 302 到 CDN（等於付兩次）。代價只有一次閒置連線。 -->
+  <link rel="preconnect" href="https://huggingface.co" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -258,22 +262,46 @@
       .transcript-container { height: auto; box-shadow: none; padding: 0; overflow: visible }
       #transcript { font-size: 11pt }
     }
+    /* 語言選單底下的補充說明（例：Whistle 不支援中文）。
+       要一起寫 [hidden] 規則，否則 display:block 會蓋掉 UA 的 [hidden]{display:none} */
+    .lang-note { display: block; font-size: .82em; opacity: .7; margin-top: 4px }
+    .lang-note[hidden] { display: none }
   </style>
 
 <!-- Google tag (gtag.js) —— G-GHGBM401HN
-     兩件事要注意：
+     三件事要注意：
      1. 這裡**沒有 SRI**（其他外部程式都有）：Google 會持續更新這支檔案內容，綁 integrity
         會在某天直接讓 GA 停止載入，而且失敗是靜默的。安全邊界靠上面的 CSP 放行清單。
      2. 它需要 CSP 的 script-src 放行 www.googletagmanager.com、connect-src 放行
         *.google-analytics.com —— 少了任何一個，GA 就會被自己的 CSP 擋掉（實測踩過：
         securitypolicyviolation script-src-elem、transferSize 0，表面上「有裝 GA」但完全沒資料）。
+     3. **刻意不在解析階段下載**：gtag.js 實測 181 KB（br），是 App 本體 gzip（44.6 KB）的
+        4 倍，而且每個訪客每次進來都付。改成頁面 load 之後、瀏覽器閒置時才抓（最多等 3 秒）。
+        取捨：page_view 會晚 1–3 秒送出，**極短命的工作階段（開了就關）可能漏記**。
+        要恢復「一進來就載」，把最後的 scheduleAnalytics() 換成 loadAnalytics() 即可。
      本頁只送 gtag('config')，沒有自訂事件；逐字稿與音訊不會進 GA。 -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
   gtag('config', 'G-GHGBM401HN');
+
+  let gaLoaded = false;
+  function loadAnalytics() {
+    if (gaLoaded) return;
+    gaLoaded = true;
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN';
+    document.head.appendChild(script);
+  }
+  function scheduleAnalytics() {
+    // Safari 舊版沒有 requestIdleCallback，退回固定 1.2 秒
+    if ('requestIdleCallback' in window) requestIdleCallback(loadAnalytics, { timeout: 3000 });
+    else setTimeout(loadAnalytics, 1200);
+  }
+  if (document.readyState === 'complete') scheduleAnalytics();
+  else window.addEventListener('load', scheduleAnalytics, { once: true });
 </script>
 </head>
 <body>
@@ -332,7 +360,7 @@
         <option value="zh-TW">中文（台灣）</option><option value="zh-CN">中文（中國大陸）</option><option value="zh-HK">粵語（香港）</option>
         <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ja-JP">日本語</option>
         <option value="ko-KR">한국어</option><option value="es-ES">Español</option><option value="fr-FR">Français</option><option value="de-DE">Deutsch</option>
-      </select></div>
+      </select><span class="lang-note" id="langNote" hidden></span></div>
       <p class="quickstart" id="quickstartText"></p>
     </section>
 
@@ -409,10 +437,8 @@
        只在段落確定後把內容送進這裡 -->
   <div id="a11yAnnouncer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- cn2t = 簡→繁 preset（含 hk/tw/twp 目標）。這個 App 只用 from:'cn'，用 preset 在語意上
-       比 full.js 精確；實測檔案只小 59 KB（1035 vs 1094 KB，gzip 後差距更小），
-       所以這是「意圖清楚」而不是顯著的體積優化。 -->
-  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/cn2t.js" integrity="sha384-9JmxkgxoKE5gP14V/eBemUAwCKh8QSb5IFEJje/JNxxh8cn9hKsIs/q5Ho+mfVau" crossorigin="anonymous"></script>
+  <!-- OpenCC（簡→繁）不在這裡用 script 標籤載入，改由 ensureOpencc() 按需下載 ——
+       原因見 opencc 常數旁的註解（它 1.04 MB，會擋住整個 App 的啟動）。 -->
   <script>
 (() => {
   'use strict';
@@ -450,6 +476,9 @@
     'en-US': 'en', 'en-GB': 'en', 'es-ES': 'es', 'fr-FR': 'fr', 'de-DE': 'de'
   };
   const SAMPLE_RATE = 16000;
+  // Whistle 的 VAD 分段上限（秒）：實測 10 秒是「首字延遲 vs 總 CPU」的甜蜜點，
+  // 詳見 createVad() 的註解
+  const WHISTLE_SEGMENT_SECONDS = 10;
   const SHERPA_DATA_FILE = 'sherpa-onnx-wasm-main-asr.data';
   const SHERPA_CACHE = 'sherpa-onnx-model-v1';
   // Vosk 的模型也自己抓（才有下載進度，見 fetchVoskPackage）。獨立快取名稱，
@@ -462,6 +491,7 @@
   const el = {
     pageTitle: $('pageTitle'), title: $('mainTitle'), engine: $('engineSelector'), lang: $('languageSelector'),
     languageField: $('languageField'), engineCards: $('engineCards'), quickstart: $('quickstartText'),
+    langNote: $('langNote'),
     control: $('controlBtn'), copy: $('copyBtn'), export: $('exportBtn'), clear: $('clearBtn'),
     placeholder: $('placeholderText'), final: $('finalText'), interim: $('interimText'),
     container: $('transcriptContainer'), volume: $('volumeLevel'), notice: $('privacyNotice'),
@@ -530,6 +560,7 @@
       voskSourceLabel: '模型來源：', voskModelLabel: '模型：', voskFileLabel: '檔案：',
       optVoskBuiltin: '網站內建模型', optVoskFile: '本機模型 ZIP', optVoskUrl: '自訂 URL',
       sherpaBaseLabel: '資產位置：', whisperModelLabel: '模型：', vadLabel: '收音靈敏度：',
+      langNoteWhistle: 'Whistle 只支援英、德、法、西、義、荷、波七種語言；選其他語言時會自動偵測。',
       optVadHigh: '高', optVadMid: '中', optVadLow: '低',
       loadModel: '載入模型',
       start: '開始辨識', stop: '停止辨識', stopping: '正在完成最後一句…',
@@ -645,6 +676,7 @@
       voskSourceLabel: 'Model source:', voskModelLabel: 'Model:', voskFileLabel: 'File:',
       optVoskBuiltin: 'Built-in models', optVoskFile: 'Local model ZIP', optVoskUrl: 'Custom URL',
       sherpaBaseLabel: 'Assets URL:', whisperModelLabel: 'Model:', vadLabel: 'Sensitivity:',
+      langNoteWhistle: 'Whistle supports English, German, French, Spanish, Italian, Dutch and Polish only; any other choice falls back to auto-detect.',
       optVadHigh: 'High', optVadMid: 'Medium', optVadLow: 'Low',
       loadModel: 'Load model',
       start: 'Start recognition', stop: 'Stop recognition', stopping: 'Finishing final phrase…',
@@ -890,6 +922,57 @@
     toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
   }
 
+  // ── OpenCC（簡→繁）────────────────────────────────────────────────────────
+  // cn2t = 簡→繁 preset（含 hk/tw/twp 目標）。這個 App 只用 from:'cn'，用 preset 在語意上
+  // 比 full.js 精確；實測檔案只小 59 KB（1035 vs 1094 KB，gzip 後差距更小），
+  // 所以這是「意圖清楚」而不是顯著的體積優化。
+  //
+  // **為什麼不放在啟動路徑上**：這支檔案實測 1.04 MB（br 505 KB），是整個 App 本體
+  // gzip（44.6 KB）的 11 倍，而且它是 parser-blocking 的 classic script —— 放在主 inline
+  // script 之前，等於整頁的 UI 接線（卡片文字、按鈕事件）都要等它下載完。
+  // 實測（Chromium、Slow 3G 400 kbps／400 ms RTT）：有它在 critical path 時
+  // 「UI 可用」是 14,111 ms，擋掉之後是 59 ms。只有「會產出中文」的組合需要它，
+  // 所以改成按需下載：開始辨識、選中文語言、或切到會輸出中文的引擎時才抓。
+  const OPENCC_URL = 'https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/cn2t.js';
+  // 版本鎖定 + SRI：CDN 或套件被換掉時直接載入失敗；失敗時 traditional() 原樣回傳，不會壞
+  const OPENCC_SRI = 'sha384-9JmxkgxoKE5gP14V/eBemUAwCKh8QSb5IFEJje/JNxxh8cn9hKsIs/q5Ho+mfVau';
+  let openccPromise = null;
+
+  function ensureOpencc() {
+    if (window.OpenCC) return Promise.resolve(true);
+    openccPromise ||= new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = OPENCC_URL;
+      script.integrity = OPENCC_SRI;
+      script.crossOrigin = 'anonymous';
+      script.onload = () => resolve(true);
+      // 離線／被擋／SRI 不符：回 false，之後 traditional() 一律原樣輸出（與舊行為相同）
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+    });
+    return openccPromise;
+  }
+
+  // 回傳要用的繁體變體（'twp' / 'hk'），「不需要轉換」時回 null。
+  // Vosk 內建模型與 sherpa / MOSS 的輸出語言由模型決定，語言選單對它們無效：
+  // 內建 cn 必定是簡中要轉，內建 en 必定是英文（不能因為選單停在 zh-TW 就送進 OpenCC）
+  function chineseVariant() {
+    const builtinVoskLang = state.engine === 'vosk' && el.voskSource.value === 'builtin'
+      ? el.voskLang.value : null;
+    const forcedChinese =
+      state.engine === 'moss' ||
+      state.engine === 'sherpa' ||
+      builtinVoskLang === 'cn';
+    const chineseSource = builtinVoskLang ? builtinVoskLang === 'cn' : el.lang.value.startsWith('zh');
+    if (!forcedChinese && !chineseSource) return null;
+    return (!forcedChinese && el.lang.value === 'zh-HK') ? 'hk' : 'twp';
+  }
+
+  // 會產出中文就先抓，不阻塞任何東西（失敗也只是這次不轉）
+  function prefetchOpencc() {
+    if (chineseVariant()) void ensureOpencc();
+  }
+
   function getOpenccConverter(variant) {
     if (!window.OpenCC) return null;
     if (!openccConverters.has(variant)) {
@@ -899,20 +982,13 @@
   }
 
   function traditional(value) {
-    if (!value || !window.OpenCC) return value;
-    // Vosk 內建模型與 sherpa / MOSS 的輸出語言由模型決定，語言選單對它們無效：
-    // 內建 cn 必定是簡中要轉，內建 en 必定是英文（不能因為選單停在 zh-TW 就送進 OpenCC）
-    const builtinVoskLang = state.engine === 'vosk' && el.voskSource.value === 'builtin'
-      ? el.voskLang.value : null;
-    const forcedChinese =
-      state.engine === 'moss' ||
-      state.engine === 'sherpa' ||
-      builtinVoskLang === 'cn';
-    const chineseSource = builtinVoskLang ? builtinVoskLang === 'cn' : el.lang.value.startsWith('zh');
-    if (!forcedChinese && !chineseSource) return value;
+    if (!value) return value;
+    const variant = chineseVariant();
+    if (!variant) return value;
+    // 還沒載到（剛開始辨識的前幾秒）就先原樣輸出，並順手補上載入 —— 之後的段落就會轉
+    if (!window.OpenCC) { void ensureOpencc(); return value; }
 
     try {
-      const variant = (!forcedChinese && el.lang.value === 'zh-HK') ? 'hk' : 'twp';
       const converter = getOpenccConverter(variant);
       return converter ? converter(value) : value;
     } catch (error) {
@@ -950,8 +1026,10 @@
     announce(s);
   }
 
-  // 一次寫入多段（例如 MOSS 的整份逐字稿）：只 render 一次，避免每段都重排與捲動
-  function commitBatch(lines) {
+  // 一次寫入多段（例如 MOSS 的整份逐字稿）：只 render 一次，避免每段都重排與捲動。
+  // OpenCC 是按需載入的，MOSS 這種「一次寫一整份」的路徑值得等它一下（而不是整份留簡體）
+  async function commitBatch(lines) {
+    if (chineseVariant()) await ensureOpencc();
     const written = [];
     for (const line of lines) {
       const text = traditional((line || '').trim());
@@ -1036,6 +1114,7 @@
   }
 
   function begin() {
+    prefetchOpencc();       // 會產出中文的組合先把 OpenCC 抓下來（不阻塞收錄音）
     state.start = new Date();
     state.segments = [];
     state.interim = '';
@@ -1125,6 +1204,13 @@
     }[state.engine];
     el.statusPrivacy.textContent = icon + (local ? t().localProcessing : t().cloudProcessing);
     el.quickstart.innerHTML = t().quickstart[state.engine] || '';
+
+    // Whistle 只認七種歐洲語言，其他選項一律自動偵測 —— 選單不動，但要講清楚，
+    // 否則使用者會以為自己選錯了（行為是對的，只是沒有說明）
+    el.langNote.hidden = state.engine !== 'whistle';
+    if (!el.langNote.hidden) el.langNote.textContent = t().langNoteWhistle;
+
+    prefetchOpencc();       // 這個引擎／語言組合會產出中文就先抓 OpenCC
     updateButtons();
     save();
   }
@@ -1915,10 +2001,17 @@
     }
   }
 
-  // ==================== Whisper VAD and offline engine ====================
-  function createVad() {
+  // ==================== VAD（Whisper 與 Whistle 共用的分句）====================
+  // maxSeconds 是「一路說不停」時強制切段的上限。預設 15 秒（Whisper 的
+  // chunk_length_s 也是 15）；Whistle 用 10 秒 —— 實測（真模型、30 秒連續語音）：
+  //   上限 15 s：第一段文字 4,255 ms，全部 13,067 ms（RTF 0.44）
+  //   上限 10 s：第一段文字 2,749 ms，全部 14,733 ms（RTF 0.49）
+  //   上限  8 s：第一段文字 2,255 ms，全部 15,559 ms（RTF 0.52）
+  // 也就是「首字延遲 −35%、總 CPU +13%」，而且 RTF 仍在 0.5 上下、追得上即時。
+  // 0.4 秒的前置緩衝本來就會讓切點有重疊，所以切短不會把字切掉。
+  function createVad(maxSeconds = 15) {
     return {
-      speaking: false, silence: 0, speech: 0,
+      speaking: false, silence: 0, speech: 0, maxSamples: SAMPLE_RATE * maxSeconds,
       pre: [], audio: [], samples: 0, threshold: +el.vad.value
     };
   }
@@ -1957,7 +2050,7 @@
     // 60 秒連續語音切出 0 段、60 秒音訊全積在 v.audio，Whisper 那邊等於完全沒有輸出。
     // 從上限切出來時 v.speaking 會歸零，下一塊若仍在說話會帶 0.4 秒 preRoll 重新起段，
     // 剛好給切點一點重疊，不會把字切一半。
-    if (v.speaking && (v.silence >= 800 || v.samples >= SAMPLE_RATE * 15)) {
+    if (v.speaking && (v.silence >= 800 || v.samples >= (v.maxSamples || SAMPLE_RATE * 15))) {
       const audio = concat(v.audio, v.samples);
       const valid = v.speech >= 800;
       v.speaking = false;
@@ -2576,9 +2669,9 @@
     updateButtons();
     el.engine.disabled = el.lang.disabled = true;
 
-    // 與 Whisper 同一套 VAD：0.8 秒靜音或滿 15 秒切一段（15 秒 < 引擎的 30 秒上限，
-    // 每段獨立轉寫時間約 4.6 秒，佇列吃得下）
-    const vad = createVad();
+    // 與 Whisper 同一套 VAD，但上限用 10 秒（見 createVad 的實測數字）：
+    // 首字延遲 4.3 s → 2.7 s，總 CPU +13%，仍在引擎的 30 秒上限內
+    const vad = createVad(WHISTLE_SEGMENT_SECONDS);
     whistle.vad = vad;
 
     try {
@@ -3017,7 +3110,7 @@
       moss.segments = segments;
       el.mossSrt.disabled = false;
       // 一次寫入整批：逐段 commit 會每段都 render 並排一次 rAF 捲動
-      commitBatch([
+      await commitBatch([
         `--- MOSS 轉寫：${file.name}（${segments.length} 段，耗時 ${seconds} 秒）---`,
         ...segments.map(mossLine)
       ]);
@@ -3150,7 +3243,10 @@
     el.engine.value = card.dataset.engine;
     updateEngine();
   });
-  el.lang.onchange = save;
+  el.lang.onchange = () => {
+    prefetchOpencc();       // 切到中文（或切離）時順手預抓
+    save();
+  };
   el.vad.onchange = save;
   el.sherpaBase.onchange = () => {
     save();

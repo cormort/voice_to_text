@@ -65,6 +65,16 @@ check('頁面有 gtag.js 載入與 config 呼叫',
 check('gtag 片段旁有註解說明「沒有 SRI」的理由（避免有人補上 integrity 反而讓 GA 靜默失效）',
   /沒有 SRI/.test(HTML));
 
+// GA 也不該在解析階段就下載：gtag.js 實測 181 KB（br），是 App 本體 gzip（44.6 KB）的 4 倍
+const gaStaticTag = HTML.match(/<script[^>]+src="[^"]*googletagmanager[^"]*"[^>]*>/);
+check('index.html 沒有靜態的 gtag <script src>（改成 load 後閒置才下載）',
+  !gaStaticTag, gaStaticTag ? gaStaticTag[0].slice(0, 80) : '');
+check('GA 由 load／requestIdleCallback 排程載入，且有非 Safari 的退路',
+  /requestIdleCallback\(loadAnalytics/.test(HTML) && /addEventListener\('load', scheduleAnalytics/.test(HTML) &&
+  /setTimeout\(loadAnalytics, 1200\)/.test(HTML));
+check('GA 仍只送 config（沒有自訂事件）且網址與 ID 不變',
+  /script\.src = 'https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=G-GHGBM401HN'/.test(HTML));
+
 // ── 4) 隱私聲明與 GA 一致 ────────────────────────────────────────────────
 const conclusions = (HTML.match(/privacyConclusion: '([^']*)'/g) || []).map((line) => line.replace(/^privacyConclusion: '|'$/g, ''));
 check('中英文各有一條隱私結論', conclusions.length === 2, `找到 ${conclusions.length} 條`);

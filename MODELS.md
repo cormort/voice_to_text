@@ -99,6 +99,14 @@ Cactus Compute 的 [Whistle](https://cactuscompute.com/blog/whistle)（Apache-2.
 每段獨立轉寫：成本線性、RTF 約 0.3，代價是字幕比 sherpa 的真串流慢一到兩秒。
 定位上兩者互補：**要真串流低延遲（中英）用 sherpa，要極小下載量（歐語）用 Whistle。**
 
+### 引擎檔不預抓（2026-10-10）
+
+`needle.js`（63 KB 原始／18 KB gzip）與 `needle.wasm`（923 KB／342 KB gzip）**不在 `sw.js`
+的 `ASSETS` 裡**。它們只有選 Whistle 的人會用到，預抓等於讓每個訪客多付約 360 KB；
+兩者都是同源資產，Service Worker 的 fetch handler 會在第一次使用時寫進快取
+（實測：用過一次 Whistle 之後 `stt-shell-v6` 就出現 `/needle/needle.js` 與 `/needle/needle.wasm`）。
+代價只有「離線後第一次就選 Whistle」，而那本來就不可能 —— 首次使用一定要連網下載 16.9 MB 模型。
+
 ### 一個只有真瀏覽器才抓得到的 bug
 
 這份 `needle.js` 建置**沒有** `Module.locateFile` 入口（整支膠水層只有一個內部

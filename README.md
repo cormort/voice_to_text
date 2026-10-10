@@ -111,7 +111,12 @@ node test_resample.js             # 降取樣：整數倍移動平均、非整�
 node test_sherpa_worker_api.js    # worker 訊息協定（不需要模型，見下）
 node test_whistle_worker_api.js   # Whistle：呼叫層參數、worker 協定、UI 接線（不需要模型）
 node test_ga_csp.js               # GA 與 CSP／隱私聲明的一致性（放行清單、沒有過度放寬、聲明不實）
+node test_opencc_lazy.js          # OpenCC 按需載入：不得回到啟動路徑、單次注入、SRI、中文判斷
 ```
+
+這 9 支在 CI 上跑（`.github/workflows/test.yml`，約 10 秒、零依賴）。
+需要 playwright 的 `test_speech_perf.js`（主執行緒阻塞量測）與 `test_worker_fallback.js`
+（Worker 退路）**不在 CI 內** —— 它們要另外準備 `PW_MODULE`，屬於本機手動執行的量測工具。
 
 需要 16.9 MB 模型檔的（沒有模型會自動跳過，不會讓 CI 紅）：
 
@@ -220,7 +225,10 @@ Whistle 的解碼細節有一堆「寫錯會安靜壞掉」的地方，測試用
 - 三種模型可選：tiny (~40MB) / base (~74MB) / small (~240MB，預設)，首次下載後快取於瀏覽器
 - 預設 small 是為了中英混雜語音的正確率：實測同一段「我用 React 寫前端，遇到 API 的問題」，
   base 會把「前端」聽成「前段」、「JavaScript」聽成「漢字」，small 則 100% 正確
-- 滾動視窗轉錄：每 ~2.6 秒對最近 6 秒音訊重新轉錄，以最長共同前綴比對輸出增量，避免重複文字
+- 分句轉錄：用與其他本機引擎同一套 VAD 切段（0.8 秒靜音或滿 15 秒），每段獨立送進
+  `whisper-worker.js` 解碼（`chunk_length_s: 15`／`stride_length_s: 2`），佇列最多排 3 段
+  > 📌 這裡原本寫「滾動視窗：每 2.6 秒重新轉錄最近 6 秒」，那是早期實作；程式碼後來改成
+  > VAD 分句，文件沒跟著改（2026-10-10 修正）。
 - 支援語言與 Web Speech 相同（中文／粵語／英日韓西法德），zh-HK 自動映射為粵語 (yue)
 - 硬體偵測：有 WebGPU 用 GPU（快），沒有自動退回 WASM（較慢但可用；WASM 用 q4 量化，
   transformers.js 4.2.0 的 WASM+q8 會因 decoder 量化錯誤崩潰，且失敗載入會毒化模型快取）
@@ -347,3 +355,67 @@ Worker 裡它用 `self.location.href`（站台根目錄）去抓 `needle.wasm`�
 
 驗證（Chromium，本機 server）：`securitypolicyviolation` 事件 0 筆、gtag.js 有實際下載、
 GA4 `/g/collect` beacon 有送出、六個引擎切換與 Whistle 載入不受影響。
+
+## 本次優化 (2026-10-10) — 啟動路徑、預抓量與 CI
+
+整體檢視（量測方法與完整數據見 `voice_to_text-優化檢視-2026-10-10.md`）後修的六件事。
+原則：**只修量得出來、且幅度對得起風險的地方**；量完發現不是問題的就不動（見文末）。
+
+### 1. OpenCC 改成按需載入（最大的一項）
+
+`opencc-js/cn2t.js` 實測 **1.04 MB（br 505 KB）**，是整個 App 本體 gzip（44.6 KB）的 **11 倍**，
+而且它是 parser-blocking 的 `<script src>`，擺在主 inline script 之前 ——
+等於全頁的 UI 接線（卡片文字、按鈕事件）都要排隊等它。
+
+實測（Chromium、Slow 3G 400 kbps／400 ms RTT）：
+
+| | UI 可用（卡片有字、按鈕能按） |
+| --- | --- |
+| 修正前（opencc 在 critical path） | **14,111 ms** |
+| 擋掉 jsdelivr（模擬不載入） | **59 ms** |
+
+現在改成 `ensureOpencc()` 動態注入（保留版本鎖定與 SRI），觸發點有三個：
+`begin()`（開始辨識前）、語言選單切到中文、`updateEngine()` 遇到會輸出中文的引擎
+（sherpa／MOSS／Vosk 內建 cn）。`traditional()` 在 OpenCC 還沒到時**原樣輸出並順手補抓**
+（與舊行為相同的優雅降級），MOSS 的整批寫入則 `await ensureOpencc()`，不會整份留簡體。
+由 `test_opencc_lazy.js` 守住：靜態標籤不得回來、單次注入、SRI、各種語言組合的判斷。
+
+### 2. Service Worker 不再預抓 needle 引擎（−360 KB）
+
+`install` 的 `cache.addAll` 原本包含 `needle/needle.wasm`（923 KB 原始／342 KB gzip）與
+`needle/needle.js`（63 KB／18 KB gzip）—— 佔預抓傳輸量的 **81%**，但只有選 Whistle 的人會用到。
+兩者都是同源資產，`fetch` handler 本來就會在第一次使用時寫進快取；
+唯一犧牲的是「離線後第一次就選 Whistle」，而那個情境本來就不成立（首次一定要連網下載 16.9 MB 模型）。
+`CACHE` 依規則升為 `stt-shell-v6`。
+
+### 3. Google Analytics 延後到閒置才下載（−181 KB）
+
+gtag.js 實測 **181 KB（br）**，是 App 本體的 4 倍。改成 `load` 之後用 `requestIdleCallback`
+（最多等 3 秒；沒有 `requestIdleCallback` 的瀏覽器退固定 1.2 秒）才注入。
+**取捨：`page_view` 會晚 1–3 秒送出，極短命的工作階段可能漏記**；
+要恢復「一進來就載」，把 `scheduleAnalytics()` 換成 `loadAnalytics()` 即可。
+
+### 4. `preconnect` 到 Hugging Face 與 jsDelivr
+
+首次下載模型／引擎前先建好連線（DNS + TCP + TLS 在手機上 200–400 ms，HF 還會再 302 到 CDN）。
+代價是一次閒置連線。
+
+### 5. Whistle 的語言選單加上說明
+
+Whistle 只支援七種歐洲語言，選 zh／ja／ko 時會自動偵測（行為正確），
+但 UI 沒有任何說明，使用者會以為自己選錯。現在選 Whistle 時語言欄下方會多一行提示
+（中英文皆有）。同時修掉 README 裡與程式碼不符的 Whisper 描述。
+
+### 6. CI
+
+`.github/workflows/test.yml`：push 到 main 與 PR 時跑 9 支純 Node 測試（約 10 秒、零依賴）。
+需要 playwright 的兩支量測工具刻意不進 CI（要另外準備 `PW_MODULE`）。
+
+### 量測後「決定不要動」的（避免以後重做）
+
+| 懷疑的地方 | 實測 | 結論 |
+| --- | --- | --- |
+| 每 128 ms 音塊的「降取樣 + VAD」 | 960 塊（120 秒音訊）共 **19.4 ms** → 0.020 ms/塊，佔預算 **0.02%** | 不是瓶頸 |
+| `render()` 每次重寫整份逐字稿 | 3000 段（176 KB）共 **1.8 ms** | 可忽略 |
+| 把 `index.html` 拆成 CSS/JS | 本體 gzip 只有 44.6 KB | 純可維護性，非效能 |
+| Vosk 的 81 MB 模型放 git | 使用者端省不到（`MODELS.md` 已評估） | 維持原結論 |

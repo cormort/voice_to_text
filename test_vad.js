@@ -16,8 +16,10 @@ const CHUNK = 2048; // 128 ms @16 kHz
 
 // 每塊的第一個 sample 帶 marker，用來追蹤某一塊音訊在 utterance 中出現幾次
 const run = new Function('SAMPLE_RATE', 'CHUNK', `${src}
-  return function run(script) {
-    const v = { speaking: false, silence: 0, speech: 0, pre: [], audio: [], samples: 0, threshold: 0.018 };
+  return function run(script, maxSeconds) {
+    const v = { speaking: false, silence: 0, speech: 0, pre: [], audio: [], samples: 0, threshold: 0.018,
+      // 沒給就沿用 vadPush 的 15 秒預設（v.maxSamples || SAMPLE_RATE * 15）
+      maxSamples: maxSeconds ? SAMPLE_RATE * maxSeconds : undefined };
     const log = { utterances: [], flushed: null, speaking: false, samples: 0 };
     for (const step of script) {
       const chunk = new Float32Array(CHUNK);
@@ -78,4 +80,18 @@ for (const u of r.utterances) {
 }
 assert.ok(r.samples <= SAMPLE_RATE * 16, `緩衝不應無限成長，實得 ${(r.samples / SAMPLE_RATE).toFixed(1)} 秒`);
 
-console.log('vadPush/vadFlush: 6 checks passed');
+// 7) 分段上限可以調：Whistle 用 10 秒（首字延遲 4.3 s → 2.7 s，總 CPU +13%）。
+//    這格同時守住「15 秒不再是唯一選項」——上限若被寫死回常數，這裡會紅。
+r = run([...silence(6), ...speech(470)], 10);   // 約 60 秒連續語音、上限 10 秒
+assert.ok(r.utterances.length >= 5, `上限 10 秒時 60 秒連續語音應切出 ≥5 段，實得 ${r.utterances.length}`);
+for (const u of r.utterances) {
+  assert.ok(u.length <= SAMPLE_RATE * 11, `上限 10 秒時每段不應超過 11 秒，實得 ${(u.length / SAMPLE_RATE).toFixed(1)} 秒`);
+}
+assert.ok(r.samples <= SAMPLE_RATE * 11, `上限 10 秒時緩衝不應無限成長，實得 ${(r.samples / SAMPLE_RATE).toFixed(1)} 秒`);
+
+// Whistle 真的用了 10 秒（而不是只是「可以調」）
+assert.ok(/const WHISTLE_SEGMENT_SECONDS = 10;/.test(html), 'index.html 應定義 WHISTLE_SEGMENT_SECONDS = 10');
+assert.ok(/const vad = createVad\(WHISTLE_SEGMENT_SECONDS\)/.test(html), 'Whistle 的 VAD 應使用 WHISTLE_SEGMENT_SECONDS');
+assert.ok(/function createVad\(maxSeconds = 15\)/.test(html), 'createVad 的預設值應為 15 秒（Whisper 沿用）');
+
+console.log('vadPush/vadFlush: 7 checks passed');

@@ -249,9 +249,13 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 0));
   check('index.html 的主執行緒退路走 WhistleEngine',
     /WhistleEngine\.loadModel|WhistleEngine\.transcribe/.test(HTML_SRC),
     /WhistleEngine\.loadModel|WhistleEngine\.transcribe/.test(HTML_SRC) ? '' : '找不到 WhistleEngine.loadModel / WhistleEngine.transcribe');
-  check('index.html 把 whistle-engine.js 與 needle 引擎都交給 Service Worker 快取',
-    /\.\/whistle-engine\.js/.test(fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8')) &&
-    /\.\/needle\/needle\.wasm/.test(fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8')));
+  const SW_TEXT = fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8');
+  check('Service Worker 預抓 whistle-worker.js 與 whistle-engine.js',
+    /\.\/whistle-worker\.js/.test(SW_TEXT) && /\.\/whistle-engine\.js/.test(SW_TEXT));
+  // needle 引擎（342 KB gzip 的 wasm + 18 KB 的 js）只有選 Whistle 的人會用到，
+  // 預抓等於讓所有訪客多付 360 KB —— 它由 fetch handler 在第一次使用時快取即可
+  check('needle 引擎**不**預抓（改由第一次使用時寫進快取）',
+    !/\.\/needle\/needle\.(wasm|js)/.test(SW_TEXT));
 
 
   // ── 4) UI 接線：引擎卡片、下拉選項、面板、按鈕、ENGINES 分派 ──────────────

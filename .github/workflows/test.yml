@@ -1,0 +1,31 @@
+name: tests
+
+# 這幾支測試是純 Node、零依賴，全部跑完約 10 秒。
+# 需要 16.9 MB 模型的 test_whistle_engine.js 沒有模型時會自動跳過（不會紅）。
+# 需要 playwright 的兩支（test_speech_perf.js、test_worker_fallback.js）刻意不放進來 ——
+# 它們要另外準備 PW_MODULE，屬於「本機手動跑」的量測工具，見 README。
+
+# push 與 PR 都跑：分支推送時就先驗證（含這個 workflow 本身），不必等到合併 main 才發現壞掉
+on: [push, pull_request]
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Node 測試（不需要瀏覽器或模型）
+        run: |
+          node test_vad.js
+          node test_resample.js
+          node test_sherpa_decode.js
+          node test_sherpa_download.js
+          node test_sherpa_worker_api.js
+          node test_whistle_worker_api.js
+          node test_whistle_engine.js
+          node test_ga_csp.js
+          node test_opencc_lazy.js
