@@ -33,6 +33,7 @@ export function createWarningSink({ showToast, label = () => '本機作業警告
   let toastFailures = 0;
 
   function report(engine, phase, message, extra = {}) {
+    // extra.silent：只進 console 與 history，不彈 toast（例如「從 400 MB 續傳」）
     const entry = {
       at: new Date(now()).toISOString(),
       engine: String(engine || 'unknown'),
@@ -43,6 +44,8 @@ export function createWarningSink({ showToast, label = () => '本機作業警告
     console.warn(`[${entry.engine}] ${entry.phase}: ${entry.message}`);
     history.push(entry);
     if (history.length > historyLimit) history.shift();
+
+    if (extra.silent) return entry;
 
     const key = `${entry.engine}:${entry.phase}`;
     // 用 has() 判斷「有沒有前一次」：時鐘從 0 開始時，`lastByKey.get(key) || 0` 會讓

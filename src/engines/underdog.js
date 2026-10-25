@@ -54,6 +54,11 @@ function ensureUnderdogWorker() {
       setUnderdogProgress(msg);
       return;
     }
+    if (msg.type === 'notice') {
+      // 資訊性事件：進 history 與 console，但不彈 toast
+      warnings.report('underdog', msg.phase, msg.message, { silent: true });
+      return;
+    }
     if (msg.type === 'warn') {
       // 例：cache 寫入失敗、OPFS 續傳中止 —— 這些都不影響本次可用性，但一定要看得到
       warnings.report('underdog', msg.phase, msg.message);
@@ -184,7 +189,9 @@ async function loadUnderdog() {
     el.underdogStatus.className = 'model-status';
 
     try {
-      const ready = await underdogRequest({ type: 'load', baseUrl: base, variant });
+      // ?opfs=1 才啟用可續傳的 OPFS 下載（預設 Cache Storage，見 underdog-worker.js 的 CONFIG）
+        const useOpfs = new URLSearchParams(location.search).get('opfs') === '1';
+        const ready = await underdogRequest({ type: 'load', baseUrl: base, variant, useOpfs });
       underdog.loaded = true;
       underdog.base = base;
       underdog.variant = variant;

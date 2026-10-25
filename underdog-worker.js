@@ -18,6 +18,7 @@
 import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.wasm.min.mjs';
 import { makeFrontend } from './underdog/frontend.js';
 import { greedyTdt, detokenize, piecesFromTokenizer, checkShapes } from './underdog/tdt.js';
+import { downloadResumable, opfsAvailable } from './src/opfs.js';
 
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/';
 ort.env.wasm.numThreads = 1;
@@ -34,6 +35,11 @@ const state = {
 };
 
 let chain = Promise.resolve();          // 轉寫序列化：ORT session 不保證併發安全
+
+// 預設用 Cache Storage；`?opfs=1` 才走可續傳的 OPFS（見 load()）。
+// 為什麼預設關：432 MB 分成 54 段寫進 OPFS，首次載入實測 27 s → 102 s（第二次 5.1 s）。
+// 續傳要留，但先把它藏起來，等分段大小／記憶體組裝最佳化之後再預設開。
+const CONFIG = { useOpfs: false };
 
 function send(msg, transfer) {
   self.postMessage(msg, transfer || []);
@@ -53,6 +59,30 @@ async function openCache() {
 
 // 從 Cache Storage 拿；沒有就下載（含位元組級進度），成功才寫回快取。
 async function fetchBytes(url, cache, onProgress, label) {
+  // 有些呼叫端只傳三個參數：label 沒給就會變成 OPFS key 'underdog/undefined'，
+  // 五個檔案全部寫進同一個 blob（實測 66.7 MB），於是每次都判定「續傳後不完整」。
+  label = label || String(url).split('/').pop() || 'file';
+  // 431.9 MB 的權重走 OPFS：分段寫入、中斷可續傳（Cache Storage 只能整份 put）。
+  // 任何失敗都要回報 —— 上次就是「靜靜退回」才讓第二次載入慢 30 倍還查不出來。
+  if (CONFIG.useOpfs && await opfsAvailable()) {
+    try {
+      const { bytes, fromCache, resumedFrom } = await downloadResumable(url, 'underdog/' + label, {
+        onProgress: (loaded, total) => onProgress({ label, loaded, total, cached: false }),
+      });
+      if (fromCache) {
+        send({ type: 'notice', phase: 'cache', message: label + '：OPFS 命中，未重新下載' });
+      } else if (resumedFrom > 0) {
+        send({ type: 'notice', phase: 'resume', message: label + '：從 ' + (resumedFrom / 1048576).toFixed(1) + ' MB 續傳' });
+      }
+      onProgress({ label, loaded: bytes.length, total: bytes.length, cached: fromCache });
+      return bytes;
+    } catch (error) {
+      send({ type: 'warn', phase: 'opfs', message: label + '：' + ((error && error.name) || 'Error') + '：' + ((error && error.message) || error) });
+    }
+  } else {
+    send({ type: 'notice', phase: 'opfs', message: '此環境沒有 OPFS，改用 Cache Storage' });
+  }
+
   if (cache) {
     const hit = await cache.match(url);
     if (hit) {
@@ -101,8 +131,9 @@ async function fetchBytes(url, cache, onProgress, label) {
   return bytes;
 }
 
-async function load(base, variant, id) {
+async function load(base, variant, id, options = {}) {
   const dir = new URL(base.endsWith('/') ? base : base + '/', self.location.href).href;
+  CONFIG.useOpfs = !!options.useOpfs;
   const cache = await openCache();
   const t0 = performance.now();
 
@@ -171,7 +202,7 @@ self.onmessage = event => {
   const msg = event.data || {};
   if (msg.type === 'load') {
     // 載入是一次性的，序列化避免與轉寫交錯
-    chain = chain.then(() => load(msg.baseUrl, msg.variant || 'q4f16', msg.id || 'load'))
+    chain = chain.then(() => load(msg.baseUrl, msg.variant || 'q4f16', msg.id || 'load', { useOpfs: msg.useOpfs }))
       .catch(error => fail(msg.id || 'load', 'load', error));
     return;
   }
