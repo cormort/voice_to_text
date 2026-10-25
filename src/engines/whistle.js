@@ -215,6 +215,7 @@ async function loadWhistle() {
           // Worker 建得起來不代表它載得動（CSP、舊瀏覽器、wasm 檔缺失）。沒有這層退路，
           // 這些情況會直接判整個引擎死亡，而主執行緒其實還有機會成功。
           console.warn('Whistle worker path failed; falling back to the main thread:', workerError);
+          ctx.warnings?.report('whistle', 'fallback', String((workerError && workerError.message) || workerError));
           try { whistleWorker?.terminate(); } catch (error) { /* 已經死了 */ }
           whistleWorker = null;
           whistleWorkerPending.clear();

@@ -17,7 +17,7 @@ export function createUnderdogEngine(ctx) {
 
   // worker 的失敗理由不再只進 console：同一階段一分鐘內彈一次、帶原始訊息，
   // 並全部寫進 window.__engineWarnings（診斷頁／自動化測試讀得到）。
-  const warnings = exposeWarnings(createWarningSink({ showToast, label: () => t().engineWarn }));
+  const warnings = ctx.warnings || exposeWarnings(createWarningSink({ showToast, label: () => t().engineWarn }));
 
 
 const UNDERDOG_DEFAULT_BASE = 'https://huggingface.co/ai-ecoverse/Underdog-Bark-3.0-ONNX/resolve/main/';

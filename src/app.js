@@ -18,6 +18,7 @@ import { createWhistleEngine } from './engines/whistle.js';
 import { createUnderdogEngine } from './engines/underdog.js';
 import { downloadInChunks, formatProgress } from './download.js';
 import { collectStorageReport, renderStorageReport } from './storage-debug.js';
+import { getSharedWarningSink } from './engine-warnings.js';
 import { opfsStore, opfsAvailable } from './opfs.js';
   const CDN = {
     vosk: 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js',
@@ -803,6 +804,11 @@ import { opfsStore, opfsAvailable } from './opfs.js';
     }
     whisperWorker.onmessage = (event) => {
       const msg = event.data || {};
+      if (msg.type === 'warn') {
+        // 非致命降級（例如 WebGPU 退回 WASM）：功能還在，但一定要看得到
+        warnings.report('whisper', msg.phase, msg.message);
+        return;
+      }
       if (msg.type === 'progress') { updateWhisperProgress(msg); return; }
       const pending = whisperWorkerPending.get(msg.id);
       if (!pending) return;
@@ -1857,7 +1863,11 @@ import { opfsStore, opfsAvailable } from './opfs.js';
   // 一份實作（src/engines/batch.js），這裡只填三份差異：可不可以開始、要帶什麼參數、
   // 怎麼推論、失敗怎麼講。runtime 直接傳引擎自己的狀態物件，所以 `whistle.queue`
   // 這類既有讀取方式仍然成立。
+  // 三個引擎共用同一份警告歷史（window.__engineWarnings）；去重以 engine＋phase 為單位
+  const warnings = getSharedWarningSink({ showToast, label: () => t().engineWarn });
+
   const engineCtx = {
+    warnings,
     el, t, state, commit, showToast, AudioCapture, createVad, vadPush, vadFlush,
     setLevel, render, begin, finish, updateButtons, metricsSubmit, metricsCommit,
   };

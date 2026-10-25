@@ -13,7 +13,10 @@
 'use strict';
 
 const assert = require('assert');
-const { createWarningSink, trimMessage, exposeWarnings } = require('./src/engine-warnings.js');
+const { createWarningSink, trimMessage, exposeWarnings, getSharedWarningSink } = require('./src/engine-warnings.js');
+
+// 共用 sink 會掛到 window；Node 沒有 window，補一個空的
+global.window = global.window || {};
 
 let clock = 0;
 const now = () => clock;
@@ -67,4 +70,17 @@ assert.strictEqual(fakeWindow.__engineWarnings.history().length, 3);
 fakeWindow.__engineWarnings.clear();
 assert.strictEqual(sink.history().length, 0);
 
-console.log('engine-warnings: 7 checks passed');
+// 8) 共用 sink：三個引擎要共用同一份 history（各自 new 會互相蓋掉）
+{
+  const shown = [];
+  const a = getSharedWarningSink({ showToast: message => shown.push(message), label: () => '警告' });
+  a.report('underdog', 'cache', 'u1');
+  const b = getSharedWarningSink({ showToast: message => shown.push(message), label: () => '警告' });
+  assert.strictEqual(a, b, '第二次呼叫要拿到同一個 sink');
+  b.report('whisper', 'device', 'w1');
+  assert.strictEqual(a.history().length, 2, '兩個引擎的警告要在同一份 history 裡');
+  assert.ok(a.history().some(entry => entry.engine === 'whisper'), '引擎名稱要保留');
+  assert.strictEqual(global.window.__engineWarnings.history().length, 2, '掛在 window 上的也要是同一份');
+}
+
+console.log('engine-warnings: 8 checks passed');

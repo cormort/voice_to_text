@@ -45,6 +45,7 @@ async function hasWebGpuAdapter() {
     return !!(await self.navigator.gpu.requestAdapter());
   } catch (error) {
     console.warn('[whisper-worker] WebGPU adapter probe failed:', error);
+    post({ type: 'warn', phase: 'probe', message: String((error && error.message) || error) });
     return false;
   }
 }
@@ -55,6 +56,7 @@ async function disposePipe(target) {
     await target.dispose();
   } catch (error) {
     console.warn('[whisper-worker] pipeline disposal failed:', error);
+    post({ type: 'warn', phase: 'dispose', message: String((error && error.message) || error) });
   }
 }
 
@@ -98,6 +100,8 @@ self.onmessage = async (event) => {
           candidateDevice = 'WebGPU';
         } catch (error) {
           console.warn('[whisper-worker] WebGPU pipeline failed; falling back to WASM:', error);
+    // 這不是錯誤（功能還在），但效能差一個檔次，使用者有權知道
+    post({ type: 'warn', phase: 'device', message: 'WebGPU 失敗，已退回 WASM：' + String((error && error.message) || error) });
           moduleRef = await loadModule(true);   // 換一份乾淨的實例（坑 1）
         }
       }

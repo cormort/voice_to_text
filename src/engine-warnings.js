@@ -76,3 +76,18 @@ export function exposeWarnings(sink, target = typeof window !== 'undefined' ? wi
   };
   return sink;
 }
+
+// 站上只有一份 history：三個引擎（Underdog／Whistle／Whisper）都往同一個 sink 報告，
+// window.__engineWarnings 才看得到全部。各自 new 一個的話，後建立的會蓋掉前面的。
+let sharedSink = null;
+
+export function getSharedWarningSink({ showToast, label } = {}) {
+  if (!sharedSink) {
+    sharedSink = createWarningSink({
+      showToast: showToast || (() => {}),
+      label: label || (() => '本機作業警告'),
+    });
+    exposeWarnings(sharedSink);
+  }
+  return sharedSink;
+}
