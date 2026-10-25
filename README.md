@@ -1,10 +1,10 @@
 # 多國語言即時逐字稿工具
 
-瀏覽器端的語音轉文字工具，提供**六種辨識引擎**（Web Speech、Vosk、sherpa-onnx、Whisper、Whistle、MOSS 會議轉寫）：可即時語音辨識、批次轉寫音檔／影片，並一鍵輸出標準 SRT 字幕。
+瀏覽器端的語音轉文字工具，提供**七種辨識引擎**（Web Speech、Vosk、sherpa-onnx、Whisper、Whistle、Underdog Bark 3.0、MOSS 會議轉寫）：可即時語音辨識、批次轉寫音檔／影片，並一鍵輸出標準 SRT 字幕。
 
 ## 特色
 
-- **六種辨識引擎**：雲端 Web Speech 與 MOSS、本機 Vosk / sherpa-onnx / Whisper / Whistle（WASM / WebGPU），引擎卡片式選擇器標明隱私等級（🔒 本機／☁️ 雲端）並附快速開始引導
+- **七種辨識引擎**：雲端 Web Speech 與 MOSS、本機 Vosk / sherpa-onnx / Whisper / Whistle / Underdog Bark 3.0（WASM / WebGPU），引擎卡片式選擇器標明隱私等級（🔒 本機／☁️ 雲端）並附快速開始引導
 - **即時語音辨識**：多語言即時轉文字，搭配音量偵測即時回饋；空白鍵快速開始／停止
 - **MOSS 會議轉寫**：拖放音訊／影片檔上傳，自動轉寫並標示說話人（S01、S02…），可一鍵匯出標準 `.srt` 字幕
 - **繁體中文輸出**：辨識結果自動簡轉繁（opencc-js）
@@ -56,6 +56,7 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 | sherpa-onnx | 🔒 本機 | 即時串流辨識（WASM） |
 | Whisper | 🔒 本機 | 即時辨識（WebGPU，WASM 退路；tiny/base/small 模型） |
 | Whistle | 🔒 本機 | 即時辨識（WASM，16.9 MB 輕量模型；英德法西義荷波） |
+| Underdog Bark 3.0 | 🔒 本機 | 英文高準確度（WASM，約 500 MB；比即時慢，RTF ≈ 1.2） |
 | MOSS-Transcribe-Diarize | ☁️ 雲端批次 | 音訊／影片批次轉寫＋說話人分離＋SRT 匯出 |
 
 ## 支援語言
@@ -70,6 +71,7 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 - Deutsch
 
 > ⚠️ **Whistle 只支援英、德、法、西、義、荷、波七種語言，沒有中文、日文、韓文。**
+> **Underdog Bark 3.0 只有英文**（它是 NVIDIA parakeet-tdt-0.6b-v3 的英文微調）。
 > 需要中文即時字幕請選 sherpa-onnx，需要中文批次高準確度請選 Whisper 或 MOSS。
 
 ## 使用說明
@@ -83,6 +85,10 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 - **Web Speech**：`webkitSpeechRecognition`
 - **Vosk**：`vosk-browser`（WASM）；**sherpa-onnx**：WASM 串流辨識；**Whisper**：transformers.js + WebGPU（npm CDN 載入模型，Cache Storage 快取）
 - **Whistle**：Cactus Compute 的 `needle` 引擎（WASM，repo 內 `needle/`，Apache-2.0）+ 16.9 MB 的 `whistle.cact`（Hugging Face，Cache Storage 快取 `whistle-model-v1`）。解碼在 `whistle-worker.js`，呼叫層 `whistle-engine.js` 由 Worker 與主執行緒退路共用一份
+- **Underdog Bark 3.0**：Conway Research 對 `parakeet-tdt-0.6b-v3` 的英文微調（ONNX 由 ai-ecoverse
+  匯出），在 `underdog-worker.js` 裡用 onnxruntime-web（jsdelivr）跑 mel → encoder → 貪心 TDT →
+  SentencePiece；`underdog/frontend.js` 與 `underdog/tdt.js` 是同一份實作的兩個部分。不支援 WebGPU
+  （會建出無效 pipeline），固定單執行緒 WASM；權重存於 `UNDERDOG_CACHE`
 - **MOSS**：Hugging Face Space（官方 Gradio / 社群 LiteRT）批次轉寫，`parseMossGradio` 逐行解析時間戳與說話人
 - 辨識結果以 opencc-js 簡轉繁；音量偵測使用 **Web Audio API**（`AudioContext`, `AnalyserNode`）
 - 偏好設定存於 LocalStorage；本機模型檔由瀏覽器快取（Cache Storage）
@@ -110,11 +116,12 @@ node test_sherpa_download.js      # 分段下載：Range、單段重試、不支
 node test_resample.js             # 降取樣：整數倍移動平均、非整數倍內插
 node test_sherpa_worker_api.js    # worker 訊息協定（不需要模型，見下）
 node test_whistle_worker_api.js   # Whistle：呼叫層參數、worker 協定、UI 接線（不需要模型）
+node test_underdog.js             # Underdog Bark 3.0：mel 前處理不變量、TDT 迴圈規則、UI／worker 接線
 node test_ga_csp.js               # GA 與 CSP／隱私聲明的一致性（放行清單、沒有過度放寬、聲明不實）
 node test_opencc_lazy.js          # OpenCC 按需載入：不得回到啟動路徑、單次注入、SRI、中文判斷
 ```
 
-這 9 支在 CI 上跑（`.github/workflows/test.yml`，約 10 秒、零依賴）。
+這 10 支在 CI 上跑（`.github/workflows/test.yml`，約 12 秒、零依賴）。
 需要 playwright 的 `test_speech_perf.js`（主執行緒阻塞量測）與 `test_worker_fallback.js`
 （Worker 退路）**不在 CI 內** —— 它們要另外準備 `PW_MODULE`，屬於本機手動執行的量測工具。
 

@@ -12,6 +12,7 @@
 | sherpa-onnx | **約 199 MB**（`.wasm` + `.data`） | Hugging Face（`cormort/sherpa-zh-en-streaming`） | `SHERPA_CACHE`（Cache Storage） |
 | Whisper | tiny/base/small × q4（實測 base 載入 10.5–12 s） | HF（transformers.js） | 瀏覽器模型快取 |
 | Whistle | **16.9 MB**（模型）＋ 986 KB（引擎，隨站台） | HF（`Cactus-Compute/whistle`） | `WHISTLE_CACHE`（Cache Storage） |
+| Underdog Bark 3.0 | **約 500 MB**（q4f16：權重 431.9 MB＋decoder 66.7 MB＋圖 1.2 MB＋tokenizer 1.1 MB；q8 約 908 MB） | HF（`ai-ecoverse/Underdog-Bark-3.0-ONNX`）＋ jsdelivr 的 onnxruntime-web（約 14 MB，只有選它才會抓） | `UNDERDOG_CACHE`（Cache Storage） |
 | MOSS | 0 | 雲端 HF Space | — |
 
 ### 把 Vosk 的 zip 搬到 HF —— 目前評估是「先不要做」
@@ -65,6 +66,7 @@ git push --force origin main
 | Whisper | ✅ 真實百分比 | 走 `whisper-worker.js` 的 `progress_callback`，狀態列會顯示 `53%（decoder_model_merged_q4.onnx）` |
 | Vosk | ✅ 真實百分比與 MB | `48e98e5` 起改由 `fetchVoskPackage` 自行分段下載（狀態列會顯示 `21.4 / 41.9 MB（51%）`），抓完用 blob: URL 交給 `createModel` |
 | sherpa | ✅ 真實百分比與 MB | 自行 `fetch` 190 MB 的 `.data` 並累計位元組（狀態列會顯示 `Downloading 64.0 / 189.8 MB（33.7%）`） |
+| Underdog | ✅ 真實百分比與 MB | 下載與解碼都在 `underdog-worker.js` 裡，逐檔回報（狀態列會顯示 `正在下載模型 encoder_model_q4f16.onnx_data 268.9 / 431.9 MB（62.3%）`） |
 | Whistle | ✅ 真實百分比與 MB | 與 sherpa 同一支 `downloadInChunks`（單一 16.9 MB 檔案，狀態列會顯示 `正在下載模型 8.4 / 16.1 MB（52.1%）`），存進 `WHISTLE_CACHE` |
 
 ## Whistle（16.9 MB）—— 已納入，數字與取捨都在這裡
@@ -117,6 +119,61 @@ Node 的假 module 測試不會經過路徑推導，所以是**在瀏覽器裡�
 （畫面顯示「模型已就緒（主執行緒）」＝ Worker 失敗、退路接手）。修法：兩條路徑都用
 `wasmBinary` 把位元組直接餵給引擎，並在 `test_whistle_worker_api.js` 留下回歸斷言。
 
+
+## Underdog Bark 3.0（約 500 MB）—— 英文最準，但比即時慢
+
+Conway Research 的 [Underdog Bark 3.0](https://huggingface.co/ConwayResearch/Underdog-Bark-3.0)
+是 **NVIDIA `parakeet-tdt-0.6b-v3` 的英文微調**（0.6B 參數、CC-BY-4.0），
+[ONNX 版](https://huggingface.co/ai-ecoverse/Underdog-Bark-3.0-ONNX) 由 ai-ecoverse 匯出。
+
+### 為什麼不能接 sherpa
+
+這份匯出**不是** sherpa 的 transducer 介面：encoder 吐 `encoder_outputs` f32 `[B,T',640]` 與
+`encoder_lengths`，decoder_joint 一步吃一格、要 `state_h`/`state_c`、吐 `token_logits`（8193）
+與 `duration_logits`（5 個 duration 0–4）。sherpa 的 NeMo transducer 期待的是另一組名稱與
+權重佈局，所以這裡自己走 onnxruntime-web：`underdog/frontend.js`（mel）→ encoder →
+`underdog/tdt.js` 的貪心 TDT → SentencePiece 還原。整條鏈路都在 `underdog-worker.js`。
+
+### 實測（桌機 Chrome 155 / 6 核；音訊是官方 fixture 的 2.67 秒英文）
+
+| 項目 | 數字 | 備註 |
+| --- | --- | --- |
+| mel 前處理 | **44–61 ms** | 與 `fixture/input_features.npy` 的最大差 **9.6e-5**（tdt.py 自己對 torch 的差也是 ~1e-4） |
+| encoder（WASM，1 執行緒） | **3.19 s** | RTF **1.19** |
+| encoder（WASM，4 執行緒） | **1.61 s** | RTF **0.60** —— 需要 COOP/COEP，GitHub Pages 給不了，所以不採用 |
+| decoder_joint | **65 ms / 19 步**（約 3.8 ms/步） | 每步一次 session.run，權重 66.7 MB |
+| 端到端 RTF | **約 1.2** | 比即時慢，定位是高準確度批次／段落，不是即時字幕 |
+| 首次載入 | **31.6 s**（432 MB 約 22 s @ ~20 MB/s） | 之後由 `UNDERDOG_CACHE` 命中，約 2 s |
+| 記憶體峰值 | **約 900 MB** | JS 端 432 MB（要交給 ORT）＋ WASM 堆 432 MB；手機請勿嘗試 |
+
+**正確性**：q4f16 在瀏覽器跑出來、對 fixture 的 token 串流與官方 parity 表裡的 q4f16 完全一致
+（`506,8192,363,1413,4870,…`）；Node 的單執行緒路徑則與 PyTorch **token 與 duration 逐項相同**。
+文字 `the quick brown fox jumps over the lazy dog` 在兩邊都一致。
+量化越重失真越明顯（官方表：q8 只有 4/20 段與 PyTorch 的 token 完全相同、q4f16 是 0/20，
+所以**不要**拿 q8/q4f16 的 token 去對 PyTorch，要比的是文字）。
+
+### WebGPU 與它的坑
+
+ORT 1.30 的 WebGPU EP 對這份 q4f16 圖**建出無效的 compute pipeline**（`Add`/`Cast`/`Sigmoid`
+全部 `Invalid ComputePipeline`），`encoder_lengths` 回 0、解碼 0 步、輸出空字串。要吃到 GPU
+得改用 fp16（1.29 GB）或 fp32（2.5 GB）權重，對「瀏覽器端下載」不現實，所以這個引擎固定在
+WASM EP。
+
+### 一個只有真瀏覽器才抓得到的 CSP 坑
+
+`underdog-worker.js` 是 module worker，import jsdelivr 上的 `ort.wasm.min.mjs` —— 那一步
+`script-src` 放行就夠（實測在沒有 CSP 的頁面完全正常）。但 ORT 初始化 WASM 時會**再從自己的
+模組網址開一個 proxy worker**，那一步受 `worker-src` 管：只寫 `worker-src 'self' blob:` 會讓
+整個 worker 建不起來，而失敗訊息是**空的**（`onerror` 的 `event.message` 是 `''`），只有
+`Target.setAutoAttach` 進 worker 才看得到
+`Creating a worker from 'https://cdn.jsdelivr.net/…/ort.wasm.min.mjs' violates … worker-src`。
+現在 `worker-src` 多了 `https://cdn.jsdelivr.net`（本來就在 `script-src` 裡，等於沒有放寬來源）。
+
+### 分段策略
+
+模型本身非串流，所以沿用 Whisper/Whistle 那套 VAD：**0.8 秒靜音或滿 15 秒**送一段。
+15 秒是「字幕延遲 vs 長脈絡準確度」的折衷；RTF 1.2 意味著佇列會慢慢落後，因此
+`UNDERDOG_MAX_QUEUED = 2`（超過就丟最舊的一段並提示一次）。
 
 ## 三條還沒做的路線
 

@@ -133,8 +133,10 @@ for (const engine of ['moss', 'sherpa']) {
 
 // ── 3) 觸發點：begin()／updateEngine()／語言選單 ────────────────────────────
 check('begin() 會預抓 OpenCC', /function begin\(\) \{\s*\n\s*prefetchOpencc\(\);/.test(HTML));
-check('updateEngine() 會預抓 OpenCC 並顯示 Whistle 的語言提示',
-  /el\.langNote\.hidden = state\.engine !== 'whistle';/.test(HTML) && /prefetchOpencc\(\);\s+\/\/ 這個引擎/.test(HTML));
+// Underdog 是英文模型、Whistle 只吃七種歐洲語言 —— 兩者都要在 updateEngine() 顯示語言提示
+check('updateEngine() 會預抓 OpenCC 並顯示 Whistle／Underdog 的語言提示',
+  /el\.langNote\.hidden = state\.engine !== 'whistle' && state\.engine !== 'underdog';/.test(HTML) &&
+  /langNoteUnderdog/.test(HTML) && /prefetchOpencc\(\);\s+\/\/ 這個引擎/.test(HTML));
 check('語言選單變更時會預抓', /el\.lang\.onchange = \(\) => \{\s*\n\s*prefetchOpencc\(\);/.test(HTML));
 check('MOSS 的整批寫入會等 OpenCC（而不是整份留簡體）',
   /async function commitBatch\(lines\) \{\s*\n\s*if \(chineseVariant\(\)\) await ensureOpencc\(\);/.test(HTML) &&

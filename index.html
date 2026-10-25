@@ -23,17 +23,22 @@
                       *.analytics.google.com     —— GA 後台網域（部分地區走這裡）
          img-src      *.google-analytics.com     —— 不能用 sendBeacon／fetch 時的 pixel 退路
        其餘指令沒有放寬（object-src 仍是 none，也沒有開放任意第三方來源）。 -->
+  <!-- CSP 註記（onnxruntime-web）：Underdog Bark 3.0 的 worker 會 import jsdelivr 上的
+       ort.wasm.min.mjs，而它初始化 WASM 時會再從「自己的模組網址」開一個 proxy worker。
+       那一步受 worker-src 管，只放行 script-src 不夠 —— 實測 worker 直接建不起來
+       （onerror、訊息為空、log 顯示違反 worker-src）。jsdelivr 本來就在 script-src 內，
+       所以這裡沒有放寬到新的來源。 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self';
     script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://www.googletagmanager.com;
     style-src 'self' 'unsafe-inline';
     img-src 'self' data: blob: https://*.google-analytics.com https://*.analytics.google.com;
     connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://*.hf.space https://*.google-analytics.com https://*.analytics.google.com;
-    worker-src 'self' blob:;
+    worker-src 'self' blob: https://cdn.jsdelivr.net;
     child-src 'self' blob:;
     object-src 'none';
     base-uri 'self';
     form-action 'none'">
-  <meta name="description" content="六引擎語音轉文字：即時辨識、MOSS 會議轉寫與 SRT 字幕輸出">
+  <meta name="description" content="七引擎語音轉文字：即時辨識、MOSS 會議轉寫與 SRT 字幕輸出">
   <!-- 第一次下載模型或引擎前先建好連線：DNS + TCP + TLS 在手機上要 200–400 ms，
        而 HF 的 resolve 還會再 302 到 CDN（等於付兩次）。代價只有一次閒置連線。 -->
   <link rel="preconnect" href="https://huggingface.co" crossorigin>
@@ -343,6 +348,10 @@
           <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
           <span class="ecard-desc"></span>
         </button>
+        <button type="button" class="engine-card" data-engine="underdog">
+          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+          <span class="ecard-desc"></span>
+        </button>
         <button type="button" class="engine-card" data-engine="moss">
           <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
           <span class="ecard-desc"></span>
@@ -354,6 +363,7 @@
         <option value="sherpa" id="optSherpa">sherpa-onnx（本機串流）</option>
         <option value="whisper" id="optWhisper">Whisper（本機 WebGPU/WASM）</option>
         <option value="whistle" id="optWhistle">Whistle（本機，16.9 MB）</option>
+        <option value="underdog" id="optUnderdog">Underdog Bark 3.0（本機，英文，約 500 MB）</option>
         <option value="moss" id="optMoss">MOSS 會議轉寫（雲端 Space，批次）</option>
       </select>
       <div class="field" id="languageField"><label for="languageSelector" id="langLabel">辨識語言：</label><select id="languageSelector">
@@ -402,6 +412,16 @@
       <div class="row"><button class="action" id="loadWhistleBtn" type="button">載入模型</button><button class="action" id="clearWhistleCacheBtn" type="button">清除已快取模型</button></div>
       <div class="progress" id="whistleProgress"><div id="whistleProgressBar"></div></div><div class="model-status" id="whistleStatus"></div>
       <p class="hint" id="whistleHint"></p>
+    </section>
+
+    <section class="panel engine-config" id="underdogConfig">
+      <div class="row"><label for="underdogBaseUrl" id="underdogBaseLabel">資產位置：</label><input id="underdogBaseUrl" type="text" value="https://huggingface.co/ai-ecoverse/Underdog-Bark-3.0-ONNX/resolve/main/" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/"></div>
+      <div class="row"><label for="underdogVariant" id="underdogVariantLabel">精度：</label><select id="underdogVariant">
+        <option value="q4f16" selected id="optUnderdogQ4">q4f16（約 500 MB，較快）</option><option value="q8" id="optUnderdogQ8">q8（約 908 MB，量化失真較小）</option>
+      </select></div>
+      <div class="row"><button class="action" id="loadUnderdogBtn" type="button">載入模型</button><button class="action" id="clearUnderdogCacheBtn" type="button">清除已快取模型</button></div>
+      <div class="progress" id="underdogProgress"><div id="underdogProgressBar"></div></div><div class="model-status" id="underdogStatus"></div>
+      <p class="hint" id="underdogHint"></p>
     </section>
 
     <section class="panel engine-config" id="mossConfig">
@@ -479,6 +499,13 @@
   // Whistle 的 VAD 分段上限（秒）：實測 10 秒是「首字延遲 vs 總 CPU」的甜蜜點，
   // 詳見 createVad() 的註解
   const WHISTLE_SEGMENT_SECONDS = 10;
+  // Underdog Bark 3.0：模型 repo 的 resolve/main/ 目錄（onnx/ 在它下面），可用「資產位置」換鏡像
+  const UNDERDOG_DEFAULT_BASE = 'https://huggingface.co/ai-ecoverse/Underdog-Bark-3.0-ONNX/resolve/main/';
+  // 只放模型權重與 tokenizer，與 sherpa / whistle 的快取分開，清外殼時不會被一起清掉
+  const UNDERDOG_CACHE = 'underdog-model-v1';
+  // 這顆模型一次要吃完整段音訊（非串流）。上限取 15 秒：WASM 單執行緒的 RTF 約 1.2，
+  // 切太長字幕會很久才出現，切太短又少了長脈絡的準確度。
+  const UNDERDOG_SEGMENT_SECONDS = 15;
   const SHERPA_DATA_FILE = 'sherpa-onnx-wasm-main-asr.data';
   const SHERPA_CACHE = 'sherpa-onnx-model-v1';
   // Vosk 的模型也自己抓（才有下載進度，見 fetchVoskPackage）。獨立快取名稱，
@@ -512,6 +539,10 @@
     loadWhistle: $('loadWhistleBtn'), clearWhistleCache: $('clearWhistleCacheBtn'),
     whistleProgress: $('whistleProgress'), whistleBar: $('whistleProgressBar'),
     whistleStatus: $('whistleStatus'),
+    underdogConfig: $('underdogConfig'), underdogBase: $('underdogBaseUrl'), underdogVariant: $('underdogVariant'),
+    loadUnderdog: $('loadUnderdogBtn'), clearUnderdogCache: $('clearUnderdogCacheBtn'),
+    underdogProgress: $('underdogProgress'), underdogBar: $('underdogProgressBar'),
+    underdogStatus: $('underdogStatus'),
     mossConfig: $('mossConfig'), mossSpace: $('mossSpaceSelect'), mossFile: $('mossFile'),
     mossFileZone: $('mossFileZone'), mossFileText: $('mossFileText'),
     mossRun: $('mossRunBtn'), mossSrt: $('mossSrtBtn'),
@@ -527,6 +558,7 @@
       optWebspeech: 'Web Speech API（雲端）', optVosk: 'Vosk（本機離線）',
       optSherpa: 'sherpa-onnx（本機串流）', optWhisper: 'Whisper（本機 WebGPU/WASM）',
       optWhistle: 'Whistle（本機，16.9 MB 輕量模型）',
+      optUnderdog: 'Underdog Bark 3.0（本機，英文，約 500 MB）',
       optMoss: 'MOSS 會議轉寫（雲端 Space，批次）', mossSpaceLabel: '運算位置：',
       optMossOfficial: 'Hugging Face 官方 Space（較快）', optMossLitert: '社群 LiteRT Space（回傳繁中）',
       mossFileLabel: '音訊／影片檔：', mossRun: '開始轉寫',
@@ -546,6 +578,7 @@
         vosk: { name: 'Vosk', tag: '🔒 本機', desc: '低資源離線即時，適合舊裝置' },
         sherpa: { name: 'sherpa-onnx', tag: '🔒 本機', desc: '真串流低延遲，中英即時字幕' },
         whistle: { name: 'Whistle', tag: '🔒 本機', desc: '16.9 MB 極輕量，歐語離線' },
+        underdog: { name: 'Underdog Bark 3.0', tag: '🔒 本機', desc: '英文高準確度，500 MB 批次偏慢' },
         whisper: { name: 'Whisper', tag: '🔒 本機', desc: '多語言最佳，WebGPU / WASM 離線' },
         moss: { name: 'MOSS 會議轉寫', tag: '☁️ 雲端批次', desc: '整段音訊 → 時間戳 + 說話人逐字稿' }
       },
@@ -554,6 +587,7 @@
         vosk: '先在上方 Vosk 面板按「<b>載入模型</b>」（內建中文約 44 MB），再按「<b>開始辨識</b>」。',
         sherpa: '在 sherpa 面板填入資產位置後按「<b>載入模型</b>」（首次約 199 MB，之後有快取），再開始辨識。',
         whistle: '在 Whistle 面板按「<b>載入模型</b>」（首次只下載 <b>16.9 MB</b>，之後有快取），再開始辨識。說英文、德文、法文、西文、義大利文、荷蘭文或波蘭文；<b>Whistle 不支援中文</b>。',
+        underdog: '在 Underdog 面板按「<b>載入模型</b>」（首次約 <b>500 MB</b>，之後有快取），再開始辨識。<b>只支援英文</b>；它繼承 parakeet-tdt-0.6b-v3，準確度明顯高於 Vosk small，但 WASM 單執行緒下比即時慢（實測 RTF 約 1.2），適合段落或會後整理，不適合長時間即時字幕。',
         whisper: '先按「<b>載入模型</b>」（第一次會下載，依模型大小約數十 MB 起），再開始辨識；WebGPU 不可用時自動退回 WASM。',
         moss: '把錄音或影片<b>拖放到下方面板</b>（或點選檔案），按「<b>開始轉寫</b>」；回傳含時間戳與說話人的逐字稿，可再<b>輸出 SRT 字幕</b>。'
       },
@@ -616,16 +650,31 @@
       whistleFailed: 'Whistle 辨識失敗：',
       whistleQueueFull: '本機轉寫速度跟不上，已捨棄最舊的一段排隊音訊。',
       whistleNoSpeech: 'Whistle 沒有聽出任何內容（它只支援英、德、法、西、義、荷、波七種語言，中文與日韓不在此列）。',
+      underdogBaseLabel: '資產位置：', underdogVariantLabel: '精度：',
+      optUnderdogQ4: 'q4f16（約 500 MB，較快）', optUnderdogQ8: 'q8（約 908 MB，量化失真較小）',
+      langNoteUnderdog: 'Underdog Bark 3.0 只支援英文；選其他語言時它仍用英文模型轉寫，輸出會是英文拼寫。',
+      underdogLoading: '正在載入 Underdog Bark 3.0（首次約 500 MB，之後由瀏覽器快取）…',
+      underdogDownloading: '正在下載模型', underdogInit: '正在建立推論工作階段',
+      underdogFromCache: '已從本機快取載入模型', underdogClearCache: '清除已快取模型',
+      underdogCacheCleared: '已清除快取模型，重新整理頁面後會重新下載。',
+      underdogCacheEmpty: '沒有已快取的模型。',
+      underdogCacheFailed: '寫入快取失敗（可能是儲存空間不足），本次仍可使用，但下次需重新下載。',
+      underdogNoBase: '請先填入 Underdog 的資產位置（模型 repo 的 resolve/main/ 目錄）。',
+      underdogFailed: 'Underdog 辨識失敗：',
+      underdogQueueFull: '本機轉寫速度跟不上，已捨棄最舊的一段排隊音訊。',
+      underdogNoSpeech: 'Underdog 沒有聽出任何內容（它只支援英文）。',
+      underdogHint: 'Underdog Bark 3.0 是 Conway Research 以 NVIDIA parakeet-tdt-0.6b-v3（0.6B 參數）微調的<b>英文</b>模型（CC-BY-4.0），在本機以 onnxruntime-web（WASM）執行、不上傳音訊。實測（桌機 Chrome、單執行緒）：2.67 秒音訊的 encoder 約 3.2 秒、decoder 約 65 ms，整體 <b>RTF 約 1.2</b> —— 比即時慢一點，所以定位是「高準確度、可接受延遲」，不是即時字幕；要真串流請用 sherpa-onnx。q4f16 是官方四種匯出裡最小的（權重 432 MB），q8 較大但量化失真較小。WebGPU 目前<b>不支援</b>這份圖（會建出無效的 pipeline），多執行緒 WASM 需要 COOP/COEP 標頭而 GitHub Pages 給不了。首次載入會下載約 500 MB 並存進 Cache Storage；資產位置可換成自架鏡像。',
       whistleHint: 'Whistle 由 Cactus Compute 發佈（Apache-2.0），<b>整顆模型只有 16.9 MB</b>，在本機以 WASM 執行、不上傳音訊。支援英、德、法、西、義、荷、波七種語言（語言自動偵測，也可用上方語言選單指定）；<b>不支援中文、日文、韓文</b>，需要中文請改用 sherpa-onnx 或 Whisper。運作方式是<b>停頓分句</b>：偵測到約 0.8 秒靜音或滿 15 秒才送出轉寫，所以字幕會比 sherpa 的真串流慢一到兩秒。模型網址可換成自架位置；清除快取後重新整理頁面即會重新下載。',
       whisperHint: 'Whisper 使用停頓分句。首次載入會下載模型並使用瀏覽器快取；WebGPU 不可用時自動改用 WASM。停止辨識時會等待最後一句處理完成。',
       mossHint: '把整段會議錄音或影片丟進來，一次取回含時間戳與說話人標籤（<code>[S01]</code>、<code>[S02]</code>…）的逐字稿。<strong>音訊會上傳到公開的 Hugging Face Space</strong>，不是本機處理，請勿用於機密內容。官方 Space 較快但輸出簡體（本頁會自動轉成台灣繁中）；社群 LiteRT Space 較慢，但直接回傳繁中，且 <code>[S01]</code> 標籤每 90 秒會重新編號。單次建議 30 分鐘以內，檔案越大上傳越久。',
       privacySummary: '使用須知與隱私聲明',
-      howItWorks: '本工具提供六種語音辨識引擎，音訊的處理位置依引擎而不同，請依內容敏感度選擇：',
-      enginesTitle: '六種引擎', engines: [
+      howItWorks: '本工具提供七種語音辨識引擎，音訊的處理位置依引擎而不同，請依內容敏感度選擇：',
+      enginesTitle: '七種引擎', engines: [
         'Web Speech API：免下載模型，但音訊處理方式由瀏覽器供應商決定，可能上傳至雲端。',
         'Vosk：模型載入後在本機即時辨識，資源需求低，適合舊設備。',
         'sherpa-onnx：本機真正串流辨識，延遲最低，中英雙語，適合長時間會議即時字幕。',
         'Whistle：本機 16.9 MB 極輕量模型（Cactus Compute），首次下載量只有 sherpa 的十二分之一，支援英德法西義荷波七種語言，<strong>不支援中文</strong>，且為停頓分句而非真串流。',
+        'Underdog Bark 3.0：Conway Research 以 NVIDIA parakeet-tdt-0.6b-v3 微調的英文模型，0.6B 參數在本機 WASM 執行，是本站英文最準的本機選項；代價是首次約 500 MB，且比即時慢（RTF 約 1.2），適合段落轉寫與會後整理，不適合長時間即時字幕。',
         'Whisper：本機分句辨識，多語言能力最佳，但需要較高運算資源。',
         'MOSS-Transcribe-Diarize：雲端 Space 的批次轉寫，能同時輸出說話人分離與時間戳，適合會後整理多人逐字稿；<strong>音訊會上傳第三方</strong>，不適合敏感內容。'
       ],
@@ -634,7 +683,7 @@
         '任何涉及<strong>個人隱私</strong>的對話（例如與醫師、律師）。',
         '任何包含<strong>敏感個資</strong>的內容（身分證號、密碼等）。'
       ],
-      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx、Whistle 或 Whisper。本頁使用 Google Analytics（GA4）統計瀏覽量與一般流量資訊（來源、裝置、大致地區）；逐字稿、麥克風音訊與辨識結果一律不會上傳，也不會送進 GA。不想被統計的話，用瀏覽器或擴充套件阻擋 googletagmanager.com 即可，功能完全不受影響。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
+      privacyConclusion: '敏感內容請改用 Vosk、sherpa-onnx、Whistle、Underdog Bark 3.0 或 Whisper。本頁使用 Google Analytics（GA4）統計瀏覽量與一般流量資訊（來源、裝置、大致地區）；逐字稿、麥克風音訊與辨識結果一律不會上傳，也不會送進 GA。不想被統計的話，用瀏覽器或擴充套件阻擋 googletagmanager.com 即可，功能完全不受影響。完整離線部署時，請將外部程式與模型下載至內部網站，並以 HTTPS 或 localhost 提供服務。'
     },
     en: {
       pageTitle: 'Multilingual Real-time Transcription', title: 'Multilingual Real-time Transcription',
@@ -643,6 +692,7 @@
       optWebspeech: 'Web Speech API (cloud)', optVosk: 'Vosk (local, offline)',
       optSherpa: 'sherpa-onnx (local, streaming)', optWhisper: 'Whisper (local, WebGPU/WASM)',
       optWhistle: 'Whistle (local, 16.9 MB lightweight model)',
+      optUnderdog: 'Underdog Bark 3.0 (local, English, ~500 MB)',
       optMoss: 'MOSS meeting transcription (cloud Space, batch)', mossSpaceLabel: 'Compute location:',
       optMossOfficial: 'Official Hugging Face Space (faster)', optMossLitert: 'Community LiteRT Space (returns Traditional Chinese)',
       mossFileLabel: 'Audio / video file:', mossRun: 'Start transcription',
@@ -662,6 +712,7 @@
         vosk: { name: 'Vosk', tag: '🔒 Local', desc: 'Low-resource offline, good for older devices' },
         sherpa: { name: 'sherpa-onnx', tag: '🔒 Local', desc: 'True streaming, lowest latency, zh-en live captions' },
         whistle: { name: 'Whistle', tag: '🔒 Local', desc: '16.9 MB ultra-light, European languages offline' },
+        underdog: { name: 'Underdog Bark 3.0', tag: '🔒 Local', desc: 'High English accuracy, 500 MB and slower than real time' },
         whisper: { name: 'Whisper', tag: '🔒 Local', desc: 'Best multilingual, offline WebGPU / WASM' },
         moss: { name: 'MOSS Transcription', tag: '☁️ Cloud batch', desc: 'Whole recording → timestamps + speaker diarization' }
       },
@@ -670,6 +721,7 @@
         vosk: 'Click <b>Load model</b> in the Vosk panel first (built-in Chinese ~44 MB), then <b>Start recognition</b>.',
         sherpa: 'Fill in the assets URL, click <b>Load model</b> (~199 MB first time, then cached), then start.',
         whistle: 'Click <b>Load model</b> in the Whistle panel (only <b>16.9 MB</b> the first time, then cached), then start. Speak English, German, French, Spanish, Italian, Dutch or Polish — <b>Whistle does not support Chinese</b>.',
+        underdog: 'Click <b>Load model</b> in the Underdog panel (~<b>500 MB</b> the first time, then cached), then start. <b>English only.</b> It inherits parakeet-tdt-0.6b-v3, so it is clearly more accurate than Vosk small, but single-threaded WASM runs slower than real time (measured RTF ≈ 1.2): good for phrases and post-meeting cleanup, not for long live captions.',
         whisper: 'Click <b>Load model</b> first (downloads once), then start; falls back to WASM without WebGPU.',
         moss: '<b>Drop the recording or video</b> below (or pick a file), press <b>Start transcription</b>; you can then <b>export SRT subtitles</b>.'
       },
@@ -732,16 +784,31 @@
       whistleFailed: 'Whistle inference failed: ',
       whistleQueueFull: 'Local transcription cannot keep up; the oldest queued audio was dropped.',
       whistleNoSpeech: 'Whistle heard nothing. It only supports English, German, French, Spanish, Italian, Dutch and Polish — Chinese, Japanese and Korean are not supported.',
+      underdogBaseLabel: 'Assets URL:', underdogVariantLabel: 'Precision:',
+      optUnderdogQ4: 'q4f16 (~500 MB, faster)', optUnderdogQ8: 'q8 (~908 MB, less quantisation loss)',
+      langNoteUnderdog: 'Underdog Bark 3.0 is English-only: other languages are still transcribed with the English model, so the output will be English spellings.',
+      underdogLoading: 'Loading Underdog Bark 3.0 (~500 MB the first time, cached afterwards)…',
+      underdogDownloading: 'Downloading model', underdogInit: 'Creating inference session',
+      underdogFromCache: 'Model loaded from local cache', underdogClearCache: 'Clear cached model',
+      underdogCacheCleared: 'Cached model cleared. It will download again after a reload.',
+      underdogCacheEmpty: 'No cached model found.',
+      underdogCacheFailed: 'Caching failed (likely out of storage). Usable now, but it will download again next time.',
+      underdogNoBase: 'Enter the Underdog assets URL (the resolve/main/ directory of the model repo).',
+      underdogFailed: 'Underdog inference failed: ',
+      underdogQueueFull: 'Local transcription cannot keep up; the oldest queued audio was dropped.',
+      underdogNoSpeech: 'Underdog heard nothing. It only supports English.',
+      underdogHint: 'Underdog Bark 3.0 is Conway Research\'s <b>English</b> fine-tune of NVIDIA parakeet-tdt-0.6b-v3 (0.6B parameters, CC-BY-4.0), running locally through onnxruntime-web (WASM); audio never leaves the device. Measured on desktop Chrome, single-threaded: for 2.67 s of audio the encoder takes ~3.2 s and the decoder ~65 ms, i.e. <b>RTF ≈ 1.2</b> — slightly slower than real time, so treat it as high-accuracy with acceptable latency rather than live captions (use sherpa-onnx for true streaming). q4f16 is the smallest of the four official exports (432 MB of weights); q8 is larger but quantises less. WebGPU <b>does not work</b> for this graph (it builds invalid pipelines), and multi-threaded WASM needs COOP/COEP headers, which GitHub Pages cannot send. The first load downloads ~500 MB into Cache Storage; point the assets URL at your own mirror if you prefer.',
       whistleHint: 'Whistle is published by Cactus Compute (Apache-2.0) and the <b>whole model is 16.9 MB</b>. It runs locally in WASM; audio never leaves the device. It supports English, German, French, Spanish, Italian, Dutch and Polish (language is auto-detected, or force it with the selector above); <b>Chinese, Japanese and Korean are not supported</b> — use sherpa-onnx or Whisper for those. It works in <b>pause-based segments</b>: a segment is transcribed after ~0.8 s of silence or 15 s of continuous speech, so captions trail sherpa\'s true streaming by a second or two. You can point the model URL at your own host; clearing the cache makes it download again after a reload.',
       whisperHint: 'Whisper segments on pauses. The model downloads once and is cached by the browser; it falls back to WASM when WebGPU is unavailable. Stopping waits for the final phrase.',
       mossHint: 'Drop in a whole meeting recording or video and get back a transcript with timestamps and anonymous speaker labels (<code>[S01]</code>, <code>[S02]</code>…). <strong>The audio is uploaded to a public Hugging Face Space</strong> — this is not local processing, so do not use it for confidential content. The official Space is faster but returns Simplified Chinese (this page converts it to Traditional); the community LiteRT Space is slower but returns Traditional Chinese directly, and its <code>[S01]</code> labels restart every 90 seconds. Keep single files under ~30 minutes; larger uploads take longer.',
       privacySummary: 'Usage and privacy',
-      howItWorks: 'This tool offers six recognition engines. Where the audio is processed depends on the engine — choose according to how sensitive the content is:',
-      enginesTitle: 'The six engines', engines: [
+      howItWorks: 'This tool offers seven recognition engines. Where the audio is processed depends on the engine — choose according to how sensitive the content is:',
+      enginesTitle: 'The seven engines', engines: [
         'Web Speech API: no model download, but the browser vendor decides how audio is handled and it may go to the cloud.',
         'Vosk: runs locally once loaded, low resource use, good for older devices.',
         'sherpa-onnx: true local streaming recognition, lowest latency, bilingual zh-en, best for live meeting captions.',
         'Whistle: an ultra-light 16.9 MB local model (Cactus Compute) — a twelfth of sherpa\'s first download — for English, German, French, Spanish, Italian, Dutch and Polish. It does <strong>not</strong> support Chinese, and it segments on pauses rather than streaming truly.',
+        'Underdog Bark 3.0: Conway Research\'s English fine-tune of NVIDIA parakeet-tdt-0.6b-v3, 0.6B parameters running locally in WASM. The most accurate local option for English, but ~500 MB to download and slower than real time (RTF ≈ 1.2), so it suits phrases and post-meeting cleanup rather than live captions.',
         'Whisper: local phrase-based recognition, best multilingual quality, needs more compute.',
         'MOSS-Transcribe-Diarize: batch transcription in a cloud Space with speaker diarization and timestamps, good for post-meeting multi-speaker transcripts; <strong>audio is uploaded to a third party</strong>, so not for sensitive content.'
       ],
@@ -750,7 +817,7 @@
         'Conversations involving <strong>personal privacy</strong> (e.g. doctors, lawyers).',
         'Any content with <strong>sensitive personal data</strong> (ID numbers, passwords).'
       ],
-      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx, Whistle or Whisper. This page uses Google Analytics (GA4) to count page views and ordinary traffic information (referrer, device, approximate region). Transcripts, microphone audio and recognition results are never uploaded and never sent to GA. Blocking googletagmanager.com in your browser or an extension does not affect any feature. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
+      privacyConclusion: 'For sensitive content use Vosk, sherpa-onnx, Whistle, Underdog Bark 3.0 or Whisper. This page uses Google Analytics (GA4) to count page views and ordinary traffic information (referrer, device, approximate region). Transcripts, microphone audio and recognition results are never uploaded and never sent to GA. Blocking googletagmanager.com in your browser or an extension does not affect any feature. For a fully offline deployment, host the libraries and models internally and serve over HTTPS or localhost.'
     }
   };
   const state = {
@@ -775,6 +842,11 @@
   const whistle = {
     module: null, loaded: false, loadPromise: null, url: null, session: null,
     queue: [], drainPromise: null, sessionId: 0, vad: null, workerMode: false, dropWarned: false
+  };
+  // Underdog Bark 3.0：0.6B 的 parakeet-TDT，模型留在 Worker 裡（主執行緒只收進度與文字）
+  const underdog = {
+    loaded: false, loadPromise: null, base: null, variant: null, session: null,
+    queue: [], drainPromise: null, sessionId: 0, vad: null, dropWarned: false
   };
   let toastTimer;
   const openccConverters = new Map();
@@ -1151,7 +1223,8 @@
       [el.loadVosk, vosk.loaded],
       [el.loadSherpa, sherpaBaseMatches()],
       [el.loadWhisper, !!whisper.pipe && whisper.model === WHISPER_MODELS[el.whisperModel.value]],
-      [el.loadWhistle, whistle.loaded && whistle.url === el.whistleUrl.value.trim()]
+      [el.loadWhistle, whistle.loaded && whistle.url === el.whistleUrl.value.trim()],
+      [el.loadUnderdog, underdog.loaded && underdog.base === underdogBaseResolved() && underdog.variant === el.underdogVariant.value]
     ]) {
       button.classList.toggle('done', done);
       button.textContent = done ? `✓ ${t().loadModel}` : t().loadModel;
@@ -1187,6 +1260,7 @@
     el.sherpaConfig.classList.toggle('visible', state.engine === 'sherpa');
     el.whisperConfig.classList.toggle('visible', state.engine === 'whisper');
     el.whistleConfig.classList.toggle('visible', state.engine === 'whistle');
+    el.underdogConfig.classList.toggle('visible', state.engine === 'underdog');
     el.mossConfig.classList.toggle('visible', state.engine === 'moss');
     // Vosk 與 sherpa 的語言由模型決定，隱藏語言選單
     el.languageField.style.display = (state.engine === 'vosk' || state.engine === 'sherpa' || state.engine === 'moss') ? 'none' : '';
@@ -1195,11 +1269,12 @@
     const icon = local ? '🔒 ' : '☁️ ';
     el.notice.textContent = icon + (state.engine === 'moss' ? t().mossNotice : (local ? t().localNotice : t().webNotice));
     el.notice.className = 'notice ' + (local ? 'local' : 'partial');
-    el.statusEngine.textContent = { webspeech: 'Web Speech API', vosk: 'Vosk', sherpa: 'sherpa-onnx', whisper: 'Whisper', whistle: 'Whistle (Cactus)', moss: 'MOSS-Transcribe-Diarize' }[state.engine];
+    el.statusEngine.textContent = { webspeech: 'Web Speech API', vosk: 'Vosk', sherpa: 'sherpa-onnx', whisper: 'Whisper', whistle: 'Whistle (Cactus)', underdog: 'Underdog Bark 3.0', moss: 'MOSS-Transcribe-Diarize' }[state.engine];
     el.statusRuntime.textContent = {
       webspeech: t().browserService, vosk: 'WASM / CPU', sherpa: 'WASM / CPU',
       whisper: whisper.device || 'WebGPU / WASM',
       whistle: 'WASM / CPU',
+      underdog: 'WASM / CPU',
       moss: el.mossSpace.value === 'litert' ? 'HF Space / LiteRT' : 'HF Space / CPU'
     }[state.engine];
     el.statusPrivacy.textContent = icon + (local ? t().localProcessing : t().cloudProcessing);
@@ -1207,8 +1282,8 @@
 
     // Whistle 只認七種歐洲語言，其他選項一律自動偵測 —— 選單不動，但要講清楚，
     // 否則使用者會以為自己選錯了（行為是對的，只是沒有說明）
-    el.langNote.hidden = state.engine !== 'whistle';
-    if (!el.langNote.hidden) el.langNote.textContent = t().langNoteWhistle;
+    el.langNote.hidden = state.engine !== 'whistle' && state.engine !== 'underdog';
+    if (!el.langNote.hidden) el.langNote.textContent = state.engine === 'underdog' ? t().langNoteUnderdog : t().langNoteWhistle;
 
     prefetchOpencc();       // 這個引擎／語言組合會產出中文就先抓 OpenCC
     updateButtons();
@@ -2711,6 +2786,300 @@
     finish();
   }
 
+  // ==================== Underdog Bark 3.0 engine ====================
+  // 為什麼借不到 sherpa：這份匯出是 parakeet-TDT 的自訂圖（encoder 輸出 640 維、
+  // decoder_joint 帶 state_h/state_c 與 5 個 duration logits），不是 sherpa 的
+  // transducer 介面，所以自己用 onnxruntime-web 走 mel → encoder → greedy TDT。
+  // 整個推論（含 432 MB 權重的下載與解碼）都在 Worker 裡，主執行緒只收進度與文字。
+  let underdogWorker = null;
+  let underdogSeq = 0;
+  const underdogPending = new Map();
+
+  function ensureUnderdogWorker() {
+    if (underdogWorker) return underdogWorker;
+    try {
+      // module worker：worker 內部以 ESM import 載入 onnxruntime-web（jsdelivr）與 underdog/*
+      underdogWorker = new Worker('underdog-worker.js', { type: 'module' });
+    } catch (error) {
+      console.warn('Underdog worker unavailable:', error);
+      underdogWorker = null;
+      return null;
+    }
+    underdogWorker.onmessage = event => {
+      const msg = event.data || {};
+      if (msg.type === 'progress') {
+        setUnderdogProgress(msg);
+        return;
+      }
+      if (msg.type === 'warn') {
+        console.warn('[underdog-worker]', msg.phase, msg.message);
+        showToast(t().underdogCacheFailed);
+        return;
+      }
+      const key = msg.type === 'ready' ? 'load' : msg.id;
+      const pending = underdogPending.get(key);
+      if (!pending) return;
+      underdogPending.delete(key);
+      if (msg.type === 'error') pending.reject(Object.assign(new Error(msg.message), { phase: msg.phase }));
+      else pending.resolve(msg);
+    };
+    underdogWorker.onerror = event => {
+      console.warn('Underdog worker crashed:', event.message || event);
+      for (const [, p] of underdogPending) p.reject(new Error(event.message || 'worker crash'));
+      underdogPending.clear();
+      try { underdogWorker.terminate(); } catch (error) { /* 已經死了 */ }
+      underdogWorker = null;
+      if (underdog.loaded) {
+        underdog.loaded = false;
+        el.underdogStatus.textContent = t().loadFailed + (event.message || 'worker crash');
+        el.underdogStatus.className = 'model-status error';
+        syncModelButtons();
+      }
+    };
+    return underdogWorker;
+  }
+
+  function underdogRequest(payload, transfer) {
+    const worker = ensureUnderdogWorker();
+    if (!worker) return Promise.reject(new Error('worker unavailable'));
+    const key = payload.type === 'load' ? 'load' : payload.id;
+    return new Promise((resolve, reject) => {
+      underdogPending.set(key, { resolve, reject });
+      try {
+        worker.postMessage(payload, transfer || []);
+      } catch (error) {
+        underdogPending.delete(key);
+        reject(error);
+      }
+    });
+  }
+
+  function setUnderdogProgress(msg) {
+    const mb = n => (n / 1048576).toFixed(1);
+    if (msg.cached) {
+      el.underdogBar.classList.remove('indeterminate');
+      el.underdogBar.style.width = '100%';
+      el.underdogStatus.textContent = `${t().underdogFromCache}（${msg.label}）`;
+      return;
+    }
+    if (msg.phase === 'init') {
+      el.underdogBar.classList.add('indeterminate');
+      el.underdogStatus.textContent = `${t().underdogInit}（${msg.label}）`;
+      return;
+    }
+    el.underdogBar.classList.remove('indeterminate');
+    if (msg.total) {
+      el.underdogBar.style.width = `${(msg.loaded / msg.total * 100).toFixed(1)}%`;
+      el.underdogStatus.textContent =
+        `${t().underdogDownloading} ${msg.label} ${mb(msg.loaded)} / ${mb(msg.total)} MB（${(msg.loaded / msg.total * 100).toFixed(1)}%）`;
+    } else {
+      el.underdogStatus.textContent = `${t().underdogDownloading} ${msg.label} ${mb(msg.loaded)} MB`;
+    }
+  }
+
+  async function clearUnderdogCache() {
+    if (underdog.drainPromise || underdog.queue.length > 0) {
+      showToast(t().busyClear);
+      return;
+    }
+    try {
+      const deleted = await caches.delete(UNDERDOG_CACHE);
+      el.underdogStatus.textContent = deleted ? t().underdogCacheCleared : t().underdogCacheEmpty;
+      el.underdogStatus.className = 'model-status';
+      el.underdogBar.style.width = '0';
+    } catch (error) {
+      console.error('Clearing the Underdog cache failed:', error);
+      showToast(t().underdogCacheFailed);
+    }
+  }
+
+  function underdogBaseResolved() {
+    try {
+      const raw = el.underdogBase.value.trim();
+      if (!raw) return null;
+      return new URL(raw.endsWith('/') ? raw : `${raw}/`, document.baseURI).href;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async function loadUnderdog() {
+    if (underdog.loadPromise) return underdog.loadPromise;
+
+    const base = underdogBaseResolved();
+    if (!base) {
+      el.underdogStatus.textContent = t().underdogNoBase;
+      el.underdogStatus.className = 'model-status error';
+      return;
+    }
+    const variant = el.underdogVariant.value;
+    if (underdog.loaded && underdog.base === base && underdog.variant === variant) {
+      el.underdogStatus.textContent = `${t().loaded}（WASM / CPU）`;
+      el.underdogStatus.className = 'model-status success';
+      return;
+    }
+
+    underdog.loadPromise = (async () => {
+      el.loadUnderdog.disabled = true;
+      el.underdogProgress.classList.add('visible');
+      el.underdogBar.classList.add('indeterminate');
+      el.underdogBar.style.width = '';
+      el.underdogStatus.textContent = t().underdogLoading;
+      el.underdogStatus.className = 'model-status';
+
+      try {
+        const ready = await underdogRequest({ type: 'load', baseUrl: base, variant });
+        underdog.loaded = true;
+        underdog.base = base;
+        underdog.variant = variant;
+        el.underdogStatus.textContent = `${t().loaded}（WASM / CPU，${((ready.ms || 0) / 1000).toFixed(1)} s）`;
+        el.underdogStatus.className = 'model-status success';
+      } catch (error) {
+        console.error('Underdog load failed:', error);
+        underdog.loaded = false;
+        el.underdogStatus.textContent = t().loadFailed + (error.message || error);
+        el.underdogStatus.className = 'model-status error';
+      } finally {
+        el.underdogBar.classList.remove('indeterminate');
+        el.underdogBar.style.width = underdog.loaded ? '100%' : '0';
+        el.loadUnderdog.disabled = false;
+        syncModelButtons();
+      }
+    })();
+
+    try {
+      await underdog.loadPromise;
+    } finally {
+      underdog.loadPromise = null;
+    }
+  }
+
+  const UNDERDOG_MAX_QUEUED = 2;
+
+  function enqueueUnderdogAudio(audio) {
+    underdog.queue.push({ audio, sessionId: underdog.sessionId });
+    // 回壓：單執行緒 WASM 的 RTF 約 1.2（比即時慢），佇列不設上限的話「停止」會等不完
+    while (underdog.queue.length > UNDERDOG_MAX_QUEUED) {
+      underdog.queue.shift();
+      if (!underdog.dropWarned) {
+        underdog.dropWarned = true;
+        showToast(t().underdogQueueFull);
+      }
+    }
+    void processUnderdogQueue();
+  }
+
+  async function underdogTranscribe(audio) {
+    const id = ++underdogSeq;
+    const copy = audio.slice();
+    return underdogRequest({ type: 'transcribe', id, audio: copy }, [copy.buffer]);
+  }
+
+  function processUnderdogQueue() {
+    if (underdog.drainPromise) return underdog.drainPromise;
+    const processingSessionId = underdog.sessionId;
+
+    underdog.drainPromise = (async () => {
+      try {
+        while (underdog.queue.length > 0) {
+          const job = underdog.queue.shift();
+          if (!job || job.sessionId !== processingSessionId) continue;
+
+          const pending = underdog.queue.length;
+          el.statusState.textContent = pending > 0 ? `${t().processing}（+${pending}）` : t().processing;
+          try {
+            const output = await underdogTranscribe(job.audio);
+            const text = String(output?.text || '').trim();
+            // 英文模型，不做簡轉繁；沒有內容就靜默跳過（VAD 切出來的靜音段很常見）
+            if (job.sessionId === underdog.sessionId && text) commit(text);
+          } catch (error) {
+            console.error('Underdog inference failed:', error);
+            showToast(t().underdogFailed + (error.message || error));
+          }
+        }
+      } finally {
+        underdog.drainPromise = null;
+        if (state.running) el.statusState.textContent = t().listening;
+        if (underdog.queue.length > 0) void processUnderdogQueue();
+      }
+    })();
+
+    return underdog.drainPromise;
+  }
+
+  async function waitForUnderdogDrain() {
+    while (underdog.drainPromise || underdog.queue.length > 0) {
+      await (underdog.drainPromise || processUnderdogQueue());
+    }
+  }
+
+  async function startUnderdog() {
+    if (!underdog.loaded) return showToast(t().loadFirst);
+
+    if (underdog.drainPromise || underdog.queue.length > 0) {
+      state.stopping = true;
+      updateButtons();
+      el.statusState.textContent = t().processing;
+      try {
+        await waitForUnderdogDrain();
+      } catch (error) {
+        console.error('Failed to drain the previous Underdog session:', error);
+        state.stopping = false;
+        updateButtons();
+        return;
+      }
+      state.stopping = false;
+    }
+
+    begin();
+    state.running = true;
+    state.stopping = false;
+    underdog.sessionId += 1;
+    underdog.queue = [];
+    underdog.dropWarned = false;
+    updateButtons();
+    el.engine.disabled = el.lang.disabled = true;
+
+    const vad = createVad(UNDERDOG_SEGMENT_SECONDS);
+    underdog.vad = vad;
+
+    try {
+      underdog.session = new AudioCapture((chunk, rms) => {
+        if (!state.running || state.stopping) return;
+        const utterance = vadPush(vad, chunk, rms);
+        state.interim = vad.speaking ? t().capturing : '';
+        render();
+        if (utterance) enqueueUnderdogAudio(utterance);
+      }, setLevel);
+      await underdog.session.start();
+    } catch (error) {
+      console.error(error);
+      showToast(t().mic);
+      await stopUnderdog();
+    }
+  }
+
+  async function stopUnderdog() {
+    if (state.stopping) return;
+    state.stopping = true;
+    state.running = false;
+    updateButtons();
+
+    const finalAudio = underdog.vad ? vadFlush(underdog.vad) : null;
+    if (finalAudio) enqueueUnderdogAudio(finalAudio);
+
+    try {
+      await underdog.session?.stop();
+    } catch (error) {
+      console.warn('Underdog audio session cleanup failed:', error);
+    } finally {
+      underdog.session = null;
+    }
+
+    await waitForUnderdogDrain();
+    finish();
+  }
+
   // ==================== Web Speech API engine ====================
   function clearWebRestartTimer() {
     if (state.restartTimer) {
@@ -2856,6 +3225,7 @@
     sherpa: { start: startSherpa, stop: stopSherpa },
     whisper: { start: startWhisper, stop: stopWhisper },
     whistle: { start: startWhistle, stop: stopWhistle },
+    underdog: { start: startUnderdog, stop: stopUnderdog },
     webspeech: { start: startWeb, stop: stopWeb },
     moss: { start: () => showToast(t().mossBatchMode), stop: () => {} }
   };
@@ -3153,13 +3523,16 @@
     el.export.textContent = d.export;
     el.clear.textContent = d.clear;
     el.loadVosk.textContent = el.loadSherpa.textContent = el.loadWhisper.textContent = el.loadWhistle.textContent = d.loadModel;
+    el.loadUnderdog.textContent = d.loadModel;
     el.clearSherpaCache.textContent = d.sherpaClearCache;
     el.clearWhistleCache.textContent = d.whistleClearCache;
+    el.clearUnderdogCache.textContent = d.underdogClearCache;
     updateMossButton();
     el.mossSrt.textContent = d.mossSrt;
 
     for (const key of [
       'engineLabel', 'langLabel', 'optWebspeech', 'optVosk', 'optSherpa', 'optWhisper', 'optWhistle', 'optMoss',
+      'optUnderdog', 'underdogBaseLabel', 'underdogVariantLabel', 'optUnderdogQ4', 'optUnderdogQ8',
       'mossSpaceLabel', 'optMossOfficial', 'optMossLitert', 'mossFileLabel',
       'voskSourceLabel', 'voskModelLabel', 'voskFileLabel', 'optVoskBuiltin', 'optVoskFile',
       'optVoskUrl', 'sherpaBaseLabel', 'whisperModelLabel', 'vadLabel', 'optVadHigh',
@@ -3174,6 +3547,7 @@
     $('sherpaHint').innerHTML = d.sherpaHint;
     $('whisperHint').innerHTML = d.whisperHint;
     $('whistleHint').innerHTML = d.whistleHint;
+    $('underdogHint').innerHTML = d.underdogHint;
     $('mossHint').innerHTML = d.mossHint;
     $('enginesList').innerHTML = d.engines.map(x => `<li>${x}</li>`).join('');
     $('riskList').innerHTML = d.risks.map(x => `<li>${x}</li>`).join('');
@@ -3200,6 +3574,8 @@
         whisper: el.whisperModel.value,
         sherpaBase: el.sherpaBase.value.trim(),
         whistleUrl: el.whistleUrl.value.trim(),
+        underdogBase: el.underdogBase.value.trim(),
+        underdogVariant: el.underdogVariant.value,
         voskSource: el.voskSource.value,
         vad: el.vad.value,
         mossSpace: el.mossSpace.value
@@ -3207,7 +3583,7 @@
     } catch {}
   }
 
-  const KNOWN_ENGINES = ['webspeech', 'vosk', 'sherpa', 'whisper', 'whistle', 'moss'];
+  const KNOWN_ENGINES = ['webspeech', 'vosk', 'sherpa', 'whisper', 'whistle', 'underdog', 'moss'];
   const hasOption = (select, value) => Array.from(select.options).some(o => o.value === value);
 
   function load() {
@@ -3223,6 +3599,8 @@
       if (p.mossSpace && hasOption(el.mossSpace, p.mossSpace)) el.mossSpace.value = p.mossSpace;
       if (p.sherpaBase) el.sherpaBase.value = p.sherpaBase;
       if (p.whistleUrl) el.whistleUrl.value = p.whistleUrl;
+      if (p.underdogBase) el.underdogBase.value = p.underdogBase;
+      if (p.underdogVariant && hasOption(el.underdogVariant, p.underdogVariant)) el.underdogVariant.value = p.underdogVariant;
       state.ui = (p.ui === 'zh' || p.ui === 'en')
         ? p.ui
         : ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
@@ -3281,6 +3659,24 @@
   el.loadWhisper.onclick = loadWhisper;
   el.loadWhistle.onclick = loadWhistle;
   el.clearWhistleCache.onclick = clearWhistleCache;
+  el.loadUnderdog.onclick = loadUnderdog;
+  el.clearUnderdogCache.onclick = clearUnderdogCache;
+  el.underdogBase.onchange = () => {
+    if (underdog.loaded && underdog.base !== underdogBaseResolved()) {
+      el.underdogStatus.textContent = t().sourceChanged;
+      el.underdogStatus.className = 'model-status';
+    }
+    save();
+    syncModelButtons();
+  };
+  el.underdogVariant.onchange = () => {
+    if (underdog.loaded && underdog.variant !== el.underdogVariant.value) {
+      el.underdogStatus.textContent = t().modelChanged;
+      el.underdogStatus.className = 'model-status';
+    }
+    save();
+    syncModelButtons();
+  };
   el.whistleUrl.onchange = () => {
     // 換模型網址等於換模型：只更新按鈕狀態，實際重新載入由「載入模型」按鈕負責
     if (whistle.loaded && whistle.url !== el.whistleUrl.value.trim()) {
@@ -3332,6 +3728,9 @@
     state.webRecognitionActive = false;
     whisper.queue = [];
     whisper.vad = null;
+    underdog.queue = [];
+    underdog.vad = null;
+    underdog.dropWarned = false;
     moss.segments = [];
     el.mossSrt.disabled = true;
 

@@ -1,5 +1,6 @@
 'use strict';
 
+// v7：新增 Underdog Bark 3.0 引擎（underdog-worker.js / underdog/frontend.js / underdog/tdt.js）。
 // v6：needle 引擎（needle.js + needle.wasm，實測傳輸 360 KB）不再預抓 —— 它只有選 Whistle
 // 的人會用到，而同源資產本來就會在第一次用到時被下面的 fetch handler 寫進快取。
 // v5：新增 Whistle 引擎（whistle-worker.js / whistle-engine.js / needle 引擎的 js 與 wasm）。
@@ -8,7 +9,7 @@
 // 而瀏覽器只會比對 sw.js 本身的位元來決定要不要更新 SW —— 只改 worker 不改 sw.js 的話，
 // install 不會重跑、cache.addAll 不會重抓，既有使用者會永遠拿到舊 worker。
 // 升版名同時讓 activate 的清快取邏輯把舊 shell 砍掉。
-const CACHE = 'stt-shell-v6';
+const CACHE = 'stt-shell-v7';
 // 只清「自己的」外殼快取版本。transformers-cache（Whisper 模型）與
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
@@ -31,7 +32,14 @@ const ASSETS = [
   // fetch handler 會在第一次使用時寫進快取 —— 犧牲的只有「離線後第一次就選 Whistle」，
   // 而那個情境本來就不成立（首次使用一定要連網下載 16.9 MB 模型）。
   './whistle-worker.js',
-  './whistle-engine.js'
+  './whistle-engine.js',
+  // Underdog Bark 3.0 的 worker 與前處理／解碼模組（各約 5 KB），同樣只有選它的人才會用到；
+  // 這裡先預抓是因為它們是同源小檔，而 worker 一旦被 Service Worker 以舊版供應就會與
+  // index.html 的訊息協定對不上（見上面的版本註記）。onnxruntime-web 由 jsdelivr 載入、
+  // 權重（432 MB）走 UNDERDOG_CACHE，都不在外殼快取裡。
+  './underdog-worker.js',
+  './underdog/frontend.js',
+  './underdog/tdt.js'
 ];
 
 self.addEventListener('install', (event) => {
