@@ -18,7 +18,7 @@
 import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.wasm.min.mjs';
 import { makeFrontend } from './underdog/frontend.js';
 import { greedyTdt, detokenize, piecesFromTokenizer, checkShapes } from './underdog/tdt.js';
-import { downloadResumable, opfsAvailable } from './src/opfs.js';
+import { downloadResumable, opfsAvailable, opfsStore, opfsKey } from './src/opfs.js';
 
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/';
 ort.env.wasm.numThreads = 1;
@@ -66,9 +66,14 @@ async function fetchBytes(url, cache, onProgress, label) {
   // 任何失敗都要回報 —— 上次就是「靜靜退回」才讓第二次載入慢 30 倍還查不出來。
   if (CONFIG.useOpfs && await opfsAvailable()) {
     try {
-      const { bytes, fromCache, resumedFrom } = await downloadResumable(url, 'underdog/' + label, {
+      // 舊版的 key 是 'underdog/<檔名>'（不含網址）：留著只會白占最多 432 MB，順手清掉
+      await opfsStore.remove('underdog/' + label);
+      const { bytes, fromCache, resumedFrom, restarted } = await downloadResumable(url, opfsKey('underdog', url, label), {
         onProgress: (loaded, total) => onProgress({ label, loaded, total, cached: false }),
       });
+      if (restarted) {
+        send({ type: 'notice', phase: 'resume', message: label + '：伺服器上的檔案已變更（或沒有來源紀錄），從頭下載' });
+      }
       if (fromCache) {
         send({ type: 'notice', phase: 'cache', message: label + '：OPFS 命中，未重新下載' });
       } else if (resumedFrom > 0) {
@@ -79,7 +84,8 @@ async function fetchBytes(url, cache, onProgress, label) {
     } catch (error) {
       send({ type: 'warn', phase: 'opfs', message: label + '：' + ((error && error.name) || 'Error') + '：' + ((error && error.message) || error) });
     }
-  } else {
+  } else if (CONFIG.useOpfs) {
+    // 只有「要求了 OPFS 卻拿不到」才值得記；預設關閉時每個檔案都記一筆只會誤導診斷
     send({ type: 'notice', phase: 'opfs', message: '此環境沒有 OPFS，改用 Cache Storage' });
   }
 

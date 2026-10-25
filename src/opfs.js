@@ -11,6 +11,28 @@
 /** 一次 Range 請求的大小。與 src/download.js 的 CHUNK_BYTES 對齊。 */
 export const CHUNK_BYTES = 8 * 1024 * 1024;
 
+// ── 檔名：同一個檔名可能來自不同網址 ─────────────────────────────────────
+// 以前 key 只有「prefix/檔名」：換「資產位置」到另一個 repo／鏡像（檔名相同）時，
+// 舊檔會被當成同一份而續傳，拼出新舊混雜的壞檔。網址雜湊放進檔名就不會撞。
+/** FNV-1a 32-bit，回 8 位十六進位。不是密碼學用途，只要「不同網址 → 不同檔名」。 */
+export function urlHash(url) {
+  let h = 0x811c9dc5;
+  const text = String(url);
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/** `prefix/<網址雜湊>-<label>`，例：`underdog/1a2b3c4d-encoder_model_q4f16.onnx_data` */
+export function opfsKey(prefix, url, label) {
+  return `${prefix}/${urlHash(url)}-${label}`;
+}
+
+/** 每個檔案旁邊的來源紀錄（網址、總大小、ETag），用來判斷「已寫入的前段還能不能接」 */
+export const metaKeyOf = key => `${key}.meta`;
+
 // ── 真實的 OPFS store ────────────────────────────────────────────────────
 export async function opfsAvailable() {
   try {
@@ -51,9 +73,39 @@ export const opfsStore = {
       return null;
     }
   },
-  /** 開一個可續寫的 writer：keepExistingData 讓新資料接在已寫入的內容後面 */
+  /**
+   * 開一個可續寫的 writer，新資料一律接在檔案現有內容後面。
+   *
+   * 首選 createSyncAccessHandle（只有 dedicated worker 有）：每段寫完就 flush，
+   * 位元組**直接落在檔案裡** —— 關頁、當掉之後，下次真的能從斷點接。
+   * createWritable 是寫進暫存檔、close() 才整份換上去：分頁被關時 close 沒跑，
+   * 這一輪寫的全部消失；所以它只當退路（主執行緒、舊瀏覽器、診斷頁的 1 MiB 探測）。
+   * 順帶：close() 時把 432 MB 暫存檔搬回原檔，也是首次載入慢的原因之一。
+   */
   async openWriter(key) {
     const handle = await fileHandle(key, true);
+    if (typeof handle.createSyncAccessHandle === 'function') {
+      let access = null;
+      try {
+        access = await handle.createSyncAccessHandle();
+      } catch {
+        access = null;                  // 例如在主執行緒：退回 createWritable
+      }
+      if (access) {
+        let at = access.getSize();
+        return {
+          write: async data => {
+            const view = data instanceof Uint8Array ? data : new Uint8Array(data);
+            let done = 0;
+            while (done < view.length) done += access.write(view.subarray(done), { at: at + done });
+            at += view.length;
+            access.flush();             // 這一段落地：之後就算分頁被關，下次也從這裡接
+          },
+          close: async () => { try { access.flush(); } finally { access.close(); } },
+          abort: async () => { try { access.close(); } catch { /* 已經關了 */ } },
+        };
+      }
+    }
     const writable = await handle.createWritable({ keepExistingData: true });
     return {
       // 只追加、不指定位置：續傳的情境一定是「已經有前段、往後接」，
@@ -62,6 +114,20 @@ export const opfsStore = {
       close: () => writable.close(),
       abort: async () => { try { await writable.abort(); } catch { /* 已經關了 */ } },
     };
+  },
+  async readText(key) {
+    try {
+      const handle = await fileHandle(key, false);
+      return await (await handle.getFile()).text();
+    } catch {
+      return null;
+    }
+  },
+  async writeText(key, text) {
+    const handle = await fileHandle(key, true);
+    const writable = await handle.createWritable();     // 不保留舊內容：整份覆寫
+    await writable.write(text);
+    await writable.close();
   },
   async remove(key) {
     try {
@@ -108,7 +174,11 @@ function rangeFetcher(fetchImpl) {
 /**
  * 下載一整份檔案到 store（預設 OPFS），支援「上次中斷就從斷點續傳」。
  *
- * @returns {Promise<{bytes: Uint8Array, fromCache: boolean, resumedFrom: number}>}
+ * 已寫入的前段只有在「同一個網址、同一個總大小、同一個 ETag」時才會接著用；
+ * 任何一項對不上（伺服器換了檔、舊版沒有來源紀錄）都從 0 重抓，`restarted` 為 true。
+ * store 沒有 readText／writeText 時不做來源檢查（相容舊的假 store）。
+ *
+ * @returns {Promise<{bytes: Uint8Array, fromCache: boolean, resumedFrom: number, restarted: boolean}>}
  */
 export async function downloadResumable(url, key, {
   store = opfsStore,
@@ -124,21 +194,41 @@ export async function downloadResumable(url, key, {
   const contentRange = probe.headers.get('Content-Range');
   const total = probe.status === 206 && contentRange ? Number(contentRange.split('/')[1]) : 0;
   if (!total) throw new Error('伺服器不支援 Range，無法續傳');
+  // HF 的 206 回應有 ETag（CORS 有開放讀取）；弱 ETag 的 W/ 前綴不影響「是不是同一份」
+  const etag = (probe.headers.get('ETag') || '').replace(/^W\//, '');
 
-  // 2) 已經抓完就直接讀回來（第二次載入模型不再碰網路）
-  const size = await store.size(key);
+  // 2) 來源檢查：已寫入的前段是不是「這一份」檔案的前段
+  const tracksSource = typeof store.readText === 'function' && typeof store.writeText === 'function';
+  let size = await store.size(key);
+  let restarted = false;
+  if (tracksSource && size > 0) {
+    let meta = null;
+    try { meta = JSON.parse((await store.readText(metaKeyOf(key))) || 'null'); } catch { meta = null; }
+    const same = !!meta && meta.url === url && meta.total === total && (meta.etag || '') === etag;
+    if (!same) {
+      await store.remove(key);
+      size = 0;
+      restarted = true;
+    }
+  }
+
+  // 3) 已經抓完就直接讀回來（第二次載入模型不再碰網路）
   if (size === total) {
     onProgress(total, total);
     const cached = await store.read(key);
-    if (cached) return { bytes: cached, fromCache: true, resumedFrom: total };
+    if (cached) return { bytes: cached, fromCache: true, resumedFrom: total, restarted };
   }
-  // 3) 大小比總量還大（伺服器換檔或上次寫壞）→ 砍掉重來；比總量小 = 上次中斷，續傳
+  // 4) 大小比總量還大（上次寫壞）→ 砍掉重來；比總量小 = 上次中斷，續傳
   let offset = 0;
   if (size > total) {
-    await store.remove(key).catch(() => {});
+    await store.remove(key);
+    size = 0;
+    restarted = true;
   } else if (size > 0) {
     offset = size;
   }
+  // 先寫來源紀錄再寫資料：資料寫到一半就被中斷時，下次才認得出這是同一份
+  if (tracksSource) await store.writeText(metaKeyOf(key), JSON.stringify({ url, total, etag }));
 
   const chunks = [];
   const writer = await store.openWriter(key);
@@ -166,7 +256,7 @@ export async function downloadResumable(url, key, {
   if (at !== total) {
     const cached = await store.read(key);
     if (!cached || cached.length !== total) throw new Error('續傳後的檔案不完整，請重新下載');
-    return { bytes: cached, fromCache: false, resumedFrom: size };
+    return { bytes: cached, fromCache: false, resumedFrom: size, restarted };
   }
-  return { bytes, fromCache: false, resumedFrom: size > 0 && size < total ? size : 0 };
+  return { bytes, fromCache: false, resumedFrom: size > 0 && size < total ? size : 0, restarted };
 }

@@ -18,7 +18,7 @@
 // 而瀏覽器只會比對 sw.js 本身的位元來決定要不要更新 SW —— 只改 worker 不改 sw.js 的話，
 // install 不會重跑、cache.addAll 不會重抓，既有使用者會永遠拿到舊 worker。
 // 升版名同時讓 activate 的清快取邏輯把舊 shell 砍掉。
-const CACHE = 'stt-shell-v23';
+const CACHE = 'stt-shell-v24';
 // 只清「自己的」外殼快取版本。transformers-cache（Whisper 模型）與
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。

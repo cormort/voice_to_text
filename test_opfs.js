@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { downloadResumable } = require('./src/opfs.js');
+const { downloadResumable, opfsKey, urlHash, metaKeyOf, opfsStore } = require('./src/opfs.js');
 
 const TOTAL = 20 * 1024 * 1024;                 // 20 MB，用預設 8 MB 分段 → 3 段
 const FULL = Buffer.alloc(TOTAL);
@@ -43,7 +43,17 @@ function makeStore(initial = {}) {
   };
 }
 
-function makeFetch({ failAfter = Infinity } = {}) {
+// 會記錄來源（網址／大小／ETag）的 store —— 真的 opfsStore 就是這種
+function makeTrackingStore(initial = {}, meta = {}) {
+  const store = makeStore(initial);
+  const texts = new Map(Object.entries(meta).map(([k, v]) => [metaKeyOf(k), JSON.stringify(v)]));
+  store.texts = texts;
+  store.readText = async key => (texts.has(key) ? texts.get(key) : null);
+  store.writeText = async (key, text) => { texts.set(key, text); };
+  return store;
+}
+
+function makeFetch({ failAfter = Infinity, etag = '"v1"' } = {}) {
   const calls = [];
   const fetchImpl = async (url, opts = {}) => {
     const m = /bytes=(\d+)-(\d+)/.exec(opts.headers.Range);
@@ -52,7 +62,8 @@ function makeFetch({ failAfter = Infinity } = {}) {
     if (calls.length > failAfter) throw new TypeError('network down');
     if (start === 0 && end === 0) {
       return {
-        ok: true, status: 206, headers: { get: k => (k === 'Content-Range' ? `bytes 0-0/${TOTAL}` : null) },
+        ok: true, status: 206,
+        headers: { get: k => (k === 'Content-Range' ? `bytes 0-0/${TOTAL}` : k === 'ETag' ? etag : null) },
         arrayBuffer: async () => FULL.buffer.slice(0, 1),
       };
     }
@@ -119,5 +130,92 @@ function makeFetch({ failAfter = Infinity } = {}) {
     assert.deepStrictEqual(calls[1], [0, Math.min(8 * 1024 * 1024, TOTAL) - 1], '第一段必須從 0 開始');
   }
 
-  console.log('opfs: 4 checks passed');
+  // 5) 有來源紀錄的 store：抓完之後記下網址／大小／ETag，第二次直接命中
+  {
+    const store = makeTrackingStore();
+    await downloadResumable('u', 'k', { store, fetchImpl: makeFetch().fetchImpl });
+    assert.deepStrictEqual(JSON.parse(store.texts.get(metaKeyOf('k'))), { url: 'u', total: TOTAL, etag: '"v1"' });
+    const again = makeFetch();
+    const out = await downloadResumable('u', 'k', { store, fetchImpl: again.fetchImpl });
+    assert.strictEqual(out.fromCache, true, '同一份來源 → 命中');
+    assert.strictEqual(out.restarted, false);
+    assert.strictEqual(again.calls.length, 1, '只發 probe');
+  }
+
+  // 6) 抓到一半，伺服器換了檔（ETag 變了、大小沒變）→ 不能接舊的前段，必須從 0 重抓
+  {
+    const half = FULL.subarray(0, 8 * 1024 * 1024);
+    const store = makeTrackingStore({ k: Buffer.alloc(half.length, 9) }, { k: { url: 'u', total: TOTAL, etag: '"v0"' } });
+    const { fetchImpl, calls } = makeFetch({ etag: '"v1"' });
+    const out = await downloadResumable('u', 'k', { store, fetchImpl });
+    assert.strictEqual(out.restarted, true, 'ETag 不同要回報 restarted');
+    assert.strictEqual(out.resumedFrom, 0);
+    assert.ok(Buffer.from(out.bytes).equals(FULL), '不能拼出新舊混雜的檔案');
+    assert.deepStrictEqual(calls[1], [0, 8 * 1024 * 1024 - 1], '第一段必須從 0 開始');
+    assert.strictEqual(JSON.parse(store.texts.get(metaKeyOf('k'))).etag, '"v1"', '來源紀錄要更新成新的 ETag');
+  }
+
+  // 7) 已抓完、但沒有來源紀錄（舊版留下的檔案）→ 不信任，重抓
+  {
+    const store = makeTrackingStore({ k: FULL });
+    const { fetchImpl, calls } = makeFetch();
+    const out = await downloadResumable('u', 'k', { store, fetchImpl });
+    assert.strictEqual(out.fromCache, false);
+    assert.strictEqual(out.restarted, true);
+    assert.strictEqual(calls.length, 1 + 3);
+  }
+
+  // 8) 換網址（鏡像）時同一個檔名不會撞到同一個 OPFS 檔
+  {
+    const a = opfsKey('underdog', 'https://huggingface.co/a/resolve/main/x.onnx', 'x.onnx');
+    const b = opfsKey('underdog', 'https://huggingface.co/b/resolve/main/x.onnx', 'x.onnx');
+    assert.notStrictEqual(a, b, '不同網址 → 不同 key');
+    assert.match(a, /^underdog\/[0-9a-f]{8}-x\.onnx$/);
+    assert.strictEqual(urlHash('same'), urlHash('same'), '雜湊要穩定（重新整理後找得到同一個檔）');
+  }
+
+  // 9) 真的 opfsStore：worker 裡走 createSyncAccessHandle，每段寫在檔尾並立刻 flush
+  //    （flush 了，分頁被關掉也不會丟；createWritable 要等 close() 才落地）
+  {
+    const disk = { bytes: Uint8Array.from([1, 2, 3]), flushes: 0, closed: false };
+    const fileHandleFake = {
+      async createSyncAccessHandle() {
+        return {
+          getSize: () => disk.bytes.length,
+          write(view, { at }) {
+            const next = new Uint8Array(Math.max(disk.bytes.length, at + view.length));
+            next.set(disk.bytes, 0);
+            next.set(view, at);
+            disk.bytes = next;
+            return view.length;
+          },
+          flush() { disk.flushes += 1; },
+          close() { disk.closed = true; },
+        };
+      },
+      async createWritable() { throw new Error('有 sync handle 時不該走 createWritable'); },
+    };
+    const dir = {
+      async getDirectoryHandle() { return dir; },
+      async getFileHandle() { return fileHandleFake; },
+    };
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { storage: { getDirectory: async () => dir } }, configurable: true,
+    });
+    try {
+      const writer = await opfsStore.openWriter('underdog/k');
+      await writer.write(Uint8Array.from([4, 5]));
+      assert.strictEqual(disk.flushes, 1, '每一段寫完都要 flush');
+      await writer.write(Uint8Array.from([6]));
+      await writer.close();
+      assert.deepStrictEqual(Array.from(disk.bytes), [1, 2, 3, 4, 5, 6], '接在既有內容後面');
+      assert.ok(disk.closed, 'close 要釋放 sync handle（否則之後讀不到檔案）');
+    } finally {
+      if (saved) Object.defineProperty(globalThis, 'navigator', saved);
+      else delete globalThis.navigator;
+    }
+  }
+
+  console.log('opfs: 9 checks passed');
 })();

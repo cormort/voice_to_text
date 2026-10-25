@@ -190,8 +190,8 @@ async function loadUnderdog() {
 
     try {
       // ?opfs=1 才啟用可續傳的 OPFS 下載（預設 Cache Storage，見 underdog-worker.js 的 CONFIG）
-        const useOpfs = new URLSearchParams(location.search).get('opfs') === '1';
-        const ready = await underdogRequest({ type: 'load', baseUrl: base, variant, useOpfs });
+      const useOpfs = new URLSearchParams(location.search).get('opfs') === '1';
+      const ready = await underdogRequest({ type: 'load', baseUrl: base, variant, useOpfs });
       underdog.loaded = true;
       underdog.base = base;
       underdog.variant = variant;
