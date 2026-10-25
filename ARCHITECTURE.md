@@ -324,3 +324,10 @@ console 沒有錯誤。**浮動字幕窗（Document PiP）沒驗到**：測試�
   （`跨來源隔離｜執行緒 4／核心 6`）：隔離失效時畫面不會報錯、只會變慢，所以必須看得見。
 - **PiP 尚未人工驗證**：headless Chrome 與 in-app browser 都打不開浮動視窗
   （需要真實使用者手勢），只能在實機 Chrome 按一次「浮動字幕窗」確認。
+
+### 跨來源隔離的三個限制（2026-10）
+
+- **Safari 忽略 `credentialless`**：不會進入 cross-origin isolated，因此永遠單執行緒。功能正常、只是慢 2–3 倍（RTF 0.85 而非 0.3），不要當成壞掉。
+- **首次載入多一次重整**：第一次造訪時頁面還沒被 Service Worker 接管，拿不到 COOP/COEP，所以自動重整一次；只在「載入時沒有 controller」時發生，之後的 SW 更新不會打斷錄音。
+- **執行緒數要看得見**：狀態列 `模型已就緒（WASM / CPU ×4，…）`、`?debug=storage` 的 `跨來源隔離｜執行緒 4／核心 6`。隔離失效時畫面不會報錯、只會變慢，所以必須有數字。
+- **PiP 尚未人工驗證**：headless Chrome 與 in-app browser 都打不開浮動視窗（需要真實使用者手勢），只能在實機 Chrome 按一次「浮動字幕窗」確認。
