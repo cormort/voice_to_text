@@ -22,6 +22,7 @@ jobs:
         run: |
           node test_opfs.js
           node test_storage_debug.js
+          node test_warnings.js
           node test_vad.js
           node test_resample.js
           node test_sherpa_decode.js

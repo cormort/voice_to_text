@@ -7,12 +7,17 @@
 
 import { createBatchPipeline } from './batch.js';
 import { opfsStore, opfsAvailable } from '../opfs.js';
+import { createWarningSink, exposeWarnings } from '../engine-warnings.js';
 
 /**
  * @param {object} ctx el / t / showToast / syncModelButtons（＋ batch pipeline 需要的其餘成員）
  */
 export function createUnderdogEngine(ctx) {
   const { el, t, showToast, syncModelButtons } = ctx;
+
+  // worker 的失敗理由不再只進 console：同一階段一分鐘內彈一次、帶原始訊息，
+  // 並全部寫進 window.__engineWarnings（診斷頁／自動化測試讀得到）。
+  const warnings = exposeWarnings(createWarningSink({ showToast, label: () => t().engineWarn }));
 
 
 const UNDERDOG_DEFAULT_BASE = 'https://huggingface.co/ai-ecoverse/Underdog-Bark-3.0-ONNX/resolve/main/';
@@ -50,8 +55,12 @@ function ensureUnderdogWorker() {
       return;
     }
     if (msg.type === 'warn') {
-      console.warn('[underdog-worker]', msg.phase, msg.message);
-      showToast(t().underdogCacheFailed);
+      // 例：cache 寫入失敗、OPFS 續傳中止 —— 這些都不影響本次可用性，但一定要看得到
+      warnings.report('underdog', msg.phase, msg.message);
+      if (msg.phase === 'cache' || msg.phase === 'opfs') {
+        el.underdogStatus.textContent = `${t().underdogStorageWarn}（${msg.phase}）`;
+        el.underdogStatus.className = 'model-status error';
+      }
       return;
     }
     const key = msg.type === 'ready' ? 'load' : msg.id;
