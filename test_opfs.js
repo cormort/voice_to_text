@@ -10,9 +10,9 @@
 'use strict';
 
 const assert = require('assert');
-const { downloadResumable, opfsKey, urlHash, metaKeyOf, opfsStore } = require('./src/opfs.js');
+const { downloadResumable, opfsKey, urlHash, metaKeyOf, opfsStore, CHUNK_BYTES } = require('./src/opfs.js');
 
-const TOTAL = 20 * 1024 * 1024;                 // 20 MB，用預設 8 MB 分段 → 3 段
+const TOTAL = 20 * 1024 * 1024;                 // 20 MB；分段大小改由 CHUNK_BYTES 決定（32 MB → 1 段），測試跟著算
 const FULL = Buffer.alloc(TOTAL);
 for (let i = 0; i < TOTAL; i++) FULL[i] = i & 0xff;
 
@@ -84,7 +84,7 @@ function makeFetch({ failAfter = Infinity, etag = '"v1"' } = {}) {
     assert.strictEqual(out.fromCache, false);
     assert.strictEqual(out.resumedFrom, 0);
     assert.ok(Buffer.from(out.bytes).equals(FULL), '內容必須與原檔一致');
-    assert.strictEqual(calls.length, 1 + 3, 'probe + 3 段');
+    assert.strictEqual(calls.length, 1 + Math.ceil(TOTAL / CHUNK_BYTES), 'probe + ceil(總量 / CHUNK_BYTES) 段');
     assert.strictEqual(store.files.get('k').length, TOTAL, 'store 裡要是完整檔案');
   }
 
@@ -102,12 +102,12 @@ function makeFetch({ failAfter = Infinity, etag = '"v1"' } = {}) {
   {
     const store = makeStore();
     const first = makeFetch({ failAfter: 3 });          // probe + 2 段之後斷線
-    await assert.rejects(downloadResumable('u', 'k', { store, fetchImpl: first.fetchImpl }), /network down/);
+    await assert.rejects(downloadResumable('u', 'k', { store, fetchImpl: first.fetchImpl, chunkBytes: 5 * 1024 * 1024 }), /network down/);
     const partial = store.files.get('k').length;
     assert(partial > 0 && partial < TOTAL, `中斷後應留下部分檔案（實得 ${partial}）`);
 
     const second = makeFetch();
-    const out = await downloadResumable('u', 'k', { store, fetchImpl: second.fetchImpl });
+    const out = await downloadResumable('u', 'k', { store, fetchImpl: second.fetchImpl, chunkBytes: 5 * 1024 * 1024 });
     assert.strictEqual(out.resumedFrom, partial, '必須從已寫入的位元組接下去');
     const resumed = Buffer.from(out.bytes);
     let firstBad = -1;
@@ -127,7 +127,7 @@ function makeFetch({ failAfter = Infinity, etag = '"v1"' } = {}) {
     const out = await downloadResumable('u', 'k', { store, fetchImpl });
     assert.strictEqual(out.resumedFrom, 0, '大小不符應重新下載');
     assert.ok(Buffer.from(out.bytes).equals(FULL), '重下之後內容正確');
-    assert.deepStrictEqual(calls[1], [0, Math.min(8 * 1024 * 1024, TOTAL) - 1], '第一段必須從 0 開始');
+    assert.strictEqual(calls[1][0], 0, '第一段必須從 0 開始');
   }
 
   // 5) 有來源紀錄的 store：抓完之後記下網址／大小／ETag，第二次直接命中
@@ -151,7 +151,7 @@ function makeFetch({ failAfter = Infinity, etag = '"v1"' } = {}) {
     assert.strictEqual(out.restarted, true, 'ETag 不同要回報 restarted');
     assert.strictEqual(out.resumedFrom, 0);
     assert.ok(Buffer.from(out.bytes).equals(FULL), '不能拼出新舊混雜的檔案');
-    assert.deepStrictEqual(calls[1], [0, 8 * 1024 * 1024 - 1], '第一段必須從 0 開始');
+    assert.strictEqual(calls[1][0], 0, '第一段必須從 0 開始（結尾由 chunkBytes 決定，不寫死）');
     assert.strictEqual(JSON.parse(store.texts.get(metaKeyOf('k'))).etag, '"v1"', '來源紀錄要更新成新的 ETag');
   }
 
@@ -162,7 +162,7 @@ function makeFetch({ failAfter = Infinity, etag = '"v1"' } = {}) {
     const out = await downloadResumable('u', 'k', { store, fetchImpl });
     assert.strictEqual(out.fromCache, false);
     assert.strictEqual(out.restarted, true);
-    assert.strictEqual(calls.length, 1 + 3);
+    assert.strictEqual(calls.length, 1 + Math.ceil(TOTAL / CHUNK_BYTES));
   }
 
   // 8) 換網址（鏡像）時同一個檔名不會撞到同一個 OPFS 檔

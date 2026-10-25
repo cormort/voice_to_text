@@ -8,8 +8,13 @@
 // 這一支刻意把「儲存」與「Fetcher」都做成可注入，於是 Node 測試可以拿假 store／
 // 假 fetch 驗續傳邏輯，不必開瀏覽器。
 
-/** 一次 Range 請求的大小。與 src/download.js 的 CHUNK_BYTES 對齊。 */
-export const CHUNK_BYTES = 8 * 1024 * 1024;
+/**
+ * 一次 Range 請求的大小。
+ * 為什麼是 32 MB：432 MB 的權重若用 8 MB 分段要 54 次「請求＋寫入＋flush」，
+ * 每次都有固定成本（實測首次載入因此從 27 s 退到 ~105 s）。放大到 32 MB 只要 14 次。
+ * 太大的代價是「中斷時最多重抓一段」，32 MB 在慢速線路上還算合理。
+ */
+export const CHUNK_BYTES = 32 * 1024 * 1024;
 
 // ── 檔名：同一個檔名可能來自不同網址 ─────────────────────────────────────
 // 以前 key 只有「prefix/檔名」：換「資產位置」到另一個 repo／鏡像（檔名相同）時，
@@ -230,14 +235,12 @@ export async function downloadResumable(url, key, {
   // 先寫來源紀錄再寫資料：資料寫到一半就被中斷時，下次才認得出這是同一份
   if (tracksSource) await store.writeText(metaKeyOf(key), JSON.stringify({ url, total, etag }));
 
-  const chunks = [];
   const writer = await store.openWriter(key);
   try {
     while (offset < total) {
       const end = Math.min(offset + chunkBytes, total) - 1;
       const part = await range(url, offset, end);
-      await writer.write(part);                    // 追加；前段已經在檔案裡
-      chunks.push(part);
+      await writer.write(part, offset);            // 指定位置寫入（續傳時前段已在檔案裡）
       offset += part.length;
       onProgress(offset, total);
     }
@@ -248,15 +251,10 @@ export async function downloadResumable(url, key, {
     throw error;
   }
 
-  const bytes = new Uint8Array(total);
-  let at = 0;
-  for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.length; }
-
-  // 續傳的情況：前面的部分不在這次的 chunks 裡，要從 store 補回來
-  if (at !== total) {
-    const cached = await store.read(key);
-    if (!cached || cached.length !== total) throw new Error('續傳後的檔案不完整，請重新下載');
-    return { bytes: cached, fromCache: false, resumedFrom: size, restarted };
-  }
+  // 直接從 store 讀一次，而不是把每段留在記憶體再複製成 total 大小：
+  // 432 MB 的檔案這樣可以省掉一份完整的 Uint8Array（峰值少 432 MB），
+  // 而且續傳與全新下載走同一條路，不用兩個分支。
+  const bytes = await store.read(key);
+  if (!bytes || bytes.length !== total) throw new Error('寫入後的檔案不完整，請重新下載');
   return { bytes, fromCache: false, resumedFrom: size > 0 && size < total ? size : 0, restarted };
 }
