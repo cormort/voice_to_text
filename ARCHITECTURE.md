@@ -245,3 +245,31 @@ Playwright 假麥克風 e2e（現在只有本機手動腳本）。
    若 `store.size()` 回 0，續傳邏輯每次都會從頭寫。
 
 要重接之前，先把這兩點接上 UI 告警，再在真機量「首次／中斷／續傳／第二次載入」四個數字。
+
+### 接回去的結果（2026-10，`?opfs=1`）
+
+上次接 OPFS 只看到「變慢 97.9 s」，查不出原因。這次先做護欄再接，**警告歷史立刻指出真正的 bug**：
+
+```
+underdog/opfs: undefined：Error：續傳後的檔案不完整，請重新下載
+OPFS-FILES ["undefined:66.7MB"]
+```
+
+`fetchBytes(url, cache, onProgress, label)` 有些呼叫端只傳三個參數，`label` 變 undefined，
+五個檔案全寫進同一個 key（`underdog/undefined`），所以每次都判定「續傳後不完整」→ 退回 Cache Storage
+→ 下次又重抓 431.9 MB。
+
+補上 `label = label || url 的檔名` 之後（真 431.9 MB 實測）：
+
+| 項目 | 結果 |
+| --- | --- |
+| OPFS 檔案 | 431.9／66.7／1.2／1.1／0.0 MB，五個都正確 |
+| 警告 | 空 |
+| 第一次載入 | **102 s**（原本 Cache Storage 27 s） |
+| 第二次載入（OPFS 命中） | **5.1 s**（原本 3.0 s） |
+
+**首次載入的回歸（27 → 102 s）不能直接上線**，所以預設仍走 Cache Storage，`?opfs=1` 才啟用續傳。
+要預設開之前先做兩件事：
+
+1. 分段大小 8 MB → 32 MB（或整段一次寫），把 54 次 OPFS 交易降下來
+2. 不要「寫完再從頭組一份 432 MB 的 Uint8Array」——直接讀回 OPFS 那一次就夠
