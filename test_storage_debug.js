@@ -114,5 +114,34 @@ function fakeCaches(entries) {
     assert.strictEqual(formatBytes(null), '?');
   }
 
-  console.log('storage-debug: 6 checks passed');
+  // 7) 警告歷史：有就帶進報告，只留最近 10 筆
+  {
+    const report = await collectStorageReport({
+      storage: { estimate: async () => ({ quota: 100, usage: 1 }) },
+      opfs: fakeOpfs(),
+      cacheNames: async () => [],
+      openCache: async () => ({ keys: async () => [], match: async () => null }),
+      warnings: () => Array.from({ length: 14 }, (_, i) => ({
+        at: '2026-10-25T10:00:00Z', engine: 'underdog', phase: 'cache', message: `w${i}`,
+      })),
+    });
+    assert.strictEqual(report.warnings.length, 10, '只留最近 10 筆');
+    assert.strictEqual(report.warnings[9].message, 'w13', '要保留最新的那幾筆');
+  }
+
+  // 8) 警告來源自己壞掉 → 不能讓整份報告掛掉
+  {
+    const report = await collectStorageReport({
+      storage: { estimate: async () => ({ quota: 100, usage: 1 }) },
+      opfs: fakeOpfs(),
+      cacheNames: async () => [],
+      openCache: async () => ({ keys: async () => [], match: async () => null }),
+      warnings: () => { throw new Error('sink broken'); },
+    });
+    assert.deepStrictEqual(report.warnings, [], '壞掉就當沒有警告');
+    assert.ok(/sink broken/.test(report.warningsError || ''), `要留下原因（實得 ${report.warningsError}）`);
+    assert.strictEqual(report.quota, 100, '其他欄位不受影響');
+  }
+
+  console.log('storage-debug: 8 checks passed');
 })();

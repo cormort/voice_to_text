@@ -2658,6 +2658,8 @@ import { opfsStore, opfsAvailable } from './opfs.js';
     void (async () => {
       const report = await collectStorageReport({
         opfs: (await opfsAvailable()) ? opfsStore : null,
+        // 引擎／worker 的警告歷史：不致命但發生過的事（cache 寫入失敗、OPFS 中止…）
+        warnings: () => (window.__engineWarnings ? window.__engineWarnings.history() : []),
       });
       window.__storageReport = report;
       renderStorageReport(report, {
@@ -2671,6 +2673,7 @@ import { opfsStore, opfsAvailable } from './opfs.js';
         opfs: t().storageOpfs,
         models: t().storageModels,
         caches: t().storageCaches,
+        warnings: t().storageWarnings,
         none: t().storageNone,
       });
     })();

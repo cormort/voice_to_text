@@ -82,6 +82,9 @@ export async function collectStorageReport({
   cacheNames = async () => (typeof caches !== 'undefined' ? caches.keys() : []),
   openCache = name => caches.open(name),
   perCacheLimit = 30,
+  warnings = typeof window !== 'undefined' && window.__engineWarnings
+    ? () => window.__engineWarnings.history()
+    : () => [],
 } = {}) {
   const report = { at: new Date().toISOString(), ua: typeof navigator !== 'undefined' ? navigator.userAgent : 'node', quota: null, usage: null, persisted: null, opfs: null, models: [], caches: [] };
 
@@ -120,6 +123,17 @@ export async function collectStorageReport({
     report.cachesError = String(error && error.message);
   }
 
+  // 引擎／worker 的警告歷史（engine-warnings.js 的 sink 掛在 window.__engineWarnings）。
+  // 這些是「不致命、但發生過」的事：cache 寫入失敗、OPFS 續傳中止、WebGPU 退回 WASM…
+  // 出國前看一次就知道這台機器載模型時踩過什麼。
+  try {
+    const entries = typeof warnings === 'function' ? await warnings() : (warnings || []);
+    report.warnings = Array.isArray(entries) ? entries.slice(-10) : [];
+  } catch (error) {
+    report.warnings = [];
+    report.warningsError = String((error && error.message) || error);
+  }
+
   return report;
 }
 
@@ -128,7 +142,7 @@ export function renderStorageReport(report, t = {}) {
   const strings = {
     title: '儲存空間診斷', close: '關閉', copy: '複製 JSON',
     quota: '配額', usage: '已用', available: '剩餘', persisted: '已申請持久化',
-    opfs: 'OPFS 寫入測試', models: 'OPFS 模型', caches: 'Cache Storage', none: '（無）',
+    opfs: 'OPFS 寫入測試', models: 'OPFS 模型', caches: 'Cache Storage', warnings: '警告紀錄', none: '（無）',
     ...t,
   };
   const el = document.createElement('div');
@@ -146,6 +160,10 @@ export function renderStorageReport(report, t = {}) {
     const files = (cache.files || []).map(f => `${f.name} ${formatBytes(f.size)}`).join('、');
     return `<li>${cache.name}：${cache.entries} 筆、${formatBytes(cache.bytes)}${cache.error ? `（${cache.error}）` : ''}${files ? `<br><span style="opacity:.65">${files}</span>` : ''}</li>`;
   }).join('') || `<li>${strings.none}</li>`;
+
+  const warningRows = (report.warnings || []).map(w =>
+    `<li>${String(w.at || '').slice(11, 19)}　<b>${w.engine}</b>／${w.phase}：${w.message}</li>`
+  ).join('') || `<li>${strings.none}</li>`;
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">
@@ -166,6 +184,7 @@ export function renderStorageReport(report, t = {}) {
       : `❌ ${report.opfs ? report.opfs.error : '?'}`)}
     <div><b>${strings.models}</b><ul style="margin:4px 0 4px 18px">${modelRows}</ul></div>
     <div><b>${strings.caches}</b><ul style="margin:4px 0 4px 18px">${cacheRows}</ul></div>
+    <div><b>${strings.warnings}</b>${report.warningsError ? `（${report.warningsError}）` : ''}<ul style="margin:4px 0 4px 18px">${warningRows}</ul></div>
     <div style="opacity:.6;margin-top:10px">${report.ua}</div>
   `;
 
