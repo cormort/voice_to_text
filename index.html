@@ -271,6 +271,37 @@
        要一起寫 [hidden] 規則，否則 display:block 會蓋掉 UA 的 [hidden]{display:none} */
     .lang-note { display: block; font-size: .82em; opacity: .7; margin-top: 4px }
     .lang-note[hidden] { display: none }
+
+    /* ==================== 雙語字幕條 ====================
+       這是「理解輔助」的主畫面：譯文大字、原文小字，只留最近兩句。
+       固定在下緣是為了不擋逐字稿，而且浮動字幕窗（Document PiP）可以把同一份內容搬出去。 */
+    .subtitle-bar {
+      position: sticky; bottom: 0; z-index: 20; margin: 10px 0 0;
+      display: grid; gap: 2px; padding: 12px 16px; border-radius: 14px;
+      background: #14151fdd; color: #fff; backdrop-filter: blur(6px);
+      box-shadow: 0 6px 24px #0006;
+    }
+    .subtitle-bar[hidden] { display: none }
+    .subtitle-zh { font-size: var(--sub-zh, 30px); font-weight: 800; line-height: 1.35; letter-spacing: .01em }
+    .subtitle-en { font-size: calc(var(--sub-zh, 30px) * 0.55); line-height: 1.4; color: #c9cbe4 }
+    .subtitle-en:empty { display: none }
+    body[data-sub-scale="s"] { --sub-zh: 20px }
+    body[data-sub-scale="m"] { --sub-zh: 30px }
+    body[data-sub-scale="l"] { --sub-zh: 44px }
+
+    /* 浮動字幕窗（Document PiP）：同一個 class 在另一個 document 裡，字級靠 --sub-zh */
+    body.subtitle-pip-mode .subtitle-bar { position: static; margin: 0; height: 100vh; align-content: center; border-radius: 0 }
+    body.subtitle-pip-mode .subtitle-zh { font-size: var(--sub-zh, 34px) }
+
+    /* 量測 HUD（Phase 0）：預設關閉，只有想看數字的人會開 */
+    #metricsHud {
+      position: fixed; right: 12px; bottom: 12px; z-index: 60;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: #0b0c13ee; color: #a8f0c6; padding: 8px 10px; border-radius: 8px;
+      white-space: pre; pointer-events: none; max-width: 46vw;
+    }
+    #metricsHud[hidden] { display: none }
+
   </style>
 
 <!-- Google tag (gtag.js) —— G-GHGBM401HN
@@ -440,6 +471,28 @@
       <p class="hint" id="mossHint"></p>
     </section>
 
+    <section class="panel" id="subtitleConfig">
+      <label id="subtitleTitle" class="panel-label">雙語字幕：</label>
+      <div class="row"><label for="mtToggle" id="mtToggleLabel">翻譯（本機）</label>
+        <input id="mtToggle" type="checkbox">
+        <label for="mtScript" id="mtScriptLabel">譯文</label>
+        <select id="mtScript"><option value="zh-Hant" selected id="optMtHant">繁體中文</option><option value="zh-Hans" id="optMtHans">簡體中文</option></select>
+      </div>
+      <div class="row"><label for="mtModel" id="mtModelLabel">翻譯模型：</label><input id="mtModel" type="text" value="Xenova/opus-mt-en-zh" spellcheck="false"></div>
+      <div class="row"><label for="subScale" id="subScaleLabel">字幕大小</label>
+        <select id="subScale"><option value="s" id="optSubS">小</option><option value="m" selected id="optSubM">中</option><option value="l" id="optSubL">大</option></select>
+        <button class="action" id="pipBtn" type="button">浮動字幕窗</button>
+        <label for="metricsToggle" id="metricsToggleLabel">顯示量測</label><input id="metricsToggle" type="checkbox">
+      </div>
+      <div class="model-status" id="mtStatus"></div>
+      <p class="hint" id="subtitleHint"></p>
+    </section>
+
+    <div class="subtitle-bar" id="subtitleBar" hidden>
+      <div class="subtitle-zh" id="subtitleZh"></div>
+      <div class="subtitle-en" id="subtitleEn"></div>
+    </div>
+
     <section class="controls">
       <button class="action" id="controlBtn" type="button">開始辨識</button><button class="action" id="copyBtn" type="button" disabled>複製內容</button>
       <button class="action" id="exportBtn" type="button" disabled>輸出逐字稿</button><button class="action" id="clearBtn" type="button">清空</button>
@@ -453,6 +506,7 @@
       <p id="privacyConclusion"></p>
     </div></details>
   </main><div id="toast" role="status"></div>
+  <div id="metricsHud" hidden></div>
   <!-- 逐字稿本身不做 live region（interim 每秒更新多次會灌爆螢幕閱讀器），
        只在段落確定後把內容送進這裡 -->
   <div id="a11yAnnouncer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -543,6 +597,10 @@
     loadUnderdog: $('loadUnderdogBtn'), clearUnderdogCache: $('clearUnderdogCacheBtn'),
     underdogProgress: $('underdogProgress'), underdogBar: $('underdogProgressBar'),
     underdogStatus: $('underdogStatus'),
+    subtitleConfig: $('subtitleConfig'), mtToggle: $('mtToggle'), mtScript: $('mtScript'),
+    mtModel: $('mtModel'), subScale: $('subScale'), pipBtn: $('pipBtn'),
+    metricsToggle: $('metricsToggle'), mtStatus: $('mtStatus'), metricsHud: $('metricsHud'),
+    subtitleBar: $('subtitleBar'), subtitleZh: $('subtitleZh'), subtitleEn: $('subtitleEn'),
     mossConfig: $('mossConfig'), mossSpace: $('mossSpaceSelect'), mossFile: $('mossFile'),
     mossFileZone: $('mossFileZone'), mossFileText: $('mossFileText'),
     mossRun: $('mossRunBtn'), mossSrt: $('mossSrtBtn'),
@@ -664,6 +722,19 @@
       underdogQueueFull: '本機轉寫速度跟不上，已捨棄最舊的一段排隊音訊。',
       underdogNoSpeech: 'Underdog 沒有聽出任何內容（它只支援英文）。',
       underdogHint: 'Underdog Bark 3.0 是 Conway Research 以 NVIDIA parakeet-tdt-0.6b-v3（0.6B 參數）微調的<b>英文</b>模型（CC-BY-4.0），在本機以 onnxruntime-web（WASM）執行、不上傳音訊。實測（桌機 Chrome、單執行緒）：2.67 秒音訊的 encoder 約 3.2 秒、decoder 約 65 ms，整體 <b>RTF 約 1.2</b> —— 比即時慢一點，所以定位是「高準確度、可接受延遲」，不是即時字幕；要真串流請用 sherpa-onnx。q4f16 是官方四種匯出裡最小的（權重 432 MB），q8 較大但量化失真較小。WebGPU 目前<b>不支援</b>這份圖（會建出無效的 pipeline），多執行緒 WASM 需要 COOP/COEP 標頭而 GitHub Pages 給不了。首次載入會下載約 500 MB 並存進 Cache Storage；資產位置可換成自架鏡像。',
+      subtitleTitle: '雙語字幕：', mtToggleLabel: '翻譯（本機）', mtScriptLabel: '譯文',
+      mtModelLabel: '翻譯模型：', subScaleLabel: '字幕大小', pipBtn: '浮動字幕窗',
+      metricsToggleLabel: '顯示量測', optMtHant: '繁體中文', optMtHans: '簡體中文',
+      optSubS: '小', optSubM: '中', optSubL: '大',
+      subtitleWaiting: '開始辨識後，這裡會顯示雙語字幕。',
+      mtOff: '翻譯未開啟（只顯示原文）', mtDownloading: '正在下載翻譯模型',
+      mtPending: '翻譯已開啟，第一次辨識時會載入模型',
+      mtLoading: '正在載入翻譯模型（首次約 114 MB，之後由瀏覽器快取）…',
+      mtReady: '翻譯模型已就緒', mtFailed: '翻譯失敗：',
+      metricsLatency: '處理延遲', metricsAvg: '平均', metricsNothing: '尚無資料（先跑一次辨識）',
+      pipUnsupported: '這個瀏覽器沒有 Document Picture-in-Picture，已改用頁內字幕條。',
+      pipFailed: '開不了浮動字幕窗（可能被瀏覽器設定擋住）。',
+      subtitleHint: '這是「聽不懂時靠文字跟上」的主畫面：<b>譯文大字、原文小字</b>，只留最近兩句。翻譯在本機跑（transformers.js + <code>Xenova/opus-mt-en-zh</code>，約 114 MB，每句 0.2–0.6 秒），<b>只翻已結束的句子</b>，所以中文會比英文晚約半秒到一秒。品質定位是「看得懂大意」——術語（例如 ablation study、state space model）常會失真，重要內容請以原文為準。模型跑不動或載入失敗時只會少了中文那一行，辨識不受影響。想浮在投影片上請按「<b>浮動字幕窗</b>」（Chrome 的 Document PiP）。',
       whistleHint: 'Whistle 由 Cactus Compute 發佈（Apache-2.0），<b>整顆模型只有 16.9 MB</b>，在本機以 WASM 執行、不上傳音訊。支援英、德、法、西、義、荷、波七種語言（語言自動偵測，也可用上方語言選單指定）；<b>不支援中文、日文、韓文</b>，需要中文請改用 sherpa-onnx 或 Whisper。運作方式是<b>停頓分句</b>：偵測到約 0.8 秒靜音或滿 15 秒才送出轉寫，所以字幕會比 sherpa 的真串流慢一到兩秒。模型網址可換成自架位置；清除快取後重新整理頁面即會重新下載。',
       whisperHint: 'Whisper 使用停頓分句。首次載入會下載模型並使用瀏覽器快取；WebGPU 不可用時自動改用 WASM。停止辨識時會等待最後一句處理完成。',
       mossHint: '把整段會議錄音或影片丟進來，一次取回含時間戳與說話人標籤（<code>[S01]</code>、<code>[S02]</code>…）的逐字稿。<strong>音訊會上傳到公開的 Hugging Face Space</strong>，不是本機處理，請勿用於機密內容。官方 Space 較快但輸出簡體（本頁會自動轉成台灣繁中）；社群 LiteRT Space 較慢，但直接回傳繁中，且 <code>[S01]</code> 標籤每 90 秒會重新編號。單次建議 30 分鐘以內，檔案越大上傳越久。',
@@ -798,6 +869,19 @@
       underdogQueueFull: 'Local transcription cannot keep up; the oldest queued audio was dropped.',
       underdogNoSpeech: 'Underdog heard nothing. It only supports English.',
       underdogHint: 'Underdog Bark 3.0 is Conway Research\'s <b>English</b> fine-tune of NVIDIA parakeet-tdt-0.6b-v3 (0.6B parameters, CC-BY-4.0), running locally through onnxruntime-web (WASM); audio never leaves the device. Measured on desktop Chrome, single-threaded: for 2.67 s of audio the encoder takes ~3.2 s and the decoder ~65 ms, i.e. <b>RTF ≈ 1.2</b> — slightly slower than real time, so treat it as high-accuracy with acceptable latency rather than live captions (use sherpa-onnx for true streaming). q4f16 is the smallest of the four official exports (432 MB of weights); q8 is larger but quantises less. WebGPU <b>does not work</b> for this graph (it builds invalid pipelines), and multi-threaded WASM needs COOP/COEP headers, which GitHub Pages cannot send. The first load downloads ~500 MB into Cache Storage; point the assets URL at your own mirror if you prefer.',
+      subtitleTitle: 'Bilingual subtitles:', mtToggleLabel: 'Translate (local)', mtScriptLabel: 'Output',
+      mtModelLabel: 'Translation model:', subScaleLabel: 'Size', pipBtn: 'Floating window',
+      metricsToggleLabel: 'Show metrics', optMtHant: 'Traditional Chinese', optMtHans: 'Simplified Chinese',
+      optSubS: 'Small', optSubM: 'Medium', optSubL: 'Large',
+      subtitleWaiting: 'Bilingual subtitles appear here once recognition starts.',
+      mtOff: 'Translation off (original only)', mtDownloading: 'Downloading translation model',
+      mtPending: 'Translation is on; the model loads on first recognition',
+      mtLoading: 'Loading the translation model (~114 MB the first time, then cached)…',
+      mtReady: 'Translation model ready', mtFailed: 'Translation failed: ',
+      metricsLatency: 'latency', metricsAvg: 'avg', metricsNothing: 'no data yet (run a recognition first)',
+      pipUnsupported: 'This browser has no Document Picture-in-Picture; the in-page subtitle bar is used instead.',
+      pipFailed: 'Could not open the floating window (it may be blocked by browser settings).',
+      subtitleHint: 'This is the main view for <b>following a talk you cannot quite hear</b>: translation in large type, the original underneath, keeping only the last two lines. Translation runs locally (transformers.js + <code>Xenova/opus-mt-en-zh</code>, ~114 MB, 0.2–0.6 s per sentence) and <b>only translates finished sentences</b>, so Chinese trails English by roughly half a second. Quality is "understand the gist" — technical terms (ablation study, state space model) often come out wrong, so trust the original for anything important. If the model fails to load you just lose the Chinese line; recognition is unaffected. Press <b>Floating window</b> to keep subtitles over your slides (Chrome Document PiP).',
       whistleHint: 'Whistle is published by Cactus Compute (Apache-2.0) and the <b>whole model is 16.9 MB</b>. It runs locally in WASM; audio never leaves the device. It supports English, German, French, Spanish, Italian, Dutch and Polish (language is auto-detected, or force it with the selector above); <b>Chinese, Japanese and Korean are not supported</b> — use sherpa-onnx or Whisper for those. It works in <b>pause-based segments</b>: a segment is transcribed after ~0.8 s of silence or 15 s of continuous speech, so captions trail sherpa\'s true streaming by a second or two. You can point the model URL at your own host; clearing the cache makes it download again after a reload.',
       whisperHint: 'Whisper segments on pauses. The model downloads once and is cached by the browser; it falls back to WASM when WebGPU is unavailable. Stopping waits for the final phrase.',
       mossHint: 'Drop in a whole meeting recording or video and get back a transcript with timestamps and anonymous speaker labels (<code>[S01]</code>, <code>[S02]</code>…). <strong>The audio is uploaded to a public Hugging Face Space</strong> — this is not local processing, so do not use it for confidential content. The official Space is faster but returns Simplified Chinese (this page converts it to Traditional); the community LiteRT Space is slower but returns Traditional Chinese directly, and its <code>[S01]</code> labels restart every 90 seconds. Keep single files under ~30 minutes; larger uploads take longer.',
@@ -1092,10 +1176,12 @@
   function commit(s) {
     s = traditional((s || '').trim());
     if (!s) return;
-    state.segments.push({ time: new Date(), text: s });
+    const segment = { time: new Date(), text: s };
+    state.segments.push(segment);
     state.interim = '';
     render();
     announce(s);
+    queueTranslation(segment);
   }
 
   // 一次寫入多段（例如 MOSS 的整份逐字稿）：只 render 一次，避免每段都重排與捲動。
@@ -1147,23 +1233,33 @@
     return effectiveCount;
   }
 
-  function render() {
-    el.placeholder.hidden = !!(state.segments.length || state.interim);
+  // 一段話在逐字稿裡長什麼樣。開了雙語字幕時，譯文以縮排的第二行附在原文下面
+  // （逐字稿仍然是「記錄」，原文一定在；譯文只是附加資訊）。
+  function segmentLine(segment) {
+    const base = `${stamp(segment.time)} ${segment.text}`;
+    return segment.zh && mt.inTranscript ? `${base}\n   ↳ ${segment.zh}` : base;
+  }
 
-    // 快取被清空或段數縮減（clear）時，重建基底文字
-    if (state.segments.length < renderedSegments) {
-      renderedSegments = 0;
-      renderedText = '';
-      el.final.textContent = '';
+  // full=true 用在「譯文後到」與清空／換場：整份重建（段落數多時會被呼叫端擋掉）
+  function renderTranscript(full = false) {
+    if (full || state.segments.length < renderedSegments) {
+      renderedText = state.segments.map(segmentLine).join('\n');
+      renderedSegments = state.segments.length;
+      el.final.textContent = renderedText;
+      return;
     }
-    // 只 append 新段落，避免每次都重建整份逐字稿
     if (state.segments.length > renderedSegments) {
-      const delta = state.segments.slice(renderedSegments)
-        .map(x => `${stamp(x.time)} ${x.text}`).join('\n');
+      const delta = state.segments.slice(renderedSegments).map(segmentLine).join('\n');
       renderedText += (renderedText ? '\n' : '') + delta;
       renderedSegments = state.segments.length;
       el.final.textContent = renderedText;
     }
+  }
+
+  function render() {
+    el.placeholder.hidden = !!(state.segments.length || state.interim);
+    renderTranscript();
+    renderSubtitles();
 
     const interimText = state.interim ? `\n${state.interim}` : '';
     if (el.interim.textContent !== interimText) el.interim.textContent = interimText;
@@ -2272,7 +2368,7 @@
   const WHISPER_MAX_QUEUED = 3;
 
   function enqueueWhisperAudio(audio) {
-    whisper.queue.push({ audio, language: el.lang.value, sessionId: whisper.sessionId });
+    whisper.queue.push({ audio, language: el.lang.value, sessionId: whisper.sessionId, job: metricsSubmit('whisper', audio.length) });
     // 沒有回壓的話，WASM 退路（RTF 可能大於 1）會讓佇列無限成長，停止時永遠等不完；
     // 超過上限就丟最舊的一段並提示一次
     while (whisper.queue.length > WHISPER_MAX_QUEUED) {
@@ -2308,6 +2404,7 @@
                   stride_length_s: 2
                 });
             const text = String(output?.text || '').trim();
+            metricsCommit(job.job, text);
             if (job.sessionId === whisper.sessionId && text) commit(text);
           } catch (error) {
             console.error('Whisper inference failed:', error);
@@ -2656,7 +2753,7 @@
   }
 
   function enqueueWhistleAudio(audio) {
-    whistle.queue.push({ audio, language: whistleLanguage(), sessionId: whistle.sessionId });
+    whistle.queue.push({ audio, language: whistleLanguage(), sessionId: whistle.sessionId, job: metricsSubmit('whistle', audio.length) });
     // 回壓：WASM 的 RTF 約 0.3，但仍比真串流慢；佇列無限成長會讓「停止」等不完
     while (whistle.queue.length > WHISTLE_MAX_QUEUED) {
       whistle.queue.shift();
@@ -2694,6 +2791,7 @@
           try {
             const output = await whistleTranscribe(job.audio, job.language);
             const text = String(output?.text || '').trim();
+            metricsCommit(job.job, text);
             // Whistle 沒有中文輸出，所以不做簡轉繁（歐洲語言的文字本來就不該進 OpenCC）
             if (job.sessionId === whistle.sessionId && text) commit(text);
           } catch (error) {
@@ -2957,7 +3055,7 @@
   const UNDERDOG_MAX_QUEUED = 2;
 
   function enqueueUnderdogAudio(audio) {
-    underdog.queue.push({ audio, sessionId: underdog.sessionId });
+    underdog.queue.push({ audio, sessionId: underdog.sessionId, job: metricsSubmit('underdog', audio.length) });
     // 回壓：單執行緒 WASM 的 RTF 約 1.2（比即時慢），佇列不設上限的話「停止」會等不完
     while (underdog.queue.length > UNDERDOG_MAX_QUEUED) {
       underdog.queue.shift();
@@ -2990,6 +3088,7 @@
           try {
             const output = await underdogTranscribe(job.audio);
             const text = String(output?.text || '').trim();
+            metricsCommit(job.job, text);
             // 英文模型，不做簡轉繁；沒有內容就靜默跳過（VAD 切出來的靜音段很常見）
             if (job.sessionId === underdog.sessionId && text) commit(text);
           } catch (error) {
@@ -3078,6 +3177,353 @@
 
     await waitForUnderdogDrain();
     finish();
+  }
+
+  // ==================== 量測（Phase 0）====================
+  // 目的：把「延遲」變成看得到的數字，而不是感覺。只記錄、不影響流程。
+  // HUD 預設關閉；window.__sttMetrics 永遠可讀，瀏覽器端測試靠它斷言。
+  const metrics = { jobs: [], engine: '', longTasks: { count: 0, max: 0 } };
+
+  function metricsSubmit(engine, samples) {
+    return { engine, audioSec: samples / SAMPLE_RATE, at: performance.now() };
+  }
+
+  function metricsCommit(job, text) {
+    if (!job) return null;
+    const latency = (performance.now() - job.at) / 1000;
+    const entry = {
+      engine: job.engine,
+      audioSec: Number(job.audioSec.toFixed(2)),
+      latency: Number(latency.toFixed(2)),
+      rtf: job.audioSec > 0 ? Number((latency / job.audioSec).toFixed(2)) : null,
+      chars: (text || '').length,
+      charsPerSec: latency > 0 ? Math.round((text || '').length / latency) : null,
+    };
+    metrics.jobs.push(entry);
+    if (metrics.jobs.length > 200) metrics.jobs.shift();
+    metrics.engine = job.engine;
+    if (!el.metricsHud.hidden) renderMetricsHud();
+    return entry;
+  }
+
+  function metricsSnapshot() {
+    const latencies = metrics.jobs.map(j => j.latency).sort((a, b) => a - b);
+    const rtfs = metrics.jobs.map(j => j.rtf).filter(v => v != null);
+    const pick = q => (latencies.length ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * q))] : null);
+    const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+    const round = v => (v == null ? null : Number(v.toFixed(2)));
+    return {
+      engine: metrics.engine,
+      count: metrics.jobs.length,
+      latency: {
+        last: metrics.jobs.length ? metrics.jobs[metrics.jobs.length - 1].latency : null,
+        avg: round(mean(latencies)),
+        p95: pick(0.95),
+      },
+      rtf: round(mean(rtfs)),
+      longTasks: { ...metrics.longTasks },
+      jobs: metrics.jobs.slice(-10),
+    };
+  }
+
+  function renderMetricsHud() {
+    const s = metricsSnapshot();
+    if (!s.count) {
+      el.metricsHud.textContent = t().metricsNothing;
+      return;
+    }
+    el.metricsHud.textContent = [
+      `${t().metricsLatency} ${s.latency.last}s（${t().metricsAvg} ${s.latency.avg}s／p95 ${s.latency.p95}s）`,
+      `RTF ${s.rtf ?? '-'}｜long task ${s.longTasks.count}（max ${s.longTasks.max} ms）`,
+      `${s.engine} × ${s.count}`,
+    ].join('\n');
+  }
+
+  window.__sttMetrics = { snapshot: metricsSnapshot, reset: () => { metrics.jobs = []; metrics.longTasks = { count: 0, max: 0 }; if (!el.metricsHud.hidden) renderMetricsHud(); } };
+
+  if ('PerformanceObserver' in window) {
+    try {
+      new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) {
+          metrics.longTasks.count += 1;
+          metrics.longTasks.max = Math.max(metrics.longTasks.max, Math.round(entry.duration));
+        }
+      }).observe({ entryTypes: ['longtask'] });
+    } catch (error) {
+      console.warn('longtask observer unavailable:', error);
+    }
+  }
+
+  // ==================== 本機翻譯層（Phase 1）====================
+  // 只翻「已結束的句子」；模型（約 114 MB）跑在 mt-worker.js，首次載入 7.8 s。
+  // 失敗只降級成「只有原文」，不影響辨識本身。
+  const MT_DEFAULT_MODEL = 'Xenova/opus-mt-en-zh';
+  const MT_CACHE_LIMIT = 500;
+  const mt = {
+    enabled: false, model: MT_DEFAULT_MODEL, script: 'zh-Hant', inTranscript: true,
+    worker: null, seq: 0, pending: new Map(), loadPromise: null, loadedModel: null,
+    queue: [], busy: false, cache: new Map(), warningShown: false, translated: 0,
+  };
+  let pipWindow = null;
+
+  function ensureMtWorker() {
+    if (mt.worker) return mt.worker;
+    try {
+      mt.worker = new Worker('mt-worker.js', { type: 'module' });
+    } catch (error) {
+      console.warn('Translation worker unavailable:', error);
+      mt.worker = null;
+      return null;
+    }
+    mt.worker.onmessage = event => {
+      const msg = event.data || {};
+      if (msg.type === 'progress') {
+        if (msg.phase === 'download' && msg.progress >= 100) el.mtStatus.textContent = `${t().mtDownloading} ${msg.file}`;
+        return;
+      }
+      const key = msg.id || 'load';
+      const pending = mt.pending.get(key);
+      if (!pending) return;
+      mt.pending.delete(key);
+      if (msg.type === 'error') pending.reject(new Error(msg.message));
+      else pending.resolve(msg);
+    };
+    mt.worker.onerror = event => {
+      console.warn('Translation worker crashed:', event.message || event);
+      for (const [, p] of mt.pending) p.reject(new Error(event.message || 'worker crash'));
+      mt.pending.clear();
+      try { mt.worker.terminate(); } catch (error) { /* 已經死了 */ }
+      mt.worker = null;
+      mt.loadedModel = null;
+    };
+    return mt.worker;
+  }
+
+  function mtRequest(payload) {
+    const worker = ensureMtWorker();
+    if (!worker) return Promise.reject(new Error('worker unavailable'));
+    const key = payload.type === 'load' ? 'load' : payload.id;
+    return new Promise((resolve, reject) => {
+      mt.pending.set(key, { resolve, reject });
+      try {
+        worker.postMessage(payload);
+      } catch (error) {
+        mt.pending.delete(key);
+        reject(error);
+      }
+    });
+  }
+
+  async function ensureMtLoaded() {
+    if (mt.loadedModel === mt.model) return;
+    if (mt.loadPromise) return mt.loadPromise;
+    mt.loadPromise = (async () => {
+      el.mtStatus.textContent = t().mtLoading;
+      el.mtStatus.className = 'model-status';
+      await mtRequest({ type: 'load', model: mt.model });
+      mt.loadedModel = mt.model;
+      el.mtStatus.textContent = t().mtReady;
+      el.mtStatus.className = 'model-status success';
+    })();
+    try {
+      await mt.loadPromise;
+    } finally {
+      mt.loadPromise = null;
+    }
+  }
+
+  // 拉丁字母為主才翻：中文引擎的輸出丟進 en→zh 只會被翻壞
+  function isLatinDominated(text) {
+    const latin = (text.match(/[A-Za-z]/g) || []).length;
+    const cjk = (text.match(/[\u3400-\u9fff]/g) || []).length;
+    return latin > 0 && latin >= cjk * 2;
+  }
+
+  async function toTraditional(text) {
+    if (mt.script !== 'zh-Hant') return text;
+    try { await ensureOpencc(); } catch (error) { /* 沒有 OpenCC 就原樣輸出 */ }
+    const convert = getOpenccConverter('twp');
+    try {
+      return convert ? convert(text) : text;
+    } catch (error) {
+      console.warn('OpenCC conversion failed for translation:', error);
+      return text;
+    }
+  }
+
+  function queueTranslation(segment) {
+    if (!mt.enabled || !segment || !segment.text) return;
+    if (segment.zh || !isLatinDominated(segment.text)) return;
+    if (/^--- .* ---$/.test(segment.text)) return;      // 「錄音開始」這種標記不是語音
+    mt.queue.push(segment);
+    void processMtQueue();
+  }
+
+  function applyTranslation(segment, zh) {
+    segment.zh = zh;
+    renderSubtitles();
+    // 逐字稿要顯示譯文時，只有「譯文後到」的段落需要重畫；整份重建在段落數少時才划算
+    if (mt.inTranscript && state.segments.length <= 800) {
+      renderTranscript(true);
+    }
+  }
+
+  function processMtQueue() {
+    if (mt.busy || !mt.enabled) return;
+    const segment = mt.queue.shift();
+    if (!segment) return;
+    mt.busy = true;
+    (async () => {
+      try {
+        if (state.segments.indexOf(segment) === -1) return;   // 已經被清空
+        const key = segment.text.trim().toLowerCase();
+        if (mt.cache.has(key)) {
+          applyTranslation(segment, mt.cache.get(key));
+          return;
+        }
+        await ensureMtLoaded();
+        if (!mt.enabled) return;
+        const out = await mtRequest({ type: 'translate', id: ++mt.seq, text: segment.text });
+        const zh = await toTraditional(String(out.text || '').trim());
+        if (!zh) return;
+        mt.cache.set(key, zh);
+        if (mt.cache.size > MT_CACHE_LIMIT) mt.cache.delete(mt.cache.keys().next().value);
+        mt.translated += 1;
+        applyTranslation(segment, zh);
+        el.mtStatus.textContent = `${t().mtReady}（${mt.translated}）`;
+      } catch (error) {
+        console.warn('Translation failed:', error);
+        el.mtStatus.textContent = t().mtFailed + (error.message || error);
+        el.mtStatus.className = 'model-status error';
+        if (!mt.warningShown) {
+          mt.warningShown = true;
+          showToast(t().mtFailed + (error.message || error));
+        }
+      } finally {
+        mt.busy = false;
+        if (mt.queue.length) void processMtQueue();
+      }
+    })();
+  }
+
+  async function setMtEnabled(on) {
+    mt.enabled = !!on;
+    el.mtToggle.checked = mt.enabled;
+    if (!mt.enabled) {
+      mt.queue = [];
+      el.mtStatus.textContent = t().mtOff;
+      el.mtStatus.className = 'model-status';
+      renderSubtitles();
+      return;
+    }
+    try {
+      await ensureMtLoaded();
+      el.subtitleBar.hidden = false;
+      // 開啟前的段落也補翻（會後才想到要中文也用得到）
+      for (const segment of state.segments) queueTranslation(segment);
+      renderSubtitles();
+    } catch (error) {
+      console.warn('Translation model failed to load:', error);
+      mt.enabled = false;
+      el.mtToggle.checked = false;
+      el.mtStatus.textContent = t().mtFailed + (error.message || error);
+      el.mtStatus.className = 'model-status error';
+      showToast(t().mtFailed + (error.message || error));
+    }
+  }
+
+  // ==================== 雙語字幕條與浮動字幕窗 ====================
+  function recentSubtitleSegments(n = 2) {
+    const out = [];
+    for (let i = state.segments.length - 1; i >= 0 && out.length < n; i--) {
+      const segment = state.segments[i];
+      if (!segment.text) continue;
+      if (/^--- .* ---$/.test(segment.text)) continue;
+      out.unshift(segment);
+    }
+    return out;
+  }
+
+  function subtitleTargets() {
+    const targets = [];
+    let pipBar = null;
+    if (pipWindow) {
+      // 視窗被關掉、或拿不到裡面的字幕條（headless／視窗還沒掛上 DOM）都算關閉：
+      // 不這樣收尾的話，主視窗的字幕條會一直維持隱藏，看起來像「字幕不見了」
+      pipBar = pipWindow.closed ? null : pipWindow.document.getElementById('subtitleBarPip');
+      if (!pipBar) {
+        pipWindow = null;
+        el.subtitleBar.style.display = '';
+      }
+    }
+    const show = mt.enabled || !!pipBar;
+    el.subtitleBar.hidden = !show || !!pipBar;
+    if (!el.subtitleBar.hidden) targets.push(el.subtitleBar);
+    if (pipBar) targets.push(pipBar);
+    return targets;
+  }
+
+  function renderSubtitles() {
+    const targets = subtitleTargets();
+    const segments = recentSubtitleSegments(2);
+    if (!segments.length) {
+      for (const bar of targets) {
+        const zh = bar.querySelector('.subtitle-zh');
+        const en = bar.querySelector('.subtitle-en');
+        if (zh) zh.textContent = t().subtitleWaiting;
+        if (en) en.textContent = '';
+      }
+      return;
+    }
+    const translated = segments.map(s => s.zh).filter(Boolean);
+    const primary = translated.length ? translated.join(' ') : segments.map(s => s.text).join(' ');
+    const secondary = translated.length ? segments.map(s => s.text).join(' ') : '';
+    for (const bar of targets) {
+      const zh = bar.querySelector('.subtitle-zh');
+      const en = bar.querySelector('.subtitle-en');
+      if (zh) zh.textContent = primary;
+      if (en) en.textContent = secondary;
+    }
+  }
+
+  async function openSubtitleWindow() {
+    if (!('documentPictureInPicture' in window)) {
+      showToast(t().pipUnsupported);
+      return;
+    }
+    if (pipWindow && !pipWindow.closed) {
+      pipWindow.focus();
+      return;
+    }
+    try {
+      pipWindow = await window.documentPictureInPicture.requestWindow({ width: 960, height: 220 });
+      for (const sheet of document.querySelectorAll('style, link[rel="stylesheet"]')) {
+        pipWindow.document.head.appendChild(sheet.cloneNode(true));
+      }
+      pipWindow.document.body.classList.add('subtitle-pip-mode');
+      pipWindow.document.body.dataset.subScale = document.body.dataset.subScale || 'm';
+      pipWindow.document.title = t().subtitleTitle;
+      const bar = el.subtitleBar.cloneNode(true);
+      bar.id = 'subtitleBarPip';
+      bar.hidden = false;
+      bar.removeAttribute('hidden');
+      pipWindow.document.body.appendChild(bar);
+      pipWindow.addEventListener('pagehide', () => {
+        pipWindow = null;
+        renderSubtitles();
+      });
+      el.subtitleBar.style.display = 'none';
+      renderSubtitles();
+    } catch (error) {
+      console.warn('Document PiP failed:', error);
+      showToast(t().pipFailed);
+    }
+  }
+
+  function applySubScale(value) {
+    const scale = ['s', 'm', 'l'].includes(value) ? value : 'm';
+    document.body.dataset.subScale = scale;
+    if (pipWindow && !pipWindow.closed) pipWindow.document.body.dataset.subScale = scale;
   }
 
   // ==================== Web Speech API engine ====================
@@ -3527,12 +3973,15 @@
     el.clearSherpaCache.textContent = d.sherpaClearCache;
     el.clearWhistleCache.textContent = d.whistleClearCache;
     el.clearUnderdogCache.textContent = d.underdogClearCache;
+    el.pipBtn.textContent = d.pipBtn;
     updateMossButton();
     el.mossSrt.textContent = d.mossSrt;
 
     for (const key of [
       'engineLabel', 'langLabel', 'optWebspeech', 'optVosk', 'optSherpa', 'optWhisper', 'optWhistle', 'optMoss',
       'optUnderdog', 'underdogBaseLabel', 'underdogVariantLabel', 'optUnderdogQ4', 'optUnderdogQ8',
+      'subtitleTitle', 'mtToggleLabel', 'mtScriptLabel', 'mtModelLabel', 'subScaleLabel',
+      'optMtHant', 'optMtHans', 'optSubS', 'optSubM', 'optSubL', 'metricsToggleLabel',
       'mossSpaceLabel', 'optMossOfficial', 'optMossLitert', 'mossFileLabel',
       'voskSourceLabel', 'voskModelLabel', 'voskFileLabel', 'optVoskBuiltin', 'optVoskFile',
       'optVoskUrl', 'sherpaBaseLabel', 'whisperModelLabel', 'vadLabel', 'optVadHigh',
@@ -3548,6 +3997,7 @@
     $('whisperHint').innerHTML = d.whisperHint;
     $('whistleHint').innerHTML = d.whistleHint;
     $('underdogHint').innerHTML = d.underdogHint;
+    $('subtitleHint').innerHTML = d.subtitleHint;
     $('mossHint').innerHTML = d.mossHint;
     $('enginesList').innerHTML = d.engines.map(x => `<li>${x}</li>`).join('');
     $('riskList').innerHTML = d.risks.map(x => `<li>${x}</li>`).join('');
@@ -3576,6 +4026,11 @@
         whistleUrl: el.whistleUrl.value.trim(),
         underdogBase: el.underdogBase.value.trim(),
         underdogVariant: el.underdogVariant.value,
+        mtEnabled: mt.enabled,
+        mtScript: el.mtScript.value,
+        mtModel: el.mtModel.value.trim(),
+        subScale: document.body.dataset.subScale || 'm',
+        metrics: !el.metricsHud.hidden,
         voskSource: el.voskSource.value,
         vad: el.vad.value,
         mossSpace: el.mossSpace.value
@@ -3601,6 +4056,18 @@
       if (p.whistleUrl) el.whistleUrl.value = p.whistleUrl;
       if (p.underdogBase) el.underdogBase.value = p.underdogBase;
       if (p.underdogVariant && hasOption(el.underdogVariant, p.underdogVariant)) el.underdogVariant.value = p.underdogVariant;
+      if (p.mtModel) el.mtModel.value = p.mtModel;
+      if (p.mtScript && hasOption(el.mtScript, p.mtScript)) el.mtScript.value = p.mtScript;
+      if (p.subScale && ['s', 'm', 'l'].includes(p.subScale)) el.subScale.value = p.subScale;
+      if (p.metrics) {
+        el.metricsToggle.checked = true;
+        el.metricsHud.hidden = false;
+      }
+      // 翻譯設定會保留，但模型「不」在載入頁面時下載 —— 等第一次真的需要翻時才抓（114 MB）
+      if (p.mtEnabled) {
+        mt.enabled = true;
+        el.mtToggle.checked = true;
+      }
       state.ui = (p.ui === 'zh' || p.ui === 'en')
         ? p.ui
         : ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
@@ -3677,6 +4144,36 @@
     save();
     syncModelButtons();
   };
+  el.mtToggle.onchange = () => setMtEnabled(el.mtToggle.checked);
+  el.mtScript.onchange = () => {
+    mt.script = el.mtScript.value;
+    // 換譯文體裁要重翻：快取裡的譯文是另一種字形的，直接清掉最省事
+    mt.cache.clear();
+    for (const segment of state.segments) delete segment.zh;
+    renderTranscript(true);
+    for (const segment of state.segments) queueTranslation(segment);
+    renderSubtitles();
+    save();
+  };
+  el.mtModel.onchange = () => {
+    const model = el.mtModel.value.trim() || MT_DEFAULT_MODEL;
+    if (model === mt.model) return;
+    mt.model = model;
+    mt.loadedModel = null;
+    mt.cache.clear();
+    if (mt.enabled) void ensureMtLoaded().catch(error => {
+      el.mtStatus.textContent = t().mtFailed + (error.message || error);
+      el.mtStatus.className = 'model-status error';
+    });
+    save();
+  };
+  el.subScale.onchange = () => applySubScale(el.subScale.value);
+  el.pipBtn.onclick = openSubtitleWindow;
+  el.metricsToggle.onchange = () => {
+    el.metricsHud.hidden = !el.metricsToggle.checked;
+    if (!el.metricsHud.hidden) renderMetricsHud();
+    save();
+  };
   el.whistleUrl.onchange = () => {
     // 換模型網址等於換模型：只更新按鈕狀態，實際重新載入由「載入模型」按鈕負責
     if (whistle.loaded && whistle.url !== el.whistleUrl.value.trim()) {
@@ -3686,8 +4183,7 @@
     save();
     syncModelButtons();
   };
-  el.mossRun.onclick = () => (moss.running ? cancelMoss() : runMoss());
-  el.mossSrt.onclick = exportMossSrt;
+  el.mossRun.onclick = () => (moss.running ? cancelMoss() : runMoss());  el.mossSrt.onclick = exportMossSrt;
   el.mossFile.addEventListener('change', () => {
     updateMossFileText();
     resetMossResult();
@@ -3787,6 +4283,14 @@
   syncVoskSourceRows();
   initWebSpeech();
   setUi(state.ui);
+  // 翻譯層的初始化：只把設定接上，模型等真的要翻再下載（114 MB 不該在開頁時就抓）
+  mt.model = el.mtModel.value.trim() || MT_DEFAULT_MODEL;
+  mt.script = el.mtScript.value;
+  applySubScale(el.subScale.value);
+  if (mt.enabled) {
+    el.mtStatus.textContent = t().mtPending;
+    el.subtitleBar.hidden = false;
+  }
   render();
 })();
   </script>

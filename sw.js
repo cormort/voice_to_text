@@ -1,5 +1,6 @@
 'use strict';
 
+// v8：新增雙語字幕（mt-worker.js）與量測 HUD。
 // v7：新增 Underdog Bark 3.0 引擎（underdog-worker.js / underdog/frontend.js / underdog/tdt.js）。
 // v6：needle 引擎（needle.js + needle.wasm，實測傳輸 360 KB）不再預抓 —— 它只有選 Whistle
 // 的人會用到，而同源資產本來就會在第一次用到時被下面的 fetch handler 寫進快取。
@@ -9,7 +10,7 @@
 // 而瀏覽器只會比對 sw.js 本身的位元來決定要不要更新 SW —— 只改 worker 不改 sw.js 的話，
 // install 不會重跑、cache.addAll 不會重抓，既有使用者會永遠拿到舊 worker。
 // 升版名同時讓 activate 的清快取邏輯把舊 shell 砍掉。
-const CACHE = 'stt-shell-v7';
+const CACHE = 'stt-shell-v8';
 // 只清「自己的」外殼快取版本。transformers-cache（Whisper 模型）與
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
@@ -39,7 +40,9 @@ const ASSETS = [
   // 權重（432 MB）走 UNDERDOG_CACHE，都不在外殼快取裡。
   './underdog-worker.js',
   './underdog/frontend.js',
-  './underdog/tdt.js'
+  './underdog/tdt.js',
+  // 翻譯 worker（約 3 KB）：字幕條一開就會用到，體積可以忽略
+  './mt-worker.js'
 ];
 
 self.addEventListener('install', (event) => {

@@ -5,6 +5,8 @@
 ## 特色
 
 - **七種辨識引擎**：雲端 Web Speech 與 MOSS、本機 Vosk / sherpa-onnx / Whisper / Whistle / Underdog Bark 3.0（WASM / WebGPU），引擎卡片式選擇器標明隱私等級（🔒 本機／☁️ 雲端）並附快速開始引導
+- **雙語字幕（本機翻譯）**：翻譯在瀏覽器內跑（transformers.js + `Xenova/opus-mt-en-zh`，約 114 MB），字幕條「譯文大字、原文小字」只留最近兩句，可拉成 Document PiP 浮動視窗浮在投影片上
+- **量測 HUD**：處理延遲（last／avg／p95）、RTF、long task，`window.__sttMetrics` 供自動化讀取；預設關閉
 - **即時語音辨識**：多語言即時轉文字，搭配音量偵測即時回饋；空白鍵快速開始／停止
 - **MOSS 會議轉寫**：拖放音訊／影片檔上傳，自動轉寫並標示說話人（S01、S02…），可一鍵匯出標準 `.srt` 字幕
 - **繁體中文輸出**：辨識結果自動簡轉繁（opencc-js）
@@ -12,6 +14,12 @@
 - **匯出／複製／清空**：逐字稿可複製或匯出 .txt；MOSS 結果可輸出 .srt
 - **增量渲染**：長會議逐字稿只增量更新畫面，不整份重建
 - **PWA**：可安裝到桌面／主畫面，外殼離線快取（模型檔仍需網路下載），圖示含 maskable 版本
+
+### 為什麼是「理解輔助」而不是「轉錄工具」
+
+這個專案的起點是「出國開會聽力跟不上、需要靠文字抓對話」。因此取捨與一般轉錄工具不同：
+**延遲優先於準確度、雙語優先於單語、離線可用優先於雲端品質**。完整的設計理由、
+延遲預算、Live／Refine 兩段式架構與後續階段，見 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 效能量測
 
@@ -117,6 +125,7 @@ node test_resample.js             # 降取樣：整數倍移動平均、非整�
 node test_sherpa_worker_api.js    # worker 訊息協定（不需要模型，見下）
 node test_whistle_worker_api.js   # Whistle：呼叫層參數、worker 協定、UI 接線（不需要模型）
 node test_underdog.js             # Underdog Bark 3.0：mel 前處理不變量、TDT 迴圈規則、UI／worker 接線
+node test_subtitle.js             # 雙語字幕與量測：該翻／不該翻的判斷、只翻完整句、HUD 與 __sttMetrics
 node test_ga_csp.js               # GA 與 CSP／隱私聲明的一致性（放行清單、沒有過度放寬、聲明不實）
 node test_opencc_lazy.js          # OpenCC 按需載入：不得回到啟動路徑、單次注入、SRI、中文判斷
 ```
