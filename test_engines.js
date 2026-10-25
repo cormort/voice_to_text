@@ -32,10 +32,12 @@ check('每個引擎都宣告 role', (SITE.match(/role: '/g) || []).length === 7,
   `${(SITE.match(/role: '/g) || []).length} 個 role:（四個在註冊表，其餘在引擎規格／模組）`);
 check('role 只有 live／refine／fallback／cloud',
   ['live', 'refine', 'fallback', 'cloud'].every(r => SITE.includes(`'${r}'`) || SITE.includes(`${r}:`)));
-check('批次引擎使用同一個 factory（whistle 已搬進自己的模組，用同一個 createBatchPipeline）',
-  ['whisperEngine', 'underdogEngine'].every(name => new RegExp(`const ${name} = createBatchPipeline\\(engineCtx, \\{`).test(APP)) &&
+check('批次引擎使用同一個 factory（whistle／underdog 搬進自己的模組，內部仍是 createBatchPipeline）',
+  ['whisperEngine'].every(name => new RegExp(`const ${name} = createBatchPipeline\\(engineCtx, \\{`).test(APP)) &&
   /const whistleEngine = createWhistleEngine\(/.test(APP) &&
-  /createBatchPipeline\(ctx, \{[\s\S]{0,200}id: 'whistle'/.test(SITE));
+  /const underdogEngine = createUnderdogEngine\(/.test(APP) &&
+  (SITE.match(/createBatchPipeline\(ctx, \{/g) || []).length === 2 &&
+  /id: 'whistle'/.test(SITE) && /id: 'underdog'/.test(SITE));
 
 // ── 2. 只有一份排隊實作 ───────────────────────────────────────────────────
 const drainRefsApp = (APP.match(/drainPromise/g) || []).length;

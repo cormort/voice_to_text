@@ -176,11 +176,15 @@ const PP = {
   check('設定面板存在（面板 id、進度條、狀態）',
     /id="underdogConfig"/.test(HTML) && /id="underdogProgressBar"/.test(HTML) && /id="underdogStatus"/.test(HTML));
   check('el 對應表有元素', /underdogStatus: \$\('underdogStatus'\)/.test(HTML));
-  check('ENGINES 註冊表有 underdog（Phase 2 之後是引擎物件）', /underdog: underdogEngine,/.test(HTML) && /const underdogEngine = createBatchPipeline\(/.test(HTML));
+  check('ENGINES 註冊表有 underdog（Phase 2 之後是引擎物件）',
+    /underdog: underdogEngine,/.test(HTML) && /const underdogEngine = createUnderdogEngine\(/.test(HTML) &&
+    /createBatchPipeline\(ctx, \{[\s\S]{0,240}id: 'underdog'/.test(HTML));
   check('updateEngine 會切換面板', /el\.underdogConfig\.classList\.toggle\('visible', state\.engine === 'underdog'\)/.test(HTML));
   check('狀態卡有引擎名稱與執行環境',
     /underdog: 'Underdog Bark 3\.0'/.test(HTML) && HTML.includes("underdog: 'WASM / CPU'"));
-  check('模型按鈕吃「已載入且來源相符」', /el\.loadUnderdog, underdog\.loaded && underdog\.base === underdogBaseResolved\(\)/.test(HTML));
+  check('模型按鈕吃「已載入且來源相符」',
+    /el\.loadUnderdog, underdogEngine\.isReady\(\)/.test(HTML) &&
+    /isReady: \(\) => underdog\.loaded && underdog\.base === underdogBaseResolved/.test(HTML));
   check('worker 以 module 形式建立', /new Worker\('underdog-worker\.js', \{ type: 'module' \}\)/.test(HTML));
   check('CSP 放行 jsdelivr 的 worker（ORT 會從自己的模組網址開 proxy worker）',
     /worker-src[^;]*cdn\.jsdelivr\.net/.test(HTML));

@@ -99,13 +99,14 @@ src/engines/batch.js 批次引擎的共用生命週期（排隊／回壓／啟�
 src/engines/live.js 串流引擎的共用生命週期（Vosk／sherpa 的啟停、字幕套用）
 src/engines/sherpa-decode.js sherpa 一次解碼迴圈（partial／endpoint／reset，可單獨測）
 src/engines/whistle.js Whistle：模型下載、worker 膠水、推論（含清除快取）
+src/engines/underdog.js Underdog：431 MB 權重下載、worker 膠水、推論
 src/i18n.js         中英文案（純資料）
 src/util.js         純函式：stamp / concat / resample / makeAudioBuffer / isLatinDominated
 src/vad.js          停頓分段：vadPush / vadFlush
 underdog-worker.js  Underdog Bark 3.0 的推論 worker（＋ underdog/{frontend,tdt}.js）
 mt-worker.js        本機翻譯 worker（transformers.js 3.8.1 + opus-mt-en-zh）
 whisper-worker.js / sherpa-worker.js / whistle-worker.js / whistle-engine.js
-sw.js               Service Worker 外殼快取（v13 起包含 src/*.js 與 src/engines/*.js）
+sw.js               Service Worker 外殼快取（v14 起包含 src/*.js 與 src/engines/*.js）
 test_*.js           Node 測試（見下），共用 test_src.js 讀取 index.html + src/*.js
 ```
 

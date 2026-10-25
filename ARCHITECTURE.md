@@ -189,7 +189,10 @@ worker 膠水、主執行緒退路、清除快取與推論，回傳的物件沿�
 `load()` / `clearCache()` / `isReady()` / `currentUrl()`。app.js 只剩 UI 接線
 （按鈕 onclick、`syncModelButtons` 用 `isReady()`）。
 
-同一份 recipe 要用在 Underdog 與 Whisper 上：把常數、worker 變數、load／clear／transcribe
+Underdog 也搬完了（同一個 recipe）：`src/engines/underdog.js` 自己管 431 MB 權重的下載、
+worker 膠水與進度回報，實測載入 27 s、轉寫正常、停止正常。剩下 Whisper。
+
+同一份 recipe 要用在 Whisper 上：把常數、worker 變數、load／clear／transcribe
 一起剪進模組，模組內建 pipeline，回傳時多掛 load／clearCache／isReady。實測（真模型、假麥克風）：
 Whistle 16.9 MB 模型載入 → 轉寫 → 停止都正常。
 
