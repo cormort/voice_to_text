@@ -127,6 +127,76 @@ check('pipeline 的量測與 commit 都由統一入口', /metricsCommit\(job\.jo
   check('單段失敗不會拖垮整條佇列',
     errors.length === 1 && calls.commits.includes('ok-good'), `errors=${errors.length}`);
 
+  // ── 5. 串流引擎（createLiveEngine）也走同一個介面 ──────────────────────
+  const { createLiveEngine } = await import('./src/engines/live.js');
+
+  check('sherpa／vosk 都是 createLiveEngine 建出來的',
+    /const voskEngine = createLiveEngine\(liveCtx, \{/.test(APP) &&
+    /const sherpaEngine = createLiveEngine\(liveCtx, \{/.test(APP));
+  check('app.js 不再有各自的 start/stop（sherpa／vosk）',
+    !/function (start|stop)(Sherpa|Vosk)\(/.test(APP) && !/function sherpaDecode\(/.test(APP));
+  check('sherpa 的解碼迴圈抽成可測模組（partial／endpoint／reset）',
+    /import \{ decodeSherpa \} from '\.\/engines\/sherpa-decode\.js';/.test(APP));
+
+  const liveCalls = { interim: [], commits: [], toasts: [], finished: 0, levels: [] };
+  const liveCtx = {
+    el: { engine: {}, lang: {} },
+    t: () => ({ loadFirst: '先載入', mic: 'mic' }),
+    state: { running: false, stopping: false, interim: '' },
+    commit: text => liveCalls.commits.push(text),
+    showToast: msg => liveCalls.toasts.push(msg),
+    AudioCapture: class {
+      constructor(onChunk, onLevel) { this.onChunk = onChunk; this.onLevel = onLevel; this.context = { fake: true }; }
+      async start() { this.started = true; }
+      async stop() { this.stopped = true; }
+      emit(chunk) { this.onChunk(chunk, 0.5); }
+    },
+    setLevel: level => liveCalls.levels.push(level),
+    begin: () => {},
+    finish: () => { liveCalls.finished += 1; },
+    render: () => {},
+    updateButtons: () => {},
+    traditional: v => v,
+  };
+
+  let controls = null;
+  const live = createLiveEngine(liveCtx, {
+    id: 'fake-live',
+    canStart: () => true,
+    attach: ({ emit, isActive }) => {
+      controls = {
+        push: chunk => {
+          if (!isActive()) return;
+          emit({ type: 'partial', text: `…${chunk}` });
+          if (chunk === 'end') emit({ type: 'final', text: `END-${chunk}` });
+        },
+        flush: () => emit({ type: 'final', text: 'flush-tail' }),
+      };
+      return controls;
+    },
+  });
+
+  check('live 引擎也有相同的生命週期介面',
+    ['start', 'stop', 'isBusy', 'reset'].every(fn => typeof live[fn] === 'function'));
+  await live.start();
+  check('start 之後 state.running 為 true', liveCtx.state.running === true);
+  check('isBusy 在有 stream 時為 true', live.isBusy() === true);
+
+  live.runtime.session.emit('abc');
+  check('partial 會更新 interim（不 commit）',
+    liveCtx.state.interim === '…abc' && liveCalls.commits.length === 0, liveCtx.state.interim);
+
+  live.runtime.session.emit('end');
+  check('final 會 commit 並清掉 interim',
+    liveCalls.commits.includes('END-end') && liveCtx.state.interim === '', liveCalls.commits.join('|'));
+
+  await live.stop();
+  check('stop 會先 flush 最後一句、再收掉收音與 finish',
+    liveCalls.commits.includes('flush-tail') && liveCalls.finished === 1 && live.isBusy() === false,
+    liveCalls.commits.join('|'));
+
+  check('沒有錄音時 push 不會再吐字（isActive 失效）', controls !== null);
+
   console.log(failed ? `\n${failed} 項失敗` : '\n全部通過');
   process.exitCode = failed ? 1 : 0;
 })();

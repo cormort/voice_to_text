@@ -162,6 +162,32 @@ Whisper／Whistle／Underdog 三個引擎只填「可不可以開始、要帶什
 `el.*` 進度條與狀態文字）；sherpa／vosk 要收斂成同一介面，得先讓它們的串流結果走
 `AsyncIterable<Hypothesis>`，那是下一階段。
 
+**串流引擎也收斂了（2026-10）** —— `src/engines/live.js` 的 `createLiveEngine(ctx, spec)`
+給串流引擎同一個外殼：
+
+```js
+{ id, role, runtime, start(), stop(), isBusy(), reset() }
+// spec.attach({ emit, isActive, getContext }) → { push(chunk), flush?() }
+// emit({ type: 'partial' | 'final' | 'error', text })
+```
+
+於是 Vosk（recognizer 事件）與 sherpa（Worker／主執行緒兩種模式）只剩「怎麼餵、怎麼收尾」
+的差異；partial→interim、final→commit、換場就不再寫入，這三件事只有一份實作。
+sherpa 的一次解碼迴圈另外抽成 `src/engines/sherpa-decode.js`，`test_sherpa_decode.js`
+因此從「刮 HTML 原始碼」改成載入真正的模組。
+
+實測（假麥克風餵英文 fixture，桌機 Chrome）：
+
+| 引擎 | 結果 |
+| --- | --- |
+| Vosk（en 內建模型 42 MB） | 逐字稿 `the quick brown fox jumps over the lazy dog…`，停止後正常收尾 |
+| sherpa（HF 199 MB，Worker 模式） | 逐字流式輸出、endpoint 分段 commit，停止時 flush 出最後一句 |
+
+**這裡踩到的坑（值得記）**：`makeAudioBuffer` 從 app.js 搬進 `src/util.js` 時漏了模組層的
+`SAMPLE_RATE`，瀏覽器直接 `ReferenceError` —— 但呼叫端的 `try/catch` 只印一行 warn，
+表現是「有在收音、字幕永遠不出來」。修法除了補常數，還加了 `test_util.js` 直接呼叫它
+（用假 AudioContext），讓這類「只有真的跑才會炸」的錯在 CI 就紅。
+
 ### Phase 3：外殼重寫
 
 Vite + TypeScript + Svelte、OPFS 模型管理、IndexedDB session 儲存、

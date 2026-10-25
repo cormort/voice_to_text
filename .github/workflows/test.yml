@@ -31,5 +31,6 @@ jobs:
           node test_subtitle.js
           node test_modules.js
           node test_engines.js
+          node test_util.js
           node test_ga_csp.js
           node test_opencc_lazy.js

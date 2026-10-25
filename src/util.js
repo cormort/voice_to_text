@@ -43,6 +43,12 @@ function resample(input, from, to) {
   return out;
 }
 
+// 整條管線的音訊取樣率（Vosk 的 acceptWaveform 要跟這個一致）。
+// 這支原本在 app.js 裡，搬出來時漏了這個常數 —— 結果 makeAudioBuffer 在瀏覽器裡
+// 直接 ReferenceError，而呼叫端的 try/catch 只印了一行 warn，表現就是
+// 「有在收音、字幕永遠不出來」。test_util.js 現在會呼叫它，缺常數會直接紅。
+const SAMPLE_RATE = 16000;
+
 function makeAudioBuffer(context, data) {
   const b = context.createBuffer(1, data.length, SAMPLE_RATE);
   b.copyToChannel(data, 0);

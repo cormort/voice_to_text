@@ -96,6 +96,8 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 index.html          版面與 CSS（約 30 KB）＋兩個小段 inline script（GA、SW 註冊）
 src/app.js          接線：狀態、DOM、引擎載入、辨識流程、雙語字幕
 src/engines/batch.js 批次引擎的共用生命週期（排隊／回壓／啟停／收尾／量測）
+src/engines/live.js 串流引擎的共用生命週期（Vosk／sherpa 的啟停、字幕套用）
+src/engines/sherpa-decode.js sherpa 一次解碼迴圈（partial／endpoint／reset，可單獨測）
 src/i18n.js         中英文案（純資料）
 src/util.js         純函式：stamp / concat / resample / makeAudioBuffer / isLatinDominated
 src/vad.js          停頓分段：vadPush / vadFlush
@@ -149,7 +151,8 @@ node test_whistle_worker_api.js   # Whistle：呼叫層參數、worker 協定、
 node test_underdog.js             # Underdog Bark 3.0：mel 前處理不變量、TDT 迴圈規則、UI／worker 接線
 node test_subtitle.js             # 雙語字幕與量測：該翻／不該翻的判斷、只翻完整句、HUD 與 __sttMetrics
 node test_modules.js              # 模組邊界：主程式不得回流 index.html、sw 外殼要含 src/*.js
-node test_engines.js              # 引擎介面：註冊表 role、三個批次引擎共用一條 pipeline、回壓與 session 隔離
+node test_engines.js              # 引擎介面：註冊表 role、批次與串流引擎共用同一個外殼、回壓與 session 隔離
+node test_util.js                 # 純函式：makeAudioBuffer 的 16 kHz、concat／resample／stamp／isLatinDominated
 node test_ga_csp.js               # GA 與 CSP／隱私聲明的一致性（放行清單、沒有過度放寬、聲明不實）
 node test_opencc_lazy.js          # OpenCC 按需載入：不得回到啟動路徑、單次注入、SRI、中文判斷
 ```

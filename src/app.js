@@ -11,6 +11,8 @@ import { T } from './i18n.js';
 import { stamp, concat, resample, makeAudioBuffer, isLatinDominated } from './util.js';
 import { vadPush, vadFlush } from './vad.js';
 import { createBatchPipeline } from './engines/batch.js';
+import { createLiveEngine } from './engines/live.js';
+import { decodeSherpa } from './engines/sherpa-decode.js';
   const CDN = {
     vosk: 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js',
     // 版本已鎖定，順便用 SRI 確認拿到的就是這一份（CDN 或套件被換掉時會直接載入失敗）
@@ -641,7 +643,7 @@ import { createBatchPipeline } from './engines/batch.js';
           sherpa.feedErrors = (sherpa.feedErrors || 0) + 1;
           if (sherpa.feedErrors === 5) {
             showToast(t().sherpaFeedFailed);
-            stopSherpa();
+            void sherpaEngine.stop();
           }
         }
         if (sherpaWorkerPending) { const p = sherpaWorkerPending; sherpaWorkerPending = null; p.reject(new Error(msg.message)); }
@@ -921,50 +923,9 @@ import { createBatchPipeline } from './engines/batch.js';
     }
   }
 
-  async function startVosk() {
-    if (!vosk.loaded) return showToast(t().loadFirst);
-    begin();
-    state.running = true;
-    updateButtons();
-    el.engine.disabled = el.lang.disabled = true;
-    try {
-      vosk.recognizer = new vosk.model.KaldiRecognizer(SAMPLE_RATE);
-      vosk.recognizer.setWords(false);
-      vosk.recognizer.on('result', m => commit(m.result?.text));
-      vosk.recognizer.on('partialresult', m => {
-        state.interim = traditional(m.result?.partial || '');
-        render();
-      });
-      const activeRecognizer = vosk.recognizer;
 
-      vosk.session = new AudioCapture(chunk => {
-        if (!state.running || state.stopping) return;
-        if (!activeRecognizer || activeRecognizer !== vosk.recognizer) return;
-        if (!vosk.session?.context || vosk.session.context.state === 'closed') return;
 
-        try {
-          activeRecognizer.acceptWaveform(makeAudioBuffer(vosk.session.context, chunk));
-        } catch (error) {
-          console.warn('Vosk audio chunk ignored:', error);
-        }
-      }, setLevel);
-      await vosk.session.start();
-    } catch (e) {
-      console.error(e);
-      showToast(t().mic);
-      await stopVosk();
-    }
-  }
 
-  async function stopVosk() {
-    state.stopping = true;
-    state.running = false;
-    updateButtons();
-    await vosk.session?.stop();
-    vosk.session = null;
-    removeVoskRecognizer();
-    finish();
-  }
 
   // ==================== sherpa-onnx streaming engine ====================
   function setSherpaProgress(loaded, total) {
@@ -1213,124 +1174,11 @@ import { createBatchPipeline } from './engines/batch.js';
 
   // 在音訊回呼中同步解碼。串流 Zipformer 的 RTF 遠低於 1，主執行緒吃得下。
   // ponytail: 單執行緒同步解碼；若在低階機器上卡住 UI，再搬進 Worker。
-  function sherpaDecode(sessionId) {
-    if (sessionId !== sherpa.sessionId || !sherpa.recognizer || !sherpa.stream) return;
 
-    while (sherpa.recognizer.isReady(sherpa.stream)) {
-      sherpa.recognizer.decode(sherpa.stream);
-    }
 
-    const partial = (sherpa.recognizer.getResult(sherpa.stream)?.text || '').trim();
 
-    if (sherpa.recognizer.isEndpoint(sherpa.stream)) {
-      sherpa.recognizer.reset(sherpa.stream);
-      if (partial) {
-        commit(partial);
-        return;
-      }
-    }
-    state.interim = traditional(partial);
-    render();
-  }
 
-  async function startSherpa() {
-    if (!sherpa.loaded || (!sherpa.recognizer && !sherpa.workerMode)) return showToast(t().loadFirst);
 
-    begin();
-    state.running = true;
-    state.stopping = false;
-    sherpa.sessionId += 1;
-    sherpa.feedErrors = 0;      // 每次起跑重新計算（見 worker error 分支）
-    const sessionId = sherpa.sessionId;
-    updateButtons();
-    el.engine.disabled = el.lang.disabled = true;
-
-    try {
-      if (sherpa.workerMode) {
-        // 結果一律由 Worker 推回來：endpoint 就 commit，其餘更新即時字幕
-        const handler = (msg) => {
-          if (msg.sessionId !== sessionId || !state.running) return;
-          if (msg.type === 'result' && !msg.started) {
-            const text = traditional(msg.text || '');
-            if (msg.endpoint) {
-              if (text) { state.interim = ''; commit(text); return; }
-            }
-            state.interim = text;
-            render();
-          }
-        };
-        sherpaWorkerHandlers.add(handler);
-        sherpa.workerHandler = handler;
-        sherpa.stream = { worker: true };          // 只作為「已在錄音」的旗標
-        await sherpaWorkerAsk({ type: 'start', sessionId });
-        sherpa.session = new AudioCapture(chunk => {
-          if (!state.running || state.stopping) return;
-          if (sessionId !== sherpa.sessionId || !sherpa.stream) return;
-          const copy = chunk.slice();
-          sherpaWorkerSend({ type: 'feed', sessionId, audio: copy }, [copy.buffer]);
-        }, setLevel);
-        await sherpa.session.start();
-        return;
-      }
-      sherpa.stream = sherpa.recognizer.createStream();
-      sherpa.session = new AudioCapture(chunk => {
-        if (!state.running || state.stopping) return;
-        if (sessionId !== sherpa.sessionId || !sherpa.stream) return;
-        try {
-          sherpa.stream.acceptWaveform(SAMPLE_RATE, chunk);
-          sherpaDecode(sessionId);
-        } catch (error) {
-          console.warn('sherpa audio chunk ignored:', error);
-        }
-      }, setLevel);
-      await sherpa.session.start();
-    } catch (error) {
-      console.error(error);
-      showToast(t().mic);
-      await stopSherpa();
-    }
-  }
-
-  async function stopSherpa() {
-    if (state.stopping) return;
-    state.stopping = true;
-    state.running = false;
-    updateButtons();
-
-    const sessionId = sherpa.sessionId;
-    try {
-      if (sherpa.workerMode) {
-        // Worker 模式：請 Worker 補靜音收尾並回傳最後結果（0.4 秒靜音那段邏輯在 Worker 內）
-        const final = await sherpaWorkerAsk({ type: 'flush', sessionId });
-        if (sessionId === sherpa.sessionId) {
-          const text = traditional(final?.text || '');
-          if (text) { state.interim = ''; commit(text); }
-        }
-      } else if (sherpa.stream && sherpa.recognizer) {
-        // 補 0.4 秒靜音，讓模型吐出最後一段尚未收尾的語音
-        sherpa.stream.acceptWaveform(SAMPLE_RATE, new Float32Array(Math.round(SAMPLE_RATE * 0.4)));
-        sherpa.stream.inputFinished();
-        while (sessionId === sherpa.sessionId && sherpa.recognizer.isReady(sherpa.stream)) {
-          sherpa.recognizer.decode(sherpa.stream);
-        }
-        commit(sherpa.recognizer.getResult(sherpa.stream)?.text || '');
-      }
-    } catch (error) {
-      console.warn('sherpa flush failed:', error);
-    } finally {
-      if (sherpa.workerMode) {
-        // 收掉這個 session 的結果處理器，並請 Worker 釋放 stream（避免累積）
-        if (sherpa.workerHandler) { sherpaWorkerHandlers.delete(sherpa.workerHandler); sherpa.workerHandler = null; }
-        sherpaWorkerSend({ type: 'free' });
-      } else {
-        try { sherpa.stream?.free(); } catch (error) { console.warn(error); }
-      }
-      sherpa.stream = null;
-      await sherpa.session?.stop();
-      sherpa.session = null;
-      finish();
-    }
-  }
 
   // ==================== VAD（Whisper 與 Whistle 共用的分句）====================
   // maxSeconds 是「一路說不停」時強制切段的上限。預設 15 秒（Whisper 的
@@ -2386,6 +2234,8 @@ import { createBatchPipeline } from './engines/batch.js';
     setLevel, render, begin, finish, updateButtons, metricsSubmit, metricsCommit,
   };
 
+  const liveCtx = { ...engineCtx, traditional };
+
   const whisperEngine = createBatchPipeline(engineCtx, {
     id: 'whisper',
     role: 'refine',
@@ -2446,12 +2296,110 @@ import { createBatchPipeline } from './engines/batch.js';
     onInferenceError: error => showToast(t().underdogFailed + (error.message || error)),
   });
 
+
+  // ==================== 串流引擎（Phase 2）====================
+  // Vosk 與 sherpa 都是「邊餵邊吐字」，差別只在怎麼餵、停止時怎麼收尾。
+  // 啟停、字幕套用、錯誤計數由 src/engines/live.js 統一，這裡只留兩份 spec。
+  const voskEngine = createLiveEngine(liveCtx, {
+    id: 'vosk',
+    role: 'live',
+    canStart: () => vosk.loaded,
+    attach: ({ emit, isActive, getContext }) => {
+      vosk.recognizer = new vosk.model.KaldiRecognizer(SAMPLE_RATE);
+      vosk.recognizer.setWords(false);
+      vosk.recognizer.on('result', m => emit({ type: 'final', text: m.result?.text }));
+      vosk.recognizer.on('partialresult', m => emit({ type: 'partial', text: m.result?.partial }));
+      const active = vosk.recognizer;
+      return {
+        push: chunk => {
+          if (!isActive() || active !== vosk.recognizer) return;
+          // 用 getContext()：AudioContext 要到 AudioCapture.start() 之後才存在
+          active.acceptWaveform(makeAudioBuffer(getContext(), chunk));
+        },
+        flush: () => removeVoskRecognizer(),
+      };
+    },
+  });
+
+  const sherpaEngine = createLiveEngine(liveCtx, {
+    id: 'sherpa',
+    role: 'live',
+    canStart: () => sherpa.loaded && (!!sherpa.recognizer || sherpa.workerMode),
+    attach: async ({ emit, isActive }) => {
+      sherpa.sessionId += 1;
+      const sessionId = sherpa.sessionId;
+      sherpa.feedErrors = 0;
+
+      if (sherpa.workerMode) {
+        // Worker 模式：結果由 Worker 推回來，endpoint 就當成 final
+        const handler = msg => {
+          if (msg.sessionId !== sessionId || !isActive()) return;
+          if (msg.type === 'result' && !msg.started) {
+            emit({ type: msg.endpoint ? 'final' : 'partial', text: msg.text || '' });
+          }
+        };
+        sherpaWorkerHandlers.add(handler);
+        sherpa.workerHandler = handler;
+        sherpa.stream = { worker: true };          // 只作為「已在錄音」的旗標
+        await sherpaWorkerAsk({ type: 'start', sessionId });
+        return {
+          push: chunk => {
+            const copy = chunk.slice();
+            sherpaWorkerSend({ type: 'feed', sessionId, audio: copy }, [copy.buffer]);
+          },
+          flush: async () => {
+            try {
+              // 請 Worker 補靜音收尾並回傳最後結果（0.4 秒靜音那段邏輯在 Worker 內）
+              const final = await sherpaWorkerAsk({ type: 'flush', sessionId });
+              if (sessionId === sherpa.sessionId) emit({ type: 'final', text: final?.text || '' });
+            } finally {
+              if (sherpa.workerHandler) { sherpaWorkerHandlers.delete(sherpa.workerHandler); sherpa.workerHandler = null; }
+              sherpaWorkerSend({ type: 'free' });
+              sherpa.stream = null;
+            }
+          },
+        };
+      }
+
+      // 主執行緒模式：自己 decode
+      sherpa.stream = sherpa.recognizer.createStream();
+      const stream = sherpa.stream;
+      // 一次解碼迴圈（partial／endpoint／reset 的細節在 src/engines/sherpa-decode.js，
+      // 那裡有獨立的測試，不必再從 HTML 刮原始碼）
+      const decode = () => decodeSherpa({
+        recognizer: sherpa.recognizer,
+        stream,
+        emit,
+        isActive,
+      });
+      return {
+        push: chunk => {
+          stream.acceptWaveform(SAMPLE_RATE, chunk);
+          decode();
+        },
+        flush: () => {
+          try {
+            // 補 0.4 秒靜音，讓模型吐出最後一段尚未收尾的語音
+            stream.acceptWaveform(SAMPLE_RATE, new Float32Array(Math.round(SAMPLE_RATE * 0.4)));
+            stream.inputFinished();
+            const recognizer = sherpa.recognizer;
+            while (recognizer && recognizer.isReady(stream)) recognizer.decode(stream);
+            emit({ type: 'final', text: recognizer?.getResult(stream)?.text || '' });
+          } finally {
+            try { stream.free(); } catch (error) { console.warn(error); }
+            sherpa.stream = null;
+          }
+        },
+      };
+    },
+  });
+
   // 引擎註冊表：`toggle()` 與 UI 只認這個介面。
   // 還沒收斂的四個引擎形狀本來就不同（sherpa 是真串流、vosk 有自己的 recognizer、
   // moss 是雲端批次、webspeech 是瀏覽器 API），所以先包成 { start, stop, role }。
   const ENGINES = {
-    vosk: { role: 'live', start: startVosk, stop: stopVosk },
-    sherpa: { role: 'live', start: startSherpa, stop: stopSherpa },
+    vosk: voskEngine,
+    sherpa: sherpaEngine,
     whisper: whisperEngine,
     whistle: whistleEngine,
     underdog: underdogEngine,

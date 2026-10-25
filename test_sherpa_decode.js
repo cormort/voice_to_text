@@ -1,52 +1,50 @@
-// 最小可跑檢查：sherpaDecode 的分支（partial / endpoint 有字 / endpoint 空字 / 過期 session）
-// 直接從 index.html 抽出函式原始碼，避免測試與實際程式碼分岔。
+// sherpa 解碼迴圈的分支測試：partial / endpoint 有字 / endpoint 空字 / 換場後不再寫入
+// 直接載入 src/engines/sherpa-decode.js（2026-10 從 app.js 的 sherpaDecode 抽出來，
+// 那時只能刮 HTML 原始碼來測，現在測的是真正的實作）。
 // 跑法：node test_sherpa_decode.js
-const fs = require('fs');
+'use strict';
+
 const assert = require('assert');
+const { decodeSherpa } = require('./src/engines/sherpa-decode.js');
 
-const html = require('./test_src.js')();
-const src = html.match(/function sherpaDecode\(sessionId\) \{[\s\S]*?\n  \}/)[0];
-
-function run({ ready, text, endpoint, sessionId = 1 }) {
-  const log = { committed: [], reset: 0, interim: null };
+function run({ ready, text, endpoint, active = true }) {
+  const log = { emitted: [], reset: 0, decodes: 0 };
   let readyLeft = ready;
-  const sherpa = {
-    sessionId: 1,
-    stream: {},
-    recognizer: {
-      isReady: () => readyLeft-- > 0,
-      decode: () => {},
-      getResult: () => ({ text }),
-      isEndpoint: () => endpoint,
-      reset: () => { log.reset += 1; }
-    }
+  const recognizer = {
+    isReady: () => readyLeft-- > 0,
+    decode: () => { log.decodes += 1; },
+    getResult: () => ({ text }),
+    isEndpoint: () => endpoint,
+    reset: () => { log.reset += 1; },
   };
-  const state = {};
-  const commit = s => log.committed.push(s);
-  const traditional = s => s;
-  const render = () => { log.interim = state.interim; };
-  new Function('sherpa', 'state', 'commit', 'traditional', 'render',
-    `${src}; sherpaDecode(${sessionId});`)(sherpa, state, commit, traditional, render);
+  decodeSherpa({
+    recognizer,
+    stream: {},
+    emit: h => log.emitted.push(h),
+    isActive: () => active,
+  });
   return log;
 }
 
 let r = run({ ready: 3, text: '你好世界', endpoint: false });
-assert.deepStrictEqual(r.committed, [], 'partial 不應 commit');
-assert.strictEqual(r.reset, 0);
-assert.strictEqual(r.interim, '你好世界');
+assert.deepStrictEqual(r.emitted.map(h => h.type), ['partial'], 'partial 只吐 partial');
+assert.strictEqual(r.emitted[0].text, '你好世界');
+assert.strictEqual(r.reset, 0, '沒有 endpoint 不該 reset');
+assert.strictEqual(r.decodes, 3, 'isReady 幾次就 decode 幾次');
 
 r = run({ ready: 1, text: '這句結束了', endpoint: true });
-assert.deepStrictEqual(r.committed, ['這句結束了'], 'endpoint 有字時應 commit');
+assert.deepStrictEqual(r.emitted.map(h => h.type), ['final'], 'endpoint 有字 → final');
+assert.strictEqual(r.emitted[0].text, '這句結束了');
 assert.strictEqual(r.reset, 1, 'endpoint 後必須 reset');
-assert.strictEqual(r.interim, null, 'commit 後不再寫 interim');
 
 r = run({ ready: 1, text: '   ', endpoint: true });
-assert.deepStrictEqual(r.committed, [], 'endpoint 空字不應 commit');
+assert.deepStrictEqual(r.emitted.map(h => h.type), ['partial'], 'endpoint 空字不 commit（只更新 partial）');
+assert.strictEqual(r.emitted[0].text, '', '空字會 trim 成空字串');
 assert.strictEqual(r.reset, 1, 'endpoint 空字仍須 reset');
-assert.strictEqual(r.interim, '', 'endpoint 空字應清空 interim');
 
-r = run({ ready: 5, text: '過期', endpoint: true, sessionId: 99 });
-assert.deepStrictEqual(r.committed, [], '過期 session 不應寫入');
-assert.strictEqual(r.reset, 0, '過期 session 不應動 recognizer');
+r = run({ ready: 5, text: '過期', endpoint: true, active: false });
+assert.deepStrictEqual(r.emitted, [], '換場之後不該再寫入字幕');
+assert.strictEqual(r.reset, 0, '換場之後不該動 recognizer');
+assert.strictEqual(r.decodes, 0, '換場之後連 decode 都不該跑');
 
-console.log('sherpaDecode: 4 checks passed');
+console.log('decodeSherpa: 4 checks passed');
