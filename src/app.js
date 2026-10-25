@@ -78,6 +78,7 @@ import { opfsStore, opfsAvailable } from './opfs.js';
     placeholder: $('placeholderText'), final: $('finalText'), interim: $('interimText'),
     container: $('transcriptContainer'), volume: $('volumeLevel'), notice: $('privacyNotice'),
     announcer: $('a11yAnnouncer'),
+    loadBar: $('loadBar'), loadBarText: $('loadBarText'), topLoad: $('topLoadBtn'),
     statusEngine: $('statusEngineValue'), statusRuntime: $('statusRuntimeValue'),
     statusPrivacy: $('statusPrivacyValue'), statusState: $('statusStateValue'), toggle: $('uiLangToggle'),
     voskConfig: $('voskConfig'), voskSource: $('voskModelSource'), voskBuiltinRow: $('voskBuiltinRow'),
@@ -381,7 +382,6 @@ import { opfsStore, opfsAvailable } from './opfs.js';
   }
 
   let renderedSegments = 0;
-  let renderedText = '';
   let effectiveCount = 0;
   let effectiveCountRef = null;
   let effectiveCountLen = -1;
@@ -408,18 +408,27 @@ import { opfsStore, opfsAvailable } from './opfs.js';
   // full=true 用在「譯文後到」與清空／換場：整份重建（段落數多時會被呼叫端擋掉）
   function renderTranscript(full = false) {
     if (full || state.segments.length < renderedSegments) {
-      renderedText = state.segments.map(segmentLine).join('\n');
+      el.final.textContent = state.segments.map(segmentLine).join('\n');
       renderedSegments = state.segments.length;
-      el.final.textContent = renderedText;
       return;
     }
     if (state.segments.length > renderedSegments) {
+      // 只 append 新的文字節點：整份重設 textContent 的成本隨逐字稿長度線性成長
+      // （實測 10,000 行時每段 27 ms → 11 ms）
       const delta = state.segments.slice(renderedSegments).map(segmentLine).join('\n');
-      renderedText += (renderedText ? '\n' : '') + delta;
+      el.final.append((renderedSegments ? '\n' : '') + delta);
       renderedSegments = state.segments.length;
-      el.final.textContent = renderedText;
     }
   }
+
+  // 「是否黏在底部」在 scroll 事件裡量（那時版面是乾淨的），不在 render() 寫完 DOM 之後量：
+  // render() 每秒約 8 次，寫完立刻讀 scrollHeight 會強制整份逐字稿同步重排。
+  // 我們自己設 scrollTop 也會觸發 scroll，所以捲到底之後仍維持 true。
+  let stickToBottom = true;
+  let scrollQueued = false;
+  el.container.addEventListener('scroll', () => {
+    stickToBottom = el.container.scrollHeight - el.container.scrollTop - el.container.clientHeight < 48;
+  }, { passive: true });
 
   function render() {
     el.placeholder.hidden = !!(state.segments.length || state.interim);
@@ -434,9 +443,10 @@ import { opfsStore, opfsAvailable } from './opfs.js';
     el.export.disabled = !hasContent;
 
     // 只在接近底部時才自動捲動，避免打斷閱讀舊內容
-    const nearBottom = el.container.scrollHeight - el.container.scrollTop - el.container.clientHeight < 48;
-    if (nearBottom) {
+    if (stickToBottom && !scrollQueued) {
+      scrollQueued = true;
       requestAnimationFrame(() => {
+        scrollQueued = false;
         el.container.scrollTop = el.container.scrollHeight;
       });
     }
@@ -565,7 +575,32 @@ import { opfsStore, opfsAvailable } from './opfs.js';
       if (done) button.title = t().loaded;
       else button.removeAttribute('title');
     }
+    syncLoadBar();
   }
+
+  // 頂部載入列不另外維護載入狀態：代按設定欄裡目前引擎的「載入模型」，
+  // 文字照抄該引擎的狀態列（進度、錯誤），按鈕照抄 disabled。
+  // Web Speech／MOSS 不需要模型，表裡沒有它們，載入列就不會出現。
+  const LOADERS = {
+    vosk: ['loadVosk', 'voskStatus'], sherpa: ['loadSherpa', 'sherpaStatus'],
+    whisper: ['loadWhisper', 'whisperStatus'], whistle: ['loadWhistle', 'whistleStatus'],
+    underdog: ['loadUnderdog', 'underdogStatus']
+  };
+  function syncLoadBar() {
+    const [buttonKey, statusKey] = LOADERS[state.engine] || [];
+    const button = el[buttonKey];
+    el.loadBar.hidden = !button || button.classList.contains('done');
+    if (el.loadBar.hidden) return;
+    el.topLoad.textContent = t().loadModel;
+    el.topLoad.disabled = button.disabled;
+    el.loadBarText.textContent = el[statusKey].textContent.trim()
+      || `${t().ecards[state.engine].name}：${t().modelNotLoaded}`;
+  }
+  el.topLoad.onclick = () => el[LOADERS[state.engine][0]].click();
+  // 載入中的進度與 disabled 散在各引擎的載入程式裡；看設定欄的變化就好，不必每處都補呼叫
+  new MutationObserver(syncLoadBar).observe(document.querySelector('.sidebar'), {
+    subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'disabled']
+  });
 
   // 跟 loadSherpa 判斷「資產位置是否與已載入的一致」用同一套規則
   function sherpaBaseMatches() {
@@ -2656,6 +2691,9 @@ import { opfsStore, opfsAvailable } from './opfs.js';
     el.mtStatus.textContent = t().mtPending;
     el.subtitleBar.hidden = false;
   }
+  // 還原的逐字稿超出畫面時維持在頂端、不自動捲（與還原前的行為一致）：開頁時量一次就好
+  renderTranscript();
+  stickToBottom = el.container.scrollHeight - el.container.clientHeight < 48;
   render();
   if (restoredCount) showToast(`${t().transcriptRestored}（${restoredCount}）`);
 

@@ -132,6 +132,14 @@
     body:has(#controlBtn.listening) #statusStateValue::before { background: var(--danger); animation: pulse 1.4s infinite }
     @keyframes pulse { 50% { opacity: .25 } }
 
+    .load-bar {
+      display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px;
+      background: var(--accent-weak); border: 1px solid var(--border); border-radius: 10px;
+    }
+    .load-bar-text { flex: 1; min-width: 0; font-size: 13.5px; overflow-wrap: anywhere }
+    #topLoadBtn { background: var(--accent); color: var(--on-accent); border-color: var(--accent) }
+    #topLoadBtn:disabled { opacity: .6; cursor: progress }
+
     /* ── 逐字稿 ＋ 字幕條 ── */
     .transcript-card {
       flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
@@ -389,6 +397,12 @@
         <div class="status-card"><div class="status-label" id="statusRuntimeLabel">執行環境</div><div class="status-value" id="statusRuntimeValue">瀏覽器服務</div></div>
         <div class="status-card"><div class="status-label" id="statusPrivacyLabel">音訊處理</div><div class="status-value" id="statusPrivacyValue">可能傳送至服務商</div></div>
       </section>
+
+      <!-- 頂部載入列：目前引擎還沒載入模型時才出現，按鈕代按設定欄裡那顆「載入模型」 -->
+      <div class="load-bar" id="loadBar" hidden>
+        <span class="load-bar-text" id="loadBarText"></span>
+        <button class="action" id="topLoadBtn" type="button"></button>
+      </div>
 
       <div class="transcript-card">
         <section class="transcript-container" id="transcriptContainer" aria-label="逐字稿">
