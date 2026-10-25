@@ -54,7 +54,7 @@ check('中英文案鍵數一致', Object.keys(i18n.T.zh).length === Object.keys(
 
 // ── 4. 服務工作者要把模組放進外殼（離線開啟才不會白畫面）──────────────────
 const SW = fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8');
-for (const file of ['./src/app.js', './src/i18n.js', './src/util.js', './src/vad.js']) {
+for (const file of ['./src/app.js', './src/i18n.js', './src/util.js', './src/vad.js', './src/persist.js']) {
   check(`sw.js 外殼包含 ${file}`, SW.includes(`'${file}'`));
 }
 

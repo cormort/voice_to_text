@@ -2,9 +2,10 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#667eea">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f6fa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#11131a" media="(prefers-color-scheme: dark)">
   <!-- 只允許實際會用到的來源。blob: 給 AudioWorklet 模組、vosk-browser 的 worker 與
        本機 ZIP 模型；wasm-unsafe-eval 給 sherpa / onnxruntime 的 WebAssembly 編譯。
        'unsafe-inline' 是本頁兩段內嵌 script 所需（沒有外部注入點，逐字稿一律走 textContent）；
@@ -52,247 +53,246 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <title id="pageTitle">多國語言即時逐字稿工具</title>
   <style>
+    /* ==================== 版面原則（2026-10 UI 重構）====================
+       會場裡眼睛只該看兩樣東西：逐字稿與「開始／停止」。所以
+         * 桌機：左邊是固定在視窗內的「舞台」（狀態 → 逐字稿＋字幕條 → 操作列），
+           右邊是可捲動的設定欄；捲設定時逐字稿不會被捲走。
+         * 手機：舞台在上、設定在下，操作列黏在畫面底部，拇指隨時按得到。
+       顏色全部走 token，深色模式（暗的會議室）只是換一組值。
+       app.js 依賴的 id 與 class（.visible / .done / .listening / .active / .over …）一律不改名。 */
     :root {
-      --primary: #5668d8;
-      --secondary: #7046a0;
-      --success: #16856f;
-      --danger: #d94f4f;
-      --warning: #f4c542;
-      --panel: rgba(255, 255, 255, .16);
-      --border: rgba(255, 255, 255, .30);
-      --shadow: 0 12px 36px rgba(20, 18, 60, .24);
+      --bg: #f5f6fa; --surface: #fff; --surface-2: #f0f2f7; --text: #1b1e27; --muted: #5f6475;
+      --border: #e1e4ec; --accent: #4652d6; --accent-hover: #3742c0; --accent-weak: #eceefe;
+      --on-accent: #fff; --success: #0f7a5a; --success-weak: #e3f5ee; --danger: #c93a4a;
+      --danger-weak: #fdecee; --warn-weak: #fff4d6; --warn-text: #6b4d00;
+      --shadow: 0 1px 2px #1b1e270d, 0 8px 24px #1b1e2712; --radius: 14px;
+      --sub-bg: #12141c; --sub-text: #fff; --sub-muted: #b9bdd3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #11131a; --surface: #1a1d26; --surface-2: #222632; --text: #e6e8ef; --muted: #9da3b5;
+        --border: #2d3240; --accent: #7c86ff; --accent-hover: #929bff; --accent-weak: #262a48;
+        --on-accent: #0d0f1a; --success: #4cc79a; --success-weak: #173329; --danger: #ff6b7a;
+        --danger-weak: #3a1d23; --warn-weak: #3a3114; --warn-text: #f5d67a;
+        --shadow: 0 1px 2px #0006, 0 8px 24px #0005; --sub-bg: #07080c;
+      }
     }
     * { box-sizing: border-box }
-    html { scroll-behavior: smooth }
+    [hidden] { display: none !important }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100% }
     body {
-      margin: 0; min-height: 100vh; padding: 20px;
-      display: flex; flex-direction: column; align-items: center;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea, #764ba2); color: #fff;
+      margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "PingFang TC", Arial, sans-serif;
     }
-    button, select, input { font: inherit }
-    button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible {
-      outline: 3px solid #ffe16b; outline-offset: 3px;
+    button, select, input { font: inherit; color: inherit }
+    :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px }
+    a { color: var(--accent) }
+
+    /* ── 頂列 ── */
+    .appbar {
+      position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 12px;
+      padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+      background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
     }
-    .topbar { width: min(100%, 960px); display: flex; justify-content: flex-end }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 }
+    .brand img { width: 30px; height: 30px; border-radius: 8px; flex: none }
+    h1 { margin: 0; font-size: 17px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
     #uiLangToggle {
-      padding: 9px 16px; border: 1px solid var(--border); border-radius: 999px;
-      background: var(--panel); color: #fff; cursor: pointer; font-weight: 700;
-      backdrop-filter: blur(10px);
+      flex: none; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px;
+      background: var(--surface); cursor: pointer; font-size: 13px; font-weight: 650;
     }
-    h1 {
-      margin: 22px 0 20px; text-align: center;
-      font-size: clamp(24px, 4vw, 34px); text-shadow: 0 2px 12px #0004;
+    #uiLangToggle:hover { border-color: var(--accent) }
+
+    /* ── 兩欄 ── */
+    .layout {
+      display: grid; gap: 20px; margin: 0 auto; max-width: 1440px;
+      padding: 16px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left));
+      grid-template-columns: minmax(0, 1fr);
     }
-    .app { width: min(100%, 960px) }
-    .status-grid {
-      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px; margin-bottom: 14px;
+    .stage { display: flex; flex-direction: column; gap: 12px; min-width: 0 }
+    .sidebar { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
+    @media (min-width: 1100px) {
+      .layout { grid-template-columns: minmax(0, 1fr) 420px; align-items: start }
+      .stage { position: sticky; top: 68px; height: calc(100vh - 84px) }
     }
+
+    /* ── 狀態 ── */
+    .status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px }
     .status-card {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 12px; padding: 10px 12px; backdrop-filter: blur(10px);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px;
     }
-    .status-label { font-size: 12px; opacity: .82 }
-    .status-value {
-      font-weight: 750; margin-top: 3px; white-space: nowrap;
-      overflow: hidden; text-overflow: ellipsis;
+    .status-label { font-size: 11.5px; color: var(--muted); font-weight: 600 }
+    .status-value { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+    #statusStateValue::before {
+      content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%;
+      background: var(--muted); vertical-align: 1px;
     }
+    body:has(#controlBtn.listening) #statusStateValue { color: var(--danger) }
+    body:has(#controlBtn.listening) #statusStateValue::before { background: var(--danger); animation: pulse 1.4s infinite }
+    @keyframes pulse { 50% { opacity: .25 } }
+
+    /* ── 逐字稿 ＋ 字幕條 ── */
+    .transcript-card {
+      flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow); transition: border-color .2s;
+    }
+    body:has(#controlBtn.listening) .transcript-card { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)) }
     .transcript-container {
-      height: 44vh; min-height: 260px; background: #fff; color: #252525;
-      border-radius: 16px; padding: 18px; overflow: auto;
-      box-shadow: var(--shadow); scroll-behavior: smooth;
+      flex: 1; height: 52vh; min-height: 260px; overflow: auto; padding: 18px 20px;
+      scroll-behavior: smooth; overscroll-behavior: contain;
     }
+    @media (min-width: 1100px) { .transcript-container { height: auto; min-height: 0 } }
     #transcript {
       margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
-      font: 16px/1.8 "Noto Sans TC", "Segoe UI", sans-serif;
+      font: 17px/1.85 "Noto Sans TC", "PingFang TC", "Segoe UI", sans-serif;
     }
-    .placeholder { color: #888 }
-    .interim { color: #777; font-style: italic }
-    .meter {
-      height: 20px; margin: 14px 0; background: #ffffff30;
-      border: 1px solid var(--border); border-radius: 999px; overflow: hidden;
-    }
-    .meter>div {
-      height: 100%; transform: scaleX(0); transform-origin: left;
-      background: linear-gradient(90deg, #36b36e, #d8db3d, #ff6659);
-      transition: transform .08s;
-    }
-    .panel {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
-      backdrop-filter: blur(10px);
-    }
-    .settings { display: block }
-    .field { display: flex; gap: 7px; align-items: center; flex: 1; min-width: 240px }
-    label { font-weight: 700 }
-    .field select, .field input {
-      flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #ffffff88;
-      border-radius: 9px; background: #fff; color: #222;
-    }
-    .panel-label { display: block; font-weight: 700; margin: 0 0 10px }
-    .engine-cards {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
-      gap: 10px; margin: 0 0 6px;
-    }
-    .engine-card {
-      display: flex; flex-direction: column; gap: 5px; text-align: left;
-      background: rgba(255, 255, 255, .12); border: 2px solid rgba(255, 255, 255, .25);
-      border-radius: 12px; padding: 12px 14px; color: #fff; cursor: pointer;
-      font: inherit; transition: transform .15s, border-color .15s, background .15s;
-      min-width: 0;
-    }
-    .engine-card:hover:not(:disabled) { transform: translateY(-2px); background: rgba(255, 255, 255, .2) }
-    .engine-card.active {
-      border-color: #ffe16b; background: rgba(255, 255, 255, .22);
-      box-shadow: 0 0 0 3px #ffe16b44;
-    }
-    .engine-card:disabled { opacity: .55; cursor: not-allowed }
-    .ecard-top { display: flex; justify-content: space-between; align-items: center; gap: 8px }
-    .ecard-name { font-weight: 750; font-size: 15px; line-height: 1.25; overflow-wrap: anywhere }
-    .ecard-tag { font-size: 11px; font-weight: 750; padding: 2px 8px; border-radius: 999px; white-space: nowrap }
-    .ecard-tag.local { background: #178a57; color: #fff }
-    .ecard-tag.cloud { background: #b9751e; color: #fff }
-    .ecard-desc { font-size: 12px; opacity: .88; line-height: 1.45 }
-    .quickstart {
-      margin: 10px 0 0; padding: 10px 14px; border-radius: 10px;
-      background: #10102aaa; border: 1px solid #ffffff26; font-size: 13px; line-height: 1.65;
-    }
-    .quickstart b { color: #ffe16b }
-    .quickstart code { background: #0004; padding: 1px 6px; border-radius: 5px; font-weight: 650 }
-    .moss-filezone {
-      position: relative; flex: 1; min-width: 250px; height: 62px;
-      display: flex; align-items: center; justify-content: center;
-      border: 2px dashed #ffffff66; border-radius: 10px; background: #ffffff12;
-      cursor: pointer; transition: border-color .15s, background .15s;
-    }
-    .moss-filezone.over { border-color: #ffe16b; background: #ffe16b22 }
-    .moss-filezone input[type=file] {
-      position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
-    }
-    .moss-filetext { font-size: 13px; font-weight: 700; pointer-events: none }
-    @media(max-width:720px) {
-      .engine-cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) }
-      .moss-filezone { min-width: 0 }
-    }
-    .engine-config { display: none }
-    .engine-config.visible { display: block }
-    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px }
-    .row:last-child { margin-bottom: 0 }
-    .row label { min-width: 82px }
-    .row select, .row input[type=url], .row input[type=text], .row input[type=file] {
-      flex: 1; min-width: 230px; padding: 9px; border-radius: 8px;
-      border: 1px solid #ddd; background: #fff; color: #222;
-    }
-    .hint { font-size: 13px; line-height: 1.55; color: #fff0a7; margin: 8px 0 0 }
-    .hint a { color: #fff5b7; font-weight: 700 }
-    .hint code { background: #0003; padding: 1px 5px; border-radius: 4px }
-    .progress {
-      height: 8px; background: #ffffff30; border-radius: 999px;
-      overflow: hidden; margin-top: 10px; display: none;
-    }
-    .progress.visible { display: block }
-    .progress>div { height: 100%; width: 0; background: #6de08e; transition: width .2s }
-    .progress>div.indeterminate { width: 32%; animation: loading 1.2s infinite }
-    @keyframes loading {
-      from { transform: translateX(-120%) }
-      to { transform: translateX(320%) }
-    }
-    .model-status { min-height: 20px; text-align: center; font-size: 13px; margin-top: 7px }
-    .error { color: #ffd0d0 }
-    .success { color: #c7ffd2 }
-    .controls { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 18px 0 }
-    button.action {
-      border: 1px solid #ffffff70; border-radius: 11px; padding: 13px 22px;
-      color: #fff; font-weight: 750; cursor: pointer; box-shadow: 0 4px 14px #0003; transition: .2s;
-    }
-    button.action:hover:not(:disabled) { transform: translateY(-2px) }
-    button:disabled { opacity: .52; cursor: not-allowed }
-    #controlBtn { background: linear-gradient(135deg, #5268dd, #74429b); min-width: 155px }
-    #controlBtn.listening { background: linear-gradient(135deg, #d94f4f, #aa2d55) }
-    #copyBtn { background: #b87825 }
-    #exportBtn { background: #16856f }
-    #clearBtn { background: #c74747 }
-    /* 按下的即時回饋（放在 hover 之後，同權重時由來源順序決定勝負） */
-    button.action:active:not(:disabled) {
-      transform: translateY(1px) scale(.98); filter: brightness(.88);
-      box-shadow: 0 2px 6px #0004;
-    }
-    /* 模型面板的按鈕原本沒有底色，疊在半透明面板上完全看不出是可按的；
-       改為實心深靛藍，白字對比約 8:1 */
-    #loadVoskBtn, #loadSherpaBtn, #loadWhisperBtn { background: #2c37a4; border-color: #ffffffc4 }
-    #loadVoskBtn:hover:not(:disabled), #loadSherpaBtn:hover:not(:disabled), #loadWhisperBtn:hover:not(:disabled) { background: #3a47c4 }
-    /* 已載入（已點擊且成功）→ 綠色 + 勾勾，跟還沒按過的深靛藍一眼可分 */
-    #loadVoskBtn.done, #loadSherpaBtn.done, #loadWhisperBtn.done { background: #0e6b57; border-color: #a6f2d3 }
-    #loadVoskBtn.done:hover:not(:disabled), #loadSherpaBtn.done:hover:not(:disabled), #loadWhisperBtn.done:hover:not(:disabled) { background: #14856d }
-    #clearSherpaCacheBtn { background: #7d2f57; border-color: #ffffffc4 }
-    #clearSherpaCacheBtn:hover:not(:disabled) { background: #96386a }
-    .notice {
-      padding: 12px 15px; color: #161616; background: #ffd86a;
-      border-radius: 10px; text-align: center; font-weight: 700; margin-bottom: 14px;
-    }
-    .notice.local { background: #a8ebba }
-    .notice.partial { background: #ffe4a0 }
-    details {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 12px; margin-bottom: 20px;
-    }
-    summary { padding: 14px 17px; cursor: pointer; font-weight: 750 }
-    .details-content { padding: 0 18px 18px; line-height: 1.65 }
-    .details-content h3 { color: #fff0a7; margin-bottom: 5px }
-    .details-content ul { margin-top: 5px; padding-left: 22px }
-    #toast {
-      position: fixed; z-index: 50; left: 50%; bottom: 24px;
-      transform: translate(-50%, 18px); background: #1f2030ee; color: #fff;
-      padding: 11px 18px; border-radius: 10px; opacity: 0; pointer-events: none;
-      transition: .25s; max-width: 90%; text-align: center; font-weight: 750;
-    }
-    #toast.show { opacity: 1; transform: translate(-50%, 0) }
-    .sr-only {
-      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-    }
-    @media(max-width:720px) {
-      body { padding: 12px }
-      .status-grid { grid-template-columns: 1fr 1fr }
-      .transcript-container { height: 42vh }
-      .field { min-width: 100% }
-      .controls { display: grid; grid-template-columns: 1fr 1fr }
-      .action { width: 100% }
-    }
-    @media print {
-      body { background: #fff; color: #000; padding: 0 }
-      .topbar, h1, .status-grid, .meter, .panel, .controls, .notice, details { display: none !important }
-      .app { width: 100% }
-      .transcript-container { height: auto; box-shadow: none; padding: 0; overflow: visible }
-      #transcript { font-size: 11pt }
-    }
-    /* 語言選單底下的補充說明（例：Whistle 不支援中文）。
-       要一起寫 [hidden] 規則，否則 display:block 會蓋掉 UA 的 [hidden]{display:none} */
-    .lang-note { display: block; font-size: .82em; opacity: .7; margin-top: 4px }
-    .lang-note[hidden] { display: none }
-
-    /* ==================== 雙語字幕條 ====================
-       這是「理解輔助」的主畫面：譯文大字、原文小字，只留最近兩句。
-       固定在下緣是為了不擋逐字稿，而且浮動字幕窗（Document PiP）可以把同一份內容搬出去。 */
+    .placeholder { color: var(--muted) }
+    .interim { color: var(--muted); font-style: italic }
     .subtitle-bar {
-      position: sticky; bottom: 0; z-index: 20; margin: 10px 0 0;
-      display: grid; gap: 2px; padding: 12px 16px; border-radius: 14px;
-      background: #14151fdd; color: #fff; backdrop-filter: blur(6px);
-      box-shadow: 0 6px 24px #0006;
+      display: grid; gap: 2px; padding: 12px 20px 14px; background: var(--sub-bg); color: var(--sub-text);
     }
-    .subtitle-bar[hidden] { display: none }
     .subtitle-zh { font-size: var(--sub-zh, 30px); font-weight: 800; line-height: 1.35; letter-spacing: .01em }
-    .subtitle-en { font-size: calc(var(--sub-zh, 30px) * 0.55); line-height: 1.4; color: #c9cbe4 }
+    .subtitle-en { font-size: calc(var(--sub-zh, 30px) * 0.55); line-height: 1.4; color: var(--sub-muted) }
     .subtitle-en:empty { display: none }
     body[data-sub-scale="s"] { --sub-zh: 20px }
     body[data-sub-scale="m"] { --sub-zh: 30px }
     body[data-sub-scale="l"] { --sub-zh: 44px }
-
-    /* 浮動字幕窗（Document PiP）：同一個 class 在另一個 document 裡，字級靠 --sub-zh */
-    body.subtitle-pip-mode .subtitle-bar { position: static; margin: 0; height: 100vh; align-content: center; border-radius: 0 }
+    /* 浮動字幕窗（Document PiP）：同一份樣式被複製到另一個 document，字級靠 --sub-zh */
+    body.subtitle-pip-mode { background: var(--sub-bg); min-height: 0 }
+    body.subtitle-pip-mode .subtitle-bar { height: 100vh; align-content: center; padding: 12px 24px }
     body.subtitle-pip-mode .subtitle-zh { font-size: var(--sub-zh, 34px) }
 
+    /* ── 操作列 ── */
+    .controls {
+      display: grid; grid-template-columns: auto minmax(80px, 1fr) auto auto auto; align-items: center; gap: 10px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px;
+    }
+    .meter { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden }
+    .meter>div {
+      height: 100%; transform: scaleX(0); transform-origin: left; transition: transform .08s;
+      background: linear-gradient(90deg, #2fb67a, #d6c93a, #ef5a5a);
+    }
+    button.action {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      border: 1px solid var(--border); border-radius: 10px; padding: 9px 16px; min-height: 40px;
+      background: var(--surface); font-weight: 650; cursor: pointer; white-space: nowrap;
+      transition: background .15s, border-color .15s, transform .1s, filter .15s;
+    }
+    button.action:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-weak) }
+    button.action:active:not(:disabled) { transform: scale(.97) }
+    button:disabled { opacity: .45; cursor: not-allowed }
+    #controlBtn {
+      min-width: 168px; min-height: 48px; padding: 10px 22px; font-size: 16px; font-weight: 750;
+      background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+    }
+    #controlBtn::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor }
+    #controlBtn:hover:not(:disabled) { background: var(--accent-hover) }
+    #controlBtn.listening { background: var(--danger); border-color: var(--danger) }
+    #controlBtn.listening::before { border-radius: 2px }
+    #clearBtn:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-weak); color: var(--danger) }
+    /* 模型面板：載入＝主色實心，已載入＝綠色＋勾勾，清快取＝紅色外框 */
+    #loadVoskBtn, #loadSherpaBtn, #loadWhisperBtn, #loadWhistleBtn, #loadUnderdogBtn, #mossRunBtn {
+      background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+    }
+    #loadVoskBtn:hover:not(:disabled), #loadSherpaBtn:hover:not(:disabled), #loadWhisperBtn:hover:not(:disabled),
+    #loadWhistleBtn:hover:not(:disabled), #loadUnderdogBtn:hover:not(:disabled), #mossRunBtn:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+    button.action.done, button.action.done:hover:not(:disabled) {
+      background: var(--success-weak); border-color: var(--success); color: var(--success);
+    }
+    #clearSherpaCacheBtn, #clearWhistleCacheBtn, #clearUnderdogCacheBtn { color: var(--danger) }
+    #clearSherpaCacheBtn:hover:not(:disabled), #clearWhistleCacheBtn:hover:not(:disabled),
+    #clearUnderdogCacheBtn:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-weak) }
+
+    /* ── 設定欄 ── */
+    .panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
+    }
+    .panel-label { display: block; font-size: 13px; font-weight: 750; color: var(--muted); margin: 0 0 10px }
+    label { font-weight: 650; font-size: 14px }
+    .engine-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-bottom: 14px }
+    .engine-card {
+      display: flex; flex-direction: column; gap: 4px; min-width: 0; text-align: left; cursor: pointer;
+      background: var(--surface); border: 1.5px solid var(--border); border-radius: 11px; padding: 10px 12px;
+      transition: border-color .15s, background .15s;
+    }
+    .engine-card:hover:not(:disabled) { border-color: var(--accent) }
+    .engine-card.active { border-color: var(--accent); background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--accent) }
+    .ecard-top { display: flex; justify-content: space-between; align-items: center; gap: 6px }
+    .ecard-name { font-weight: 750; font-size: 14px; line-height: 1.25; overflow-wrap: anywhere }
+    .ecard-tag { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap }
+    .ecard-tag.local { background: var(--success-weak); color: var(--success) }
+    .ecard-tag.cloud { background: var(--warn-weak); color: var(--warn-text) }
+    .ecard-desc { font-size: 12px; color: var(--muted); line-height: 1.4 }
+    .field { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center }
+    .field label { min-width: 84px }
+    select, input[type=url], input[type=text] {
+      flex: 1 1 180px; min-width: 0; padding: 8px 10px; min-height: 38px;
+      border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2);
+    }
+    input[type=file] { flex: 1 1 180px; min-width: 0; font-size: 13px }
+    select:hover, input[type=url]:hover, input[type=text]:hover { border-color: var(--muted) }
+    .lang-note { flex-basis: 100%; font-size: 12.5px; color: var(--muted) }
+    .quickstart {
+      margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.6;
+      background: var(--accent-weak); border-left: 3px solid var(--accent);
+    }
+    .quickstart b { color: var(--accent) }
+    .quickstart code, .hint code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: .92em }
+    .engine-config { display: none }
+    .engine-config.visible { display: block }
+    .row { display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px }
+    .row:last-child { margin-bottom: 0 }
+    .row > label:first-child { min-width: 84px }
+    .hint { font-size: 12.5px; line-height: 1.6; color: var(--muted); margin: 12px 0 0 }
+    .hint b { color: var(--text) }
+    input[type=checkbox] {
+      appearance: none; flex: none; width: 38px; height: 22px; margin: 0; border-radius: 999px; cursor: pointer;
+      background: var(--border); position: relative; transition: background .15s;
+    }
+    input[type=checkbox]::after {
+      content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+      background: #fff; box-shadow: 0 1px 2px #0004; transition: transform .15s;
+    }
+    input[type=checkbox]:checked { background: var(--accent) }
+    input[type=checkbox]:checked::after { transform: translateX(16px) }
+    .moss-filezone {
+      position: relative; flex: 1 1 200px; min-height: 64px; display: flex; align-items: center; justify-content: center;
+      border: 2px dashed var(--border); border-radius: 10px; background: var(--surface-2); cursor: pointer; padding: 8px;
+    }
+    .moss-filezone:hover, .moss-filezone.over { border-color: var(--accent); background: var(--accent-weak) }
+    .moss-filezone input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer }
+    .moss-filetext { font-size: 13px; font-weight: 650; text-align: center; pointer-events: none; overflow-wrap: anywhere }
+    .progress { height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin-top: 12px; display: none }
+    .progress.visible { display: block }
+    .progress>div { height: 100%; width: 0; background: var(--accent); transition: width .2s }
+    .progress>div.indeterminate { width: 32%; animation: loading 1.2s infinite }
+    @keyframes loading { from { transform: translateX(-120%) } to { transform: translateX(320%) } }
+    .model-status { min-height: 20px; font-size: 13px; margin-top: 6px; color: var(--muted); overflow-wrap: anywhere }
+    .model-status:empty { min-height: 0; margin: 0 }
+    .error { color: var(--danger) }
+    .success { color: var(--success) }
+    .notice {
+      padding: 10px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; line-height: 1.5;
+      background: var(--warn-weak); color: var(--warn-text);
+    }
+    .notice.local { background: var(--success-weak); color: var(--success) }
+    details { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius) }
+    summary { padding: 12px 16px; cursor: pointer; font-weight: 700; font-size: 14px }
+    .details-content { padding: 0 16px 16px; font-size: 13.5px; line-height: 1.65; color: var(--muted) }
+    .details-content h3 { color: var(--text); font-size: 14px; margin: 14px 0 4px }
+    .details-content ul { margin: 4px 0; padding-left: 20px }
+
+    #toast {
+      position: fixed; z-index: 50; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom));
+      transform: translate(-50%, 18px); background: #1b1e27f2; color: #fff;
+      padding: 10px 18px; border-radius: 10px; opacity: 0; pointer-events: none;
+      transition: .25s; max-width: 90%; text-align: center; font-weight: 650; box-shadow: var(--shadow);
+    }
+    #toast.show { opacity: 1; transform: translate(-50%, 0) }
     /* 量測 HUD（Phase 0）：預設關閉，只有想看數字的人會開 */
     #metricsHud {
       position: fixed; right: 12px; bottom: 12px; z-index: 60;
@@ -300,8 +300,42 @@
       background: #0b0c13ee; color: #a8f0c6; padding: 8px 10px; border-radius: 8px;
       white-space: pre; pointer-events: none; max-width: 46vw;
     }
-    #metricsHud[hidden] { display: none }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
 
+    @media (max-width: 720px) {
+      .layout { padding-top: 12px; gap: 14px }
+      .status-grid { grid-template-columns: 1fr 1fr; gap: 6px }
+      .status-card { padding: 6px 10px }
+      /* 手機只留「狀態／引擎」：執行環境是給除錯看的，隱私等級在設定欄的提示條裡已經有 */
+      .status-card:nth-child(n+3) { display: none }
+      .transcript-container { height: 48vh; padding: 14px 16px }
+      #transcript { font-size: 16px }
+      /* 開始／停止固定在畫面底部：捲到設定欄時也按得到，會場裡單手就能操作。
+         （sticky 只在 .stage 範圍內有效，捲過舞台就會跟著離開，所以這裡用 fixed） */
+      .layout { padding-bottom: calc(88px + env(safe-area-inset-bottom)) }
+      .controls { grid-template-columns: repeat(3, minmax(0, 1fr)) }
+      #controlBtn {
+        position: fixed; z-index: 25; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+        min-height: 54px; box-shadow: 0 6px 20px #0003;
+      }
+      .meter { grid-column: 1 / -1 }
+      .controls button.action:not(#controlBtn) { padding: 8px 6px; font-size: 13.5px; min-width: 0 }
+      .engine-cards { grid-template-columns: 1fr 1fr }
+      .ecard-desc { display: none }
+      .engine-card.active .ecard-desc { display: block }
+    }
+    @media print {
+      body { background: #fff; color: #000 }
+      .appbar, .status-grid, .controls, .sidebar, .subtitle-bar { display: none !important }
+      .layout { display: block; padding: 0 }
+      .stage { position: static; height: auto }
+      .transcript-card { border: 0; box-shadow: none }
+      .transcript-container { height: auto; padding: 0; overflow: visible }
+      #transcript { font-size: 11pt }
+    }
   </style>
 
 <!-- Google tag (gtag.js) —— G-GHGBM401HN
@@ -341,171 +375,186 @@
 </script>
 </head>
 <body>
-  <div class="topbar"><button id="uiLangToggle" type="button">Switch to English</button></div>
-  <h1 id="mainTitle">多國語言即時逐字稿工具</h1>
-  <main class="app">
-    <section class="status-grid" aria-label="執行狀態">
-      <div class="status-card"><div class="status-label" id="statusEngineLabel">引擎</div><div class="status-value" id="statusEngineValue">Web Speech API</div></div>
-      <div class="status-card"><div class="status-label" id="statusRuntimeLabel">執行環境</div><div class="status-value" id="statusRuntimeValue">瀏覽器服務</div></div>
-      <div class="status-card"><div class="status-label" id="statusPrivacyLabel">音訊處理</div><div class="status-value" id="statusPrivacyValue">可能傳送至服務商</div></div>
-      <div class="status-card"><div class="status-label" id="statusStateLabel">狀態</div><div class="status-value" id="statusStateValue">待命</div></div>
-    </section>
+  <header class="appbar">
+    <div class="brand"><img src="icon-192.png" alt=""><h1 id="mainTitle">多國語言即時逐字稿工具</h1></div>
+    <button id="uiLangToggle" type="button">Switch to English</button>
+  </header>
 
-    <section class="transcript-container" id="transcriptContainer" aria-label="逐字稿">
-      <pre id="transcript"><span class="placeholder" id="placeholderText"></span><span id="finalText"></span><span id="interimText" class="interim"></span></pre>
-    </section>
-    <div class="meter" aria-label="麥克風音量"><div id="volumeLevel"></div></div>
+  <div class="layout">
+    <!-- 舞台：會場裡唯一需要看的區塊 -->
+    <main class="stage">
+      <section class="status-grid" aria-label="執行狀態">
+        <div class="status-card"><div class="status-label" id="statusStateLabel">狀態</div><div class="status-value" id="statusStateValue">待命</div></div>
+        <div class="status-card"><div class="status-label" id="statusEngineLabel">引擎</div><div class="status-value" id="statusEngineValue">Web Speech API</div></div>
+        <div class="status-card"><div class="status-label" id="statusRuntimeLabel">執行環境</div><div class="status-value" id="statusRuntimeValue">瀏覽器服務</div></div>
+        <div class="status-card"><div class="status-label" id="statusPrivacyLabel">音訊處理</div><div class="status-value" id="statusPrivacyValue">可能傳送至服務商</div></div>
+      </section>
 
-    <section class="panel settings">
-      <label id="engineLabel" class="panel-label">引擎：</label>
-      <div class="engine-cards" id="engineCards" role="group" aria-label="引擎選擇">
-        <button type="button" class="engine-card" data-engine="webspeech">
-          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
-          <span class="ecard-desc"></span>
-        </button>
-        <button type="button" class="engine-card" data-engine="vosk">
-          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
-          <span class="ecard-desc"></span>
-        </button>
-        <button type="button" class="engine-card" data-engine="sherpa">
-          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
-          <span class="ecard-desc"></span>
-        </button>
-        <button type="button" class="engine-card" data-engine="whisper">
-          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
-          <span class="ecard-desc"></span>
-        </button>
-        <button type="button" class="engine-card" data-engine="whistle">
-          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
-          <span class="ecard-desc"></span>
-        </button>
-        <button type="button" class="engine-card" data-engine="underdog">
-          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
-          <span class="ecard-desc"></span>
-        </button>
-        <button type="button" class="engine-card" data-engine="moss">
-          <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
-          <span class="ecard-desc"></span>
-        </button>
-      </div>
-      <select id="engineSelector" hidden>
-        <option value="webspeech" id="optWebspeech">Web Speech API（雲端）</option>
-        <option value="vosk" id="optVosk">Vosk（本機離線）</option>
-        <option value="sherpa" id="optSherpa">sherpa-onnx（本機串流）</option>
-        <option value="whisper" id="optWhisper">Whisper（本機 WebGPU/WASM）</option>
-        <option value="whistle" id="optWhistle">Whistle（本機，16.9 MB）</option>
-        <option value="underdog" id="optUnderdog">Underdog Bark 3.0（本機，英文，約 500 MB）</option>
-        <option value="moss" id="optMoss">MOSS 會議轉寫（雲端 Space，批次）</option>
-      </select>
-      <div class="field" id="languageField"><label for="languageSelector" id="langLabel">辨識語言：</label><select id="languageSelector">
-        <option value="zh-TW">中文（台灣）</option><option value="zh-CN">中文（中國大陸）</option><option value="zh-HK">粵語（香港）</option>
-        <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ja-JP">日本語</option>
-        <option value="ko-KR">한국어</option><option value="es-ES">Español</option><option value="fr-FR">Français</option><option value="de-DE">Deutsch</option>
-      </select><span class="lang-note" id="langNote" hidden></span></div>
-      <p class="quickstart" id="quickstartText"></p>
-    </section>
-
-    <section class="panel engine-config" id="voskConfig">
-      <div class="row"><label for="voskModelSource" id="voskSourceLabel">模型來源：</label><select id="voskModelSource">
-        <option value="builtin" id="optVoskBuiltin">網站內建模型</option><option value="file" id="optVoskFile">本機模型 ZIP</option><option value="url" id="optVoskUrl">自訂 URL</option>
-      </select></div>
-      <div class="row" id="voskBuiltinRow"><label for="voskBuiltinLang" id="voskModelLabel">模型：</label><select id="voskBuiltinLang">
-        <option value="cn">中文 small（約 44 MB）</option><option value="en">English small（約 41 MB）</option>
-      </select></div>
-      <div class="row" id="voskFileRow" hidden><label for="voskModelFile" id="voskFileLabel">檔案：</label><input id="voskModelFile" type="file" accept=".zip"></div>
-      <div class="row" id="voskUrlRow" hidden><label for="voskModelUrl">URL：</label><input id="voskModelUrl" type="url" placeholder="https://example.org/model.zip"></div>
-      <div class="row"><button class="action" id="loadVoskBtn" type="button">載入模型</button></div>
-      <div class="progress" id="voskProgress"><div id="voskProgressBar"></div></div><div class="model-status" id="voskStatus"></div>
-      <p class="hint" id="voskHint"></p>
-    </section>
-
-    <section class="panel engine-config" id="sherpaConfig">
-      <div class="row"><label for="sherpaBaseUrl" id="sherpaBaseLabel">資產位置：</label><input id="sherpaBaseUrl" type="text" value="https://huggingface.co/cormort/sherpa-zh-en-streaming/resolve/main/sherpa/" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/sherpa/"></div>
-      <div class="row"><button class="action" id="loadSherpaBtn" type="button">載入模型</button><button class="action" id="clearSherpaCacheBtn" type="button">清除已快取模型</button></div>
-      <div class="progress" id="sherpaProgress"><div id="sherpaProgressBar"></div></div><div class="model-status" id="sherpaStatus"></div>
-      <p class="hint" id="sherpaHint"></p>
-    </section>
-
-    <section class="panel engine-config" id="whisperConfig">
-      <div class="row"><label for="whisperModelSelect" id="whisperModelLabel">模型：</label><select id="whisperModelSelect">
-        <option value="tiny">Whisper tiny（約 40 MB，速度優先）</option><option value="base">Whisper base（約 74 MB）</option><option value="small" selected>Whisper small（約 240 MB，準確度優先）</option>
-      </select></div>
-      <div class="row"><label for="vadSensitivity" id="vadLabel">收音靈敏度：</label><select id="vadSensitivity">
-        <option value="0.012" id="optVadHigh">高</option><option value="0.018" selected id="optVadMid">中</option><option value="0.028" id="optVadLow">低</option>
-      </select></div>
-      <div class="row"><button class="action" id="loadWhisperBtn" type="button">載入模型</button></div>
-      <div class="progress" id="whisperProgress"><div id="whisperProgressBar"></div></div><div class="model-status" id="whisperStatus"></div>
-      <p class="hint" id="whisperHint"></p>
-    </section>
-
-    <section class="panel engine-config" id="whistleConfig">
-      <div class="row"><label for="whistleModelUrl" id="whistleUrlLabel">模型網址：</label><input id="whistleModelUrl" type="url" value="https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/whistle.cact"></div>
-      <div class="row"><button class="action" id="loadWhistleBtn" type="button">載入模型</button><button class="action" id="clearWhistleCacheBtn" type="button">清除已快取模型</button></div>
-      <div class="progress" id="whistleProgress"><div id="whistleProgressBar"></div></div><div class="model-status" id="whistleStatus"></div>
-      <p class="hint" id="whistleHint"></p>
-    </section>
-
-    <section class="panel engine-config" id="underdogConfig">
-      <div class="row"><label for="underdogBaseUrl" id="underdogBaseLabel">資產位置：</label><input id="underdogBaseUrl" type="text" value="https://huggingface.co/ai-ecoverse/Underdog-Bark-3.0-ONNX/resolve/main/" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/"></div>
-      <div class="row"><label for="underdogVariant" id="underdogVariantLabel">精度：</label><select id="underdogVariant">
-        <option value="q4f16" selected id="optUnderdogQ4">q4f16（約 500 MB，較快）</option><option value="q8" id="optUnderdogQ8">q8（約 908 MB，量化失真較小）</option>
-      </select></div>
-      <div class="row"><button class="action" id="loadUnderdogBtn" type="button">載入模型</button><button class="action" id="clearUnderdogCacheBtn" type="button">清除已快取模型</button></div>
-      <div class="progress" id="underdogProgress"><div id="underdogProgressBar"></div></div><div class="model-status" id="underdogStatus"></div>
-      <p class="hint" id="underdogHint"></p>
-    </section>
-
-    <section class="panel engine-config" id="mossConfig">
-      <div class="row"><label for="mossSpaceSelect" id="mossSpaceLabel">運算位置：</label><select id="mossSpaceSelect">
-        <option value="official" id="optMossOfficial">Hugging Face 官方 Space（較快）</option>
-        <option value="litert" id="optMossLitert">社群 LiteRT Space（回傳繁中）</option>
-      </select></div>
-      <div class="row"><label for="mossFile" id="mossFileLabel">音訊／影片檔：</label>
-        <div class="moss-filezone" id="mossFileZone">
-          <input id="mossFile" type="file" accept="audio/*,video/*">
-          <span class="moss-filetext" id="mossFileText">點選檔案或拖放到此</span>
+      <div class="transcript-card">
+        <section class="transcript-container" id="transcriptContainer" aria-label="逐字稿">
+          <pre id="transcript"><span class="placeholder" id="placeholderText"></span><span id="finalText"></span><span id="interimText" class="interim"></span></pre>
+        </section>
+        <!-- 雙語字幕條：譯文大字、原文小字，只留最近兩句；浮動字幕窗（Document PiP）複製的也是它 -->
+        <div class="subtitle-bar" id="subtitleBar" hidden>
+          <div class="subtitle-zh" id="subtitleZh"></div>
+          <div class="subtitle-en" id="subtitleEn"></div>
         </div>
       </div>
-      <div class="row"><button class="action" id="mossRunBtn" type="button">開始轉寫</button><button class="action" id="mossSrtBtn" type="button" disabled>輸出 SRT 字幕</button></div>
-      <div class="progress" id="mossProgress"><div id="mossProgressBar"></div></div><div class="model-status" id="mossStatus"></div>
-      <p class="hint" id="mossHint"></p>
-    </section>
 
-    <section class="panel" id="subtitleConfig">
-      <label id="subtitleTitle" class="panel-label">雙語字幕：</label>
-      <div class="row"><label for="mtToggle" id="mtToggleLabel">翻譯（本機）</label>
-        <input id="mtToggle" type="checkbox">
-        <label for="mtScript" id="mtScriptLabel">譯文</label>
-        <select id="mtScript"><option value="zh-Hant" selected id="optMtHant">繁體中文</option><option value="zh-Hans" id="optMtHans">簡體中文</option></select>
-      </div>
-      <div class="row"><label for="mtModel" id="mtModelLabel">翻譯模型：</label><input id="mtModel" type="text" value="Xenova/opus-mt-en-zh" spellcheck="false"></div>
-      <div class="row"><label for="subScale" id="subScaleLabel">字幕大小</label>
-        <select id="subScale"><option value="s" id="optSubS">小</option><option value="m" selected id="optSubM">中</option><option value="l" id="optSubL">大</option></select>
-        <button class="action" id="pipBtn" type="button">浮動字幕窗</button>
-        <label for="metricsToggle" id="metricsToggleLabel">顯示量測</label><input id="metricsToggle" type="checkbox">
-      </div>
-      <div class="model-status" id="mtStatus"></div>
-      <p class="hint" id="subtitleHint"></p>
-    </section>
+      <section class="controls">
+        <button class="action" id="controlBtn" type="button">開始辨識</button>
+        <div class="meter" aria-label="麥克風音量"><div id="volumeLevel"></div></div>
+        <button class="action" id="copyBtn" type="button" disabled>複製內容</button>
+        <button class="action" id="exportBtn" type="button" disabled>輸出逐字稿</button>
+        <button class="action" id="clearBtn" type="button">清空</button>
+      </section>
+    </main>
 
-    <div class="subtitle-bar" id="subtitleBar" hidden>
-      <div class="subtitle-zh" id="subtitleZh"></div>
-      <div class="subtitle-en" id="subtitleEn"></div>
-    </div>
+    <!-- 設定欄：出發前設定好，會場裡不必再碰 -->
+    <aside class="sidebar">
+      <section class="panel settings">
+        <label id="engineLabel" class="panel-label">引擎：</label>
+        <div class="engine-cards" id="engineCards" role="group" aria-label="引擎選擇">
+          <button type="button" class="engine-card" data-engine="webspeech">
+            <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
+            <span class="ecard-desc"></span>
+          </button>
+          <button type="button" class="engine-card" data-engine="vosk">
+            <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+            <span class="ecard-desc"></span>
+          </button>
+          <button type="button" class="engine-card" data-engine="sherpa">
+            <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+            <span class="ecard-desc"></span>
+          </button>
+          <button type="button" class="engine-card" data-engine="whisper">
+            <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+            <span class="ecard-desc"></span>
+          </button>
+          <button type="button" class="engine-card" data-engine="whistle">
+            <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+            <span class="ecard-desc"></span>
+          </button>
+          <button type="button" class="engine-card" data-engine="underdog">
+            <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag local"></span></span>
+            <span class="ecard-desc"></span>
+          </button>
+          <button type="button" class="engine-card" data-engine="moss">
+            <span class="ecard-top"><span class="ecard-name"></span><span class="ecard-tag cloud"></span></span>
+            <span class="ecard-desc"></span>
+          </button>
+        </div>
+        <select id="engineSelector" hidden>
+          <option value="webspeech" id="optWebspeech">Web Speech API（雲端）</option>
+          <option value="vosk" id="optVosk">Vosk（本機離線）</option>
+          <option value="sherpa" id="optSherpa">sherpa-onnx（本機串流）</option>
+          <option value="whisper" id="optWhisper">Whisper（本機 WebGPU/WASM）</option>
+          <option value="whistle" id="optWhistle">Whistle（本機，16.9 MB）</option>
+          <option value="underdog" id="optUnderdog">Underdog Bark 3.0（本機，英文，約 500 MB）</option>
+          <option value="moss" id="optMoss">MOSS 會議轉寫（雲端 Space，批次）</option>
+        </select>
+        <div class="field" id="languageField"><label for="languageSelector" id="langLabel">辨識語言：</label><select id="languageSelector">
+          <option value="zh-TW">中文（台灣）</option><option value="zh-CN">中文（中國大陸）</option><option value="zh-HK">粵語（香港）</option>
+          <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ja-JP">日本語</option>
+          <option value="ko-KR">한국어</option><option value="es-ES">Español</option><option value="fr-FR">Français</option><option value="de-DE">Deutsch</option>
+        </select><span class="lang-note" id="langNote" hidden></span></div>
+        <p class="quickstart" id="quickstartText"></p>
+      </section>
 
-    <section class="controls">
-      <button class="action" id="controlBtn" type="button">開始辨識</button><button class="action" id="copyBtn" type="button" disabled>複製內容</button>
-      <button class="action" id="exportBtn" type="button" disabled>輸出逐字稿</button><button class="action" id="clearBtn" type="button">清空</button>
-    </section>
-    <div class="notice" id="privacyNotice"></div>
+      <div class="notice" id="privacyNotice"></div>
 
-    <details><summary id="privacySummary">使用須知與隱私聲明</summary><div class="details-content">
-      <p id="howItWorksText"></p>
-      <h3 id="enginesTitle"></h3><ul id="enginesList"></ul>
-      <h3 id="riskTitle"></h3><ul id="riskList"></ul>
-      <p id="privacyConclusion"></p>
-    </div></details>
-  </main><div id="toast" role="status"></div>
+      <section class="panel engine-config" id="voskConfig">
+        <div class="row"><label for="voskModelSource" id="voskSourceLabel">模型來源：</label><select id="voskModelSource">
+          <option value="builtin" id="optVoskBuiltin">網站內建模型</option><option value="file" id="optVoskFile">本機模型 ZIP</option><option value="url" id="optVoskUrl">自訂 URL</option>
+        </select></div>
+        <div class="row" id="voskBuiltinRow"><label for="voskBuiltinLang" id="voskModelLabel">模型：</label><select id="voskBuiltinLang">
+          <option value="cn">中文 small（約 44 MB）</option><option value="en">English small（約 41 MB）</option>
+        </select></div>
+        <div class="row" id="voskFileRow" hidden><label for="voskModelFile" id="voskFileLabel">檔案：</label><input id="voskModelFile" type="file" accept=".zip"></div>
+        <div class="row" id="voskUrlRow" hidden><label for="voskModelUrl">URL：</label><input id="voskModelUrl" type="url" placeholder="https://example.org/model.zip"></div>
+        <div class="row"><button class="action" id="loadVoskBtn" type="button">載入模型</button></div>
+        <div class="progress" id="voskProgress"><div id="voskProgressBar"></div></div><div class="model-status" id="voskStatus"></div>
+        <p class="hint" id="voskHint"></p>
+      </section>
+
+      <section class="panel engine-config" id="sherpaConfig">
+        <div class="row"><label for="sherpaBaseUrl" id="sherpaBaseLabel">資產位置：</label><input id="sherpaBaseUrl" type="text" value="https://huggingface.co/cormort/sherpa-zh-en-streaming/resolve/main/sherpa/" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/sherpa/"></div>
+        <div class="row"><button class="action" id="loadSherpaBtn" type="button">載入模型</button><button class="action" id="clearSherpaCacheBtn" type="button">清除已快取模型</button></div>
+        <div class="progress" id="sherpaProgress"><div id="sherpaProgressBar"></div></div><div class="model-status" id="sherpaStatus"></div>
+        <p class="hint" id="sherpaHint"></p>
+      </section>
+
+      <section class="panel engine-config" id="whisperConfig">
+        <div class="row"><label for="whisperModelSelect" id="whisperModelLabel">模型：</label><select id="whisperModelSelect">
+          <option value="tiny">Whisper tiny（約 40 MB，速度優先）</option><option value="base">Whisper base（約 74 MB）</option><option value="small" selected>Whisper small（約 240 MB，準確度優先）</option>
+        </select></div>
+        <div class="row"><label for="vadSensitivity" id="vadLabel">收音靈敏度：</label><select id="vadSensitivity">
+          <option value="0.012" id="optVadHigh">高</option><option value="0.018" selected id="optVadMid">中</option><option value="0.028" id="optVadLow">低</option>
+        </select></div>
+        <div class="row"><button class="action" id="loadWhisperBtn" type="button">載入模型</button></div>
+        <div class="progress" id="whisperProgress"><div id="whisperProgressBar"></div></div><div class="model-status" id="whisperStatus"></div>
+        <p class="hint" id="whisperHint"></p>
+      </section>
+
+      <section class="panel engine-config" id="whistleConfig">
+        <div class="row"><label for="whistleModelUrl" id="whistleUrlLabel">模型網址：</label><input id="whistleModelUrl" type="url" value="https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/whistle.cact"></div>
+        <div class="row"><button class="action" id="loadWhistleBtn" type="button">載入模型</button><button class="action" id="clearWhistleCacheBtn" type="button">清除已快取模型</button></div>
+        <div class="progress" id="whistleProgress"><div id="whistleProgressBar"></div></div><div class="model-status" id="whistleStatus"></div>
+        <p class="hint" id="whistleHint"></p>
+      </section>
+
+      <section class="panel engine-config" id="underdogConfig">
+        <div class="row"><label for="underdogBaseUrl" id="underdogBaseLabel">資產位置：</label><input id="underdogBaseUrl" type="text" value="https://huggingface.co/ai-ecoverse/Underdog-Bark-3.0-ONNX/resolve/main/" placeholder="https://huggingface.co/&lt;user&gt;/&lt;repo&gt;/resolve/main/"></div>
+        <div class="row"><label for="underdogVariant" id="underdogVariantLabel">精度：</label><select id="underdogVariant">
+          <option value="q4f16" selected id="optUnderdogQ4">q4f16（約 500 MB，較快）</option><option value="q8" id="optUnderdogQ8">q8（約 908 MB，量化失真較小）</option>
+        </select></div>
+        <div class="row"><button class="action" id="loadUnderdogBtn" type="button">載入模型</button><button class="action" id="clearUnderdogCacheBtn" type="button">清除已快取模型</button></div>
+        <div class="progress" id="underdogProgress"><div id="underdogProgressBar"></div></div><div class="model-status" id="underdogStatus"></div>
+        <p class="hint" id="underdogHint"></p>
+      </section>
+
+      <section class="panel engine-config" id="mossConfig">
+        <div class="row"><label for="mossSpaceSelect" id="mossSpaceLabel">運算位置：</label><select id="mossSpaceSelect">
+          <option value="official" id="optMossOfficial">Hugging Face 官方 Space（較快）</option>
+          <option value="litert" id="optMossLitert">社群 LiteRT Space（回傳繁中）</option>
+        </select></div>
+        <div class="row"><label for="mossFile" id="mossFileLabel">音訊／影片檔：</label>
+          <div class="moss-filezone" id="mossFileZone">
+            <input id="mossFile" type="file" accept="audio/*,video/*">
+            <span class="moss-filetext" id="mossFileText">點選檔案或拖放到此</span>
+          </div>
+        </div>
+        <div class="row"><button class="action" id="mossRunBtn" type="button">開始轉寫</button><button class="action" id="mossSrtBtn" type="button" disabled>輸出 SRT 字幕</button></div>
+        <div class="progress" id="mossProgress"><div id="mossProgressBar"></div></div><div class="model-status" id="mossStatus"></div>
+        <p class="hint" id="mossHint"></p>
+      </section>
+
+      <section class="panel" id="subtitleConfig">
+        <label id="subtitleTitle" class="panel-label">雙語字幕：</label>
+        <div class="row"><label for="mtToggle" id="mtToggleLabel">翻譯（本機）</label>
+          <input id="mtToggle" type="checkbox">
+          <label for="mtScript" id="mtScriptLabel">譯文</label>
+          <select id="mtScript"><option value="zh-Hant" selected id="optMtHant">繁體中文</option><option value="zh-Hans" id="optMtHans">簡體中文</option></select>
+        </div>
+        <div class="row"><label for="mtModel" id="mtModelLabel">翻譯模型：</label><input id="mtModel" type="text" value="Xenova/opus-mt-en-zh" spellcheck="false"></div>
+        <div class="row"><label for="subScale" id="subScaleLabel">字幕大小</label>
+          <select id="subScale"><option value="s" id="optSubS">小</option><option value="m" selected id="optSubM">中</option><option value="l" id="optSubL">大</option></select>
+          <button class="action" id="pipBtn" type="button">浮動字幕窗</button>
+        </div>
+        <div class="row"><label for="metricsToggle" id="metricsToggleLabel">顯示量測</label><input id="metricsToggle" type="checkbox"></div>
+        <div class="model-status" id="mtStatus"></div>
+        <p class="hint" id="subtitleHint"></p>
+      </section>
+
+      <details><summary id="privacySummary">使用須知與隱私聲明</summary><div class="details-content">
+        <p id="howItWorksText"></p>
+        <h3 id="enginesTitle"></h3><ul id="enginesList"></ul>
+        <h3 id="riskTitle"></h3><ul id="riskList"></ul>
+        <p id="privacyConclusion"></p>
+      </div></details>
+    </aside>
+  </div>
+  <div id="toast" role="status"></div>
   <div id="metricsHud" hidden></div>
   <!-- 逐字稿本身不做 live region（interim 每秒更新多次會灌爆螢幕閱讀器），
        只在段落確定後把內容送進這裡 -->

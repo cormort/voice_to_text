@@ -10,6 +10,7 @@
 import { T } from './i18n.js';
 import { stamp, concat, resample, makeAudioBuffer, isLatinDominated } from './util.js';
 import { vadPush, vadFlush } from './vad.js';
+import { TRANSCRIPT_KEY, serializeTranscript, restoreTranscript } from './persist.js';
 import { createBatchPipeline } from './engines/batch.js';
 import { createLiveEngine } from './engines/live.js';
 import { decodeSherpa } from './engines/sherpa-decode.js';
@@ -340,6 +341,7 @@ import { createUnderdogEngine } from './engines/underdog.js';
     render();
     announce(s);
     queueTranslation(segment);
+    persistTranscript();
   }
 
   // 一次寫入多段（例如 MOSS 的整份逐字稿）：只 render 一次，避免每段都重排與捲動。
@@ -356,6 +358,7 @@ import { createUnderdogEngine } from './engines/underdog.js';
     if (!written.length) return;
     state.interim = '';
     render();
+    persistTranscript();
     // 整批只播報最後一段，否則螢幕閱讀器會把整場會議唸一遍
     announce(written[written.length - 1]);
   }
@@ -441,10 +444,82 @@ import { createUnderdogEngine } from './engines/underdog.js';
 
   function begin() {
     prefetchOpencc();       // 會產出中文的組合先把 OpenCC 抓下來（不阻塞收錄音）
-    state.start = new Date();
-    state.segments = [];
-    state.interim = '';
+    // 不清掉前面的段落：中場停下來再按開始，上半場的逐字稿必須還在
+    // （以前這裡會 state.segments = []，而且沒有任何提示）。只有「清空」按鈕會清。
+    // 每次開始仍寫一行標記，看得出是第幾段錄音；複製／輸出時標記會被濾掉。
+    if (!state.start) state.start = new Date();
     commit('--- Recording Start / 錄音開始 ---');
+  }
+
+  // ==================== 逐字稿保存（重新整理／當掉後還原）====================
+  // 每次有新段落就排一次寫入（1 秒節流），切到背景或離開頁面時立刻寫，
+  // 所以最壞只會掉最後一秒。純序列化邏輯在 src/persist.js。
+  let persistTimer = null;
+  let persistWarned = false;
+
+  function persistTranscript(now = false) {
+    if (!now) {
+      persistTimer ||= setTimeout(() => persistTranscript(true), 1000);
+      return;
+    }
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    try {
+      if (!getEffectiveSegments().length) localStorage.removeItem(TRANSCRIPT_KEY);
+      else localStorage.setItem(TRANSCRIPT_KEY, serializeTranscript(state.start, state.segments));
+    } catch (error) {
+      // 配額滿或隱私模式：辨識照常進行，只是不保證能還原 —— 講一次就好
+      console.warn('Saving the transcript failed:', error);
+      if (!persistWarned) {
+        persistWarned = true;
+        showToast(t().persistFailed);
+      }
+    }
+  }
+
+  function restoreSavedTranscript() {
+    let saved = null;
+    try {
+      saved = restoreTranscript(localStorage.getItem(TRANSCRIPT_KEY));
+    } catch (error) {
+      console.warn('Reading the saved transcript failed:', error);
+    }
+    if (!saved) return 0;
+    state.start = saved.start;
+    state.segments = saved.segments;
+    return getEffectiveSegments().length;
+  }
+
+  // ==================== 錄音中保持螢幕常亮（Screen Wake Lock）====================
+  // 手機螢幕一關，麥克風或 Web Speech 就可能被系統停掉，畫面卻還寫著「辨識中」。
+  // 錄音期間持有 wake lock；切到背景時瀏覽器會自動釋放，回到前景再要一次。
+  let wakeLock = null;
+  let wakeLockPending = false;
+
+  async function syncWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    const want = state.running && document.visibilityState === 'visible';
+    if (!want) {
+      if (wakeLock && !state.running) {
+        const lock = wakeLock;
+        wakeLock = null;
+        lock.release().catch(() => {});
+      }
+      return;
+    }
+    if (wakeLock || wakeLockPending) return;
+    wakeLockPending = true;
+    try {
+      const lock = await navigator.wakeLock.request('screen');
+      lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+      wakeLock = lock;
+    } catch (error) {
+      // 省電模式、權限政策或非安全環境：拿不到就算了，不影響辨識
+      console.warn('Screen Wake Lock unavailable:', error);
+    } finally {
+      wakeLockPending = false;
+    }
+    if (wakeLock && !state.running) void syncWakeLock();   // 等待期間就已經停止了
   }
 
   function finish() {
@@ -466,6 +541,7 @@ import { createUnderdogEngine } from './engines/underdog.js';
     el.control.disabled = batch || state.stopping;
     el.statusState.textContent = state.stopping ? t().processing : (state.running ? t().listening : t().idle);
     document.title = (state.running ? '● ' : '') + t().pageTitle;
+    void syncWakeLock();
     syncEngineCards();
     syncModelButtons();
   }
@@ -1537,6 +1613,7 @@ import { createUnderdogEngine } from './engines/underdog.js';
 
   function applyTranslation(segment, zh) {
     segment.zh = zh;
+    persistTranscript();
     renderSubtitles();
     // 逐字稿要顯示譯文時，只有「譯文後到」的段落需要重畫；整份重建在段落數少時才划算
     if (mt.inTranscript && state.segments.length <= 800) {
@@ -2486,6 +2563,7 @@ import { createUnderdogEngine } from './engines/underdog.js';
     // 換譯文體裁要重翻：快取裡的譯文是另一種字形的，直接清掉最省事
     mt.cache.clear();
     for (const segment of state.segments) delete segment.zh;
+    persistTranscript();
     renderTranscript(true);
     for (const segment of state.segments) queueTranslation(segment);
     renderSubtitles();
@@ -2549,6 +2627,8 @@ import { createUnderdogEngine } from './engines/underdog.js';
 
   el.clear.onclick = () => {
     if (state.running || state.stopping || whisperEngine.isBusy() || moss.running) return showToast(t().busyClear);
+    // 逐字稿現在會被保存，清空等於真的刪掉整場會議 —— 有內容時先確認
+    if (effectiveSegmentCount() && !confirm(t().confirmClear)) return;
 
     clearWebRestartTimer();
     clearWebErrorTimer();
@@ -2562,6 +2642,7 @@ import { createUnderdogEngine } from './engines/underdog.js';
     underdogEngine.reset();
     moss.segments = [];
     el.mossSrt.disabled = true;
+    persistTranscript(true);
 
     el.placeholder.textContent = t().placeholder;
     setLevel(0);
@@ -2604,6 +2685,13 @@ import { createUnderdogEngine } from './engines/underdog.js';
     }
   });
 
+  // 切到背景／關頁前立刻寫一次（節流中的那一秒不能丟）；回到前景時補回 wake lock
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') persistTranscript(true);
+    else void syncWakeLock();
+  });
+  window.addEventListener('pagehide', () => persistTranscript(true));
+
   window.addEventListener('beforeunload', event => {
     // MOSS 是批次上傳／轉寫，跑掉就得整份重來，所以也要擋
     if (state.running || moss.running) {
@@ -2613,6 +2701,7 @@ import { createUnderdogEngine } from './engines/underdog.js';
   });
 
   load();
+  const restoredCount = restoreSavedTranscript();
   syncVoskSourceRows();
   initWebSpeech();
   setUi(state.ui);
@@ -2625,3 +2714,4 @@ import { createUnderdogEngine } from './engines/underdog.js';
     el.subtitleBar.hidden = false;
   }
   render();
+  if (restoredCount) showToast(`${t().transcriptRestored}（${restoredCount}）`);
