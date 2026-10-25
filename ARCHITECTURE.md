@@ -225,3 +225,23 @@ Playwright 假麥克風 e2e（現在只有本機手動腳本）。
 - **引擎不再「等權並列」**：每個引擎有角色（live／refine／fallback），使用者不必在會議前選模型。
 - **不用 VAD 分段硬套非串流模型做即時**：這是 Underdog 接線時最勉強的一段。
 - **不在 Cache Storage 存大權重**：改用 OPFS（現況 900 MB 峰值就是這樣來的）。
+
+## 七、儲存空間診斷（`?debug=storage`）
+
+`src/storage-debug.js`：配額／已用（`navigator.storage.estimate()`）、是否已申請持久化、
+**真的寫 1 MiB 進 OPFS 再讀回比對**（寫得進去不代表寫對了）、每個 Cache Storage 的筆數與位元組。
+卡片可複製 JSON，報告同時掛在 `window.__storageReport` 供自動化讀取。
+
+存在的理由：OPFS 那次事故是「配額不足 → 靜靜退回 → 每次重抓 431.9 MB」，畫面上完全看不出來。
+與其用載入時間猜，不如出國前打開這頁看一眼。
+
+**實機量測（headless Chrome，2026-10）**：配額 10.00 GB、已用 0、OPFS 可寫 1 MiB／66 ms、cache 空。
+
+**這推翻了「OPFS 配額不足」的假設** —— headless profile 的 OPFS 是寫得進去的。所以 431.9 MB
+那次變慢（97.9 s）另有原因，待查兩個方向：
+
+1. worker 內 `opfsAvailable()` 與 Range probe 是否其實失敗了（失敗只送到 console，UI 看不到）；
+2. 432 MB 用大量 append 寫入的實際速度，以及「中斷後檔案大小是否如預期可見」——
+   若 `store.size()` 回 0，續傳邏輯每次都會從頭寫。
+
+要重接之前，先把這兩點接上 UI 告警，再在真機量「首次／中斷／續傳／第二次載入」四個數字。
