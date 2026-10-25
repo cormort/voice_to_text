@@ -183,6 +183,11 @@ sherpa 的一次解碼迴圈另外抽成 `src/engines/sherpa-decode.js`，`test_
 | Vosk（en 內建模型 42 MB） | 逐字稿 `the quick brown fox jumps over the lazy dog…`，停止後正常收尾 |
 | sherpa（HF 199 MB，Worker 模式） | 逐字流式輸出、endpoint 分段 commit，停止時 flush 出最後一句 |
 
+**下載樣板也收斂了（2026-10）**：`src/download.js` 把 `fetchRange`／`downloadInChunks`／
+`streamWhole`／`formatProgress` 收成一支 —— sherpa 的 189.8 MB、Whistle 的 16.9 MB、
+Underdog 的 431.9 MB 外部權重都走同一套「分段 + 逐段重試 + 進度」。這同時是 Phase 3
+換 OPFS 續傳時唯一要改的地方，也讓 `test_sherpa_download.js` 從「刮原始碼」改成 import 真模組。
+
 **模型載入碼開始搬進引擎模組（2026-10）**：Whistle 已經搬完 ——
 `src/engines/whistle.js` 的 `createWhistleEngine(ctx)` 自己負責下載（Cache Storage）、
 worker 膠水、主執行緒退路、清除快取與推論，回傳的物件沿用 batch pipeline 的介面再加上

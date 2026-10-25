@@ -1,6 +1,7 @@
 'use strict';
 
 // v15：新增 src/persist.js（逐字稿本機保存），外殼要列入。
+// v16：下載樣板抽成 src/download.js（fetchRange／downloadInChunks／streamWhole／formatProgress）。
 // v14：Underdog 的模型載入與 worker 膠水搬進 src/engines/underdog.js。
 // v13：Whistle 的模型載入與 worker 膠水搬進 src/engines/whistle.js。
 // v12：串流引擎也收斂（src/engines/live.js ＋ sherpa-decode.js），Vosk／sherpa 共用啟停。
@@ -17,7 +18,7 @@
 // 而瀏覽器只會比對 sw.js 本身的位元來決定要不要更新 SW —— 只改 worker 不改 sw.js 的話，
 // install 不會重跑、cache.addAll 不會重抓，既有使用者會永遠拿到舊 worker。
 // 升版名同時讓 activate 的清快取邏輯把舊 shell 砍掉。
-const CACHE = 'stt-shell-v15';
+const CACHE = 'stt-shell-v16';
 // 只清「自己的」外殼快取版本。transformers-cache（Whisper 模型）與
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
@@ -56,6 +57,7 @@ const ASSETS = [
   './src/util.js',
   './src/vad.js',
   './src/persist.js',
+  './src/download.js',
   './src/engines/batch.js',
   './src/engines/live.js',
   './src/engines/sherpa-decode.js',

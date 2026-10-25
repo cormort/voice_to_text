@@ -16,6 +16,7 @@ import { createLiveEngine } from './engines/live.js';
 import { decodeSherpa } from './engines/sherpa-decode.js';
 import { createWhistleEngine } from './engines/whistle.js';
 import { createUnderdogEngine } from './engines/underdog.js';
+import { downloadInChunks, formatProgress } from './download.js';
   const CDN = {
     vosk: 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js',
     // 版本已鎖定，順便用 SRI 確認拿到的就是這一份（CDN 或套件被換掉時會直接載入失敗）
@@ -1001,87 +1002,17 @@ import { createUnderdogEngine } from './engines/underdog.js';
 
   // ==================== sherpa-onnx streaming engine ====================
   function setSherpaProgress(loaded, total) {
-    const mb = n => (n / 1048576).toFixed(1);
-    if (total) {
-      el.sherpaBar.classList.remove('indeterminate');
-      el.sherpaBar.style.width = `${(loaded / total * 100).toFixed(1)}%`;
-      el.sherpaStatus.textContent =
-        `${t().sherpaDownloading} ${mb(loaded)} / ${mb(total)} MB（${(loaded / total * 100).toFixed(1)}%）`;
-    } else {
-      el.sherpaStatus.textContent = `${t().sherpaDownloading} ${mb(loaded)} MB`;
-    }
+    if (total) el.sherpaBar.classList.remove('indeterminate');
+    el.sherpaBar.style.width = total ? `${(loaded / total * 100).toFixed(1)}%` : '';
+    el.sherpaStatus.textContent = `${t().sherpaDownloading} ${formatProgress(loaded, total)}`;
   }
 
-  const CHUNK_BYTES = 8 * 1024 * 1024;
 
-  async function fetchRange(url, start, end, attempts = 4) {
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        const response = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
-        if (response.status !== 206) throw new Error(`expected 206, got ${response.status}`);
-        return await response.arrayBuffer();
-      } catch (error) {
-        if (attempt >= attempts) throw error;
-        // 退避後重試：慢速線路上大檔很容易被中斷，重來一段比重來整份便宜
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-      }
-    }
-  }
 
-  // 單一個 199 MB 的 fetch 只要閃斷一次就全部作廢，改成分段抓、逐段重試。
-  // ponytail: 段落只存在記憶體，重整頁面仍會從頭開始；要跨重整續傳再說。
-  // onProgress 預設寫 sherpa 的進度條；Vosk 的模型下載也重用這支（見 fetchVoskPackage）
-  async function downloadInChunks(url, onProgress = setSherpaProgress) {
-    const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
-    if (!probe.ok) throw new Error(`${probe.status}: ${url}`);
 
-    const contentRange = probe.headers.get('Content-Range');
-    const total = probe.status === 206 && contentRange
-      ? Number(contentRange.split('/')[1])
-      : 0;
 
-    // 伺服器不支援 Range 就退回單次串流下載
-    if (!total) return streamWhole(url, onProgress);
 
-    const bytes = new Uint8Array(total);
-    let loaded = 0;
 
-    for (let start = 0; start < total; start += CHUNK_BYTES) {
-      const end = Math.min(start + CHUNK_BYTES, total) - 1;
-      const part = await fetchRange(url, start, end);
-      bytes.set(new Uint8Array(part), start);
-      loaded += part.byteLength;
-      onProgress(loaded, total);
-    }
-
-    return bytes;
-  }
-
-  async function streamWhole(url, onProgress = setSherpaProgress) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`${response.status}: ${url}`);
-
-    const total = Number(response.headers.get('Content-Length')) || 0;
-    const reader = response.body.getReader();
-    const chunks = [];
-    let loaded = 0;
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      loaded += value.length;
-      onProgress(loaded, total);
-    }
-
-    const bytes = new Uint8Array(loaded);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return bytes;
-  }
 
   // 回傳 .data 的 ArrayBuffer：優先讀 Cache Storage，沒有才下載並存起來。
   // ponytail: 快取失敗（配額不足、非安全環境）就退回純下載，功能不受影響。

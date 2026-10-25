@@ -101,6 +101,7 @@ src/engines/sherpa-decode.js sherpa 一次解碼迴圈（partial／endpoint／re
 src/engines/whistle.js Whistle：模型下載、worker 膠水、推論（含清除快取）
 src/engines/underdog.js Underdog：431 MB 權重下載、worker 膠水、推論
 src/i18n.js         中英文案（純資料）
+src/download.js     大檔下載：Range 分段、逐段重試、不支援 Range 的退路、進度文字
 src/util.js         純函式：stamp / concat / resample / makeAudioBuffer / isLatinDominated
 src/vad.js          停頓分段：vadPush / vadFlush
 underdog-worker.js  Underdog Bark 3.0 的推論 worker（＋ underdog/{frontend,tdt}.js）
