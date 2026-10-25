@@ -31,6 +31,9 @@ check('COEP: credentialless（不是 require-corp，否則 HF／jsDelivr／GA �
   /'Cross-Origin-Embedder-Policy': 'credentialless'/.test(SW) && !/require-corp'/.test(SW));
 check('頁面（navigate）回應有補', /return withIsolation\(response\);\s*\n\s*\}\)\.catch\(\(\) => caches\.match\('\.\/index\.html'\)\.then\(withIsolation\)\)/.test(SW));
 check('快取命中也有補（離線開啟仍是隔離的）', /if \(hit\) return withIsolation\(hit\);/.test(SW));
+// GitHub Pages 是 max-age=600：install 不繞 HTTP 快取的話，部署後 10 分鐘內升版會把舊 worker
+// 裝進新快取，之後一直拿到舊檔（瀏覽器實測重現過）
+check('install 抓外殼繞過 HTTP 快取（cache: reload）', /new Request\(url, \{ cache: 'reload' \}\)/.test(SW));
 
 // withIsolation 本身：抽出來用假的 Response／Headers 跑
 {
