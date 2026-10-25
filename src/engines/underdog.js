@@ -6,6 +6,7 @@
 // 排隊／啟停／量測由 src/engines/batch.js 提供。
 
 import { createBatchPipeline } from './batch.js';
+import { opfsStore, opfsAvailable } from '../opfs.js';
 
 /**
  * @param {object} ctx el / t / showToast / syncModelButtons（＋ batch pipeline 需要的其餘成員）
@@ -119,8 +120,17 @@ async function clearUnderdogCache() {
     showToast(t().busyClear);
     return;
   }
+  // v17 起 431.9 MB 的權重存在 OPFS（可續傳），清快取時一定要一起清，
+  // 否則使用者以為清掉了、空間卻還在。
+  let opfsDeleted = 0;
+  if (await opfsAvailable()) {
+    for (const entry of await opfsStore.list()) {
+      if (!entry.key.startsWith('underdog/')) continue;
+      if (await opfsStore.remove(entry.key)) opfsDeleted += 1;
+    }
+  }
   try {
-    const deleted = await caches.delete(UNDERDOG_CACHE);
+    const deleted = (await caches.delete(UNDERDOG_CACHE)) || opfsDeleted > 0;
     el.underdogStatus.textContent = deleted ? t().underdogCacheCleared : t().underdogCacheEmpty;
     el.underdogStatus.className = 'model-status';
     el.underdogBar.style.width = '0';
