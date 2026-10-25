@@ -21,7 +21,12 @@ function walk(dir, out = []) {
 module.exports = function readSite() {
   const root = __dirname;
   const files = [path.join(root, 'index.html'), ...walk(path.join(root, 'src'))];
-  return files.map(file => `// ==== ${path.relative(root, file)} ====\n${fs.readFileSync(file, 'utf8')}`).join('\n');
+  // 一律正規化成 LF：這台機器上有些檔案是 CRLF（git autocrlf）、有些是 LF（工具直接寫入），
+  // 而測試會用 `\n  }\n` 這種樣式刮函式原始碼 —— 混用時會抓過頭、跨檔案抓到別的 export，
+  // 出現「CI 綠、本機紅」的假失敗。正規化之後兩邊看到同一份文字。
+  return files
+    .map(file => `// ==== ${path.relative(root, file)} ====\n${fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')}`)
+    .join('\n');
 };
 
 module.exports.files = function files() {
