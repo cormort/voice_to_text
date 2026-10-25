@@ -1,5 +1,6 @@
 'use strict';
 
+// v13：Whistle 的模型載入與 worker 膠水搬進 src/engines/whistle.js。
 // v12：串流引擎也收斂（src/engines/live.js ＋ sherpa-decode.js），Vosk／sherpa 共用啟停。
 // v11：引擎介面收斂（src/engines/batch.js），三個批次引擎共用一條 pipeline。
 // v10：程式拆成 src/（app.js / i18n.js / util.js / vad.js），外殼要全部列入。
@@ -14,7 +15,7 @@
 // 而瀏覽器只會比對 sw.js 本身的位元來決定要不要更新 SW —— 只改 worker 不改 sw.js 的話，
 // install 不會重跑、cache.addAll 不會重抓，既有使用者會永遠拿到舊 worker。
 // 升版名同時讓 activate 的清快取邏輯把舊 shell 砍掉。
-const CACHE = 'stt-shell-v12';
+const CACHE = 'stt-shell-v13';
 // 只清「自己的」外殼快取版本。transformers-cache（Whisper 模型）與
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
@@ -55,6 +56,7 @@ const ASSETS = [
   './src/engines/batch.js',
   './src/engines/live.js',
   './src/engines/sherpa-decode.js',
+  './src/engines/whistle.js',
   // 翻譯 worker（約 3 KB）：字幕條一開就會用到，體積可以忽略
   './mt-worker.js'
 ];

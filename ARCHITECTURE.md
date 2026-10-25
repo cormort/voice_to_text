@@ -183,6 +183,16 @@ sherpa 的一次解碼迴圈另外抽成 `src/engines/sherpa-decode.js`，`test_
 | Vosk（en 內建模型 42 MB） | 逐字稿 `the quick brown fox jumps over the lazy dog…`，停止後正常收尾 |
 | sherpa（HF 199 MB，Worker 模式） | 逐字流式輸出、endpoint 分段 commit，停止時 flush 出最後一句 |
 
+**模型載入碼開始搬進引擎模組（2026-10）**：Whistle 已經搬完 ——
+`src/engines/whistle.js` 的 `createWhistleEngine(ctx)` 自己負責下載（Cache Storage）、
+worker 膠水、主執行緒退路、清除快取與推論，回傳的物件沿用 batch pipeline 的介面再加上
+`load()` / `clearCache()` / `isReady()` / `currentUrl()`。app.js 只剩 UI 接線
+（按鈕 onclick、`syncModelButtons` 用 `isReady()`）。
+
+同一份 recipe 要用在 Underdog 與 Whisper 上：把常數、worker 變數、load／clear／transcribe
+一起剪進模組，模組內建 pipeline，回傳時多掛 load／clearCache／isReady。實測（真模型、假麥克風）：
+Whistle 16.9 MB 模型載入 → 轉寫 → 停止都正常。
+
 **這裡踩到的坑（值得記）**：`makeAudioBuffer` 從 app.js 搬進 `src/util.js` 時漏了模組層的
 `SAMPLE_RATE`，瀏覽器直接 `ReferenceError` —— 但呼叫端的 `try/catch` 只印一行 warn，
 表現是「有在收音、字幕永遠不出來」。修法除了補常數，還加了 `test_util.js` 直接呼叫它
