@@ -29,5 +29,6 @@ jobs:
           node test_whistle_engine.js
           node test_underdog.js
           node test_subtitle.js
+          node test_modules.js
           node test_ga_csp.js
           node test_opencc_lazy.js

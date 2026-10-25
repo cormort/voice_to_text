@@ -88,6 +88,26 @@ Worker 化之後出現過兩個同型 bug，都是「**Worker 掛掉時的處理
 2. 即時引擎：允許瀏覽器存取麥克風 → 點「開始辨識」→ 說話後文字即時顯示 → 「停止辨識」→ 複製或匯出
 3. MOSS：拖放或點選音訊／影片檔 → 點「批次轉寫」→ 完成後輸出 SRT 字幕
 
+## 專案結構
+
+2026-10 之前所有程式都在 `index.html` 裡（單檔約 204 KB）。現在拆成：
+
+```
+index.html          版面與 CSS（約 30 KB）＋兩個小段 inline script（GA、SW 註冊）
+src/app.js          接線：狀態、DOM、引擎載入、辨識流程、雙語字幕
+src/i18n.js         中英文案（純資料）
+src/util.js         純函式：stamp / concat / resample / makeAudioBuffer / isLatinDominated
+src/vad.js          停頓分段：vadPush / vadFlush
+underdog-worker.js  Underdog Bark 3.0 的推論 worker（＋ underdog/{frontend,tdt}.js）
+mt-worker.js        本機翻譯 worker（transformers.js 3.8.1 + opus-mt-en-zh）
+whisper-worker.js / sherpa-worker.js / whistle-worker.js / whistle-engine.js
+sw.js               Service Worker 外殼快取（v10 起包含 src/*.js）
+test_*.js           Node 測試（見下），共用 test_src.js 讀取 index.html + src/*.js
+```
+
+沒有建置步驟：瀏覽器直接載入 ES module（`<script type="module" src="src/app.js">`），
+GitHub Pages 靜態伺服即可。`test_modules.js` 會擋住「把邏輯寫回 index.html」的退化。
+
 ## 技術說明
 
 - **Web Speech**：`webkitSpeechRecognition`
@@ -126,11 +146,12 @@ node test_sherpa_worker_api.js    # worker 訊息協定（不需要模型，見�
 node test_whistle_worker_api.js   # Whistle：呼叫層參數、worker 協定、UI 接線（不需要模型）
 node test_underdog.js             # Underdog Bark 3.0：mel 前處理不變量、TDT 迴圈規則、UI／worker 接線
 node test_subtitle.js             # 雙語字幕與量測：該翻／不該翻的判斷、只翻完整句、HUD 與 __sttMetrics
+node test_modules.js              # 模組邊界：主程式不得回流 index.html、sw 外殼要含 src/*.js
 node test_ga_csp.js               # GA 與 CSP／隱私聲明的一致性（放行清單、沒有過度放寬、聲明不實）
 node test_opencc_lazy.js          # OpenCC 按需載入：不得回到啟動路徑、單次注入、SRI、中文判斷
 ```
 
-這 10 支在 CI 上跑（`.github/workflows/test.yml`，約 12 秒、零依賴）。
+這 11 支在 CI 上跑（`.github/workflows/test.yml`，約 12 秒、零依賴）。
 需要 playwright 的 `test_speech_perf.js`（主執行緒阻塞量測）與 `test_worker_fallback.js`
 （Worker 退路）**不在 CI 內** —— 它們要另外準備 `PW_MODULE`，屬於本機手動執行的量測工具。
 

@@ -1,5 +1,7 @@
 'use strict';
 
+// v10：程式拆成 src/（app.js / i18n.js / util.js / vad.js），外殼要全部列入。
+// v9：主程式從 index.html 搬到 src/app.js（單檔 HTML 結束），外殼必須包含它。
 // v8：新增雙語字幕（mt-worker.js）與量測 HUD。
 // v7：新增 Underdog Bark 3.0 引擎（underdog-worker.js / underdog/frontend.js / underdog/tdt.js）。
 // v6：needle 引擎（needle.js + needle.wasm，實測傳輸 360 KB）不再預抓 —— 它只有選 Whistle
@@ -10,7 +12,7 @@
 // 而瀏覽器只會比對 sw.js 本身的位元來決定要不要更新 SW —— 只改 worker 不改 sw.js 的話，
 // install 不會重跑、cache.addAll 不會重抓，既有使用者會永遠拿到舊 worker。
 // 升版名同時讓 activate 的清快取邏輯把舊 shell 砍掉。
-const CACHE = 'stt-shell-v8';
+const CACHE = 'stt-shell-v10';
 // 只清「自己的」外殼快取版本。transformers-cache（Whisper 模型）與
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
@@ -41,6 +43,13 @@ const ASSETS = [
   './underdog-worker.js',
   './underdog/frontend.js',
   './underdog/tdt.js',
+  // 主程式（2026-10 從 index.html 搬到 src/）：外殼一定要有，否則離線開啟會白畫面。
+  // app.js 會 import src/i18n.js（文案）、src/util.js（純函式）、src/vad.js（分段），
+  // 三者都列進來，離線時才不會缺模組。
+  './src/app.js',
+  './src/i18n.js',
+  './src/util.js',
+  './src/vad.js',
   // 翻譯 worker（約 3 KB）：字幕條一開就會用到，體積可以忽略
   './mt-worker.js'
 ];

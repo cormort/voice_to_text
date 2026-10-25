@@ -22,7 +22,7 @@ const vm = require('vm');
 
 const ENGINE_SRC = fs.readFileSync(path.join(__dirname, 'whistle-engine.js'), 'utf8');
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'whistle-worker.js'), 'utf8');
-const HTML_SRC = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const HTML_SRC = require('./test_src.js')();
 
 let failed = 0;
 const check = (name, pass, detail = '') => {

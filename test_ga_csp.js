@@ -16,7 +16,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const HTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+// 主程式在 2026-10 搬到 src/app.js：CSP 在 HTML、隱私聲明在 app.js，兩邊一起看
+const HTML = require('./test_src.js')();
 
 let failed = 0;
 const check = (name, pass, detail = '') => {

@@ -16,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const HTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const HTML = require('./test_src.js')();
 const WORKER = fs.readFileSync(path.join(__dirname, 'mt-worker.js'), 'utf8');
 const SW = fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8');
 
@@ -34,9 +34,8 @@ function extract(name) {
   return match[0];
 }
 
-const sandbox = { mt: { script: 'zh-Hant' } };
-const helpers = new Function('mt', `${extract('isLatinDominated')}
-  return { isLatinDominated };`)(sandbox.mt);
+// isLatinDominated 在 2026-10 搬到 src/util.js（純函式），直接載入實作來測
+const helpers = require('./src/util.js');
 
 // ── 1. 該翻與不該翻 ─────────────────────────────────────────────────────
 check('英文句子要翻', helpers.isLatinDominated('So the key idea is a state space model.'));

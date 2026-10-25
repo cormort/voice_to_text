@@ -1,37 +1,33 @@
 // 最小可跑檢查：vadPush / vadFlush 的分段行為
-// 直接從 index.html 抽出函式原始碼，避免測試與實際程式碼分岔。
+// 直接載入 src/vad.js（2026-10 從 index.html 的 IIFE 搬出來、2026-10 再抽成模組）
 // 跑法：node test_vad.js
-const fs = require('fs');
 const assert = require('assert');
 
-const html = fs.readFileSync(`${__dirname}/index.html`, 'utf8');
-const src = [
-  /function vadPush\([\s\S]*?\n  \}\n/,
-  /function vadFlush\([\s\S]*?\n  \}\n/,
-  /function concat\([\s\S]*?\n  \}\n/
-].map(re => html.match(re)[0]).join('\n');
+const { vadPush, vadFlush } = require('./src/vad.js');
+const html = require('./test_src.js')();
 
 const SAMPLE_RATE = 16000;
 const CHUNK = 2048; // 128 ms @16 kHz
 
 // 每塊的第一個 sample 帶 marker，用來追蹤某一塊音訊在 utterance 中出現幾次
-const run = new Function('SAMPLE_RATE', 'CHUNK', `${src}
-  return function run(script, maxSeconds) {
-    const v = { speaking: false, silence: 0, speech: 0, pre: [], audio: [], samples: 0, threshold: 0.018,
-      // 沒給就沿用 vadPush 的 15 秒預設（v.maxSamples || SAMPLE_RATE * 15）
-      maxSamples: maxSeconds ? SAMPLE_RATE * maxSeconds : undefined };
-    const log = { utterances: [], flushed: null, speaking: false, samples: 0 };
-    for (const step of script) {
-      const chunk = new Float32Array(CHUNK);
-      if (step.marker !== undefined) chunk[0] = step.marker;
-      const out = vadPush(v, chunk, step.rms);
-      if (out) log.utterances.push(out);
-    }
-    log.speaking = v.speaking;
-    log.samples = v.samples;
-    log.flushed = vadFlush(v);
-    return log;
-  };`)(SAMPLE_RATE, CHUNK);
+function run(script, maxSeconds) {
+  const v = {
+    speaking: false, silence: 0, speech: 0, pre: [], audio: [], samples: 0, threshold: 0.018,
+    // 沒給就沿用 vadPush 的 15 秒預設（v.maxSamples || SAMPLE_RATE * 15）
+    maxSamples: maxSeconds ? SAMPLE_RATE * maxSeconds : undefined,
+  };
+  const log = { utterances: [], flushed: null, speaking: false, samples: 0 };
+  for (const step of script) {
+    const chunk = new Float32Array(CHUNK);
+    if (step.marker !== undefined) chunk[0] = step.marker;
+    const out = vadPush(v, chunk, step.rms);
+    if (out) log.utterances.push(out);
+  }
+  log.speaking = v.speaking;
+  log.samples = v.samples;
+  log.flushed = vadFlush(v);
+  return log;
+}
 
 const silence = n => Array.from({ length: n }, () => ({ rms: 0 }));
 const speech = (n, firstMarker = 42) =>

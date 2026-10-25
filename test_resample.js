@@ -1,12 +1,10 @@
 // 最小可跑檢查：resample 不應該在每一塊的尾端丟掉 sample
-// 直接從 index.html 抽出函式原始碼，避免測試與實際程式碼分岔。
+// 直接載入 src/util.js 的實作（2026-10 從 index.html 搬出來，測試也改成 import）
 // 跑法：node test_resample.js
-const fs = require('fs');
 const assert = require('assert');
 
-const html = fs.readFileSync(`${__dirname}/index.html`, 'utf8');
-const src = html.match(/function resample\([\s\S]*?\n  \}\n/)[0];
-const resample = new Function(`${src}\n  return resample;`)();
+const { resample } = require('./src/util.js');
+const html = require('./test_src.js')();
 
 const CHUNK = 2048;   // AudioWorklet 的緩衝大小
 

@@ -1,6 +1,6 @@
 // 從 index.html 抽出 fetchRange / downloadInChunks，用假 fetch 驗證分段與重試
 const fs=require('fs'), assert=require('assert');
-const html=fs.readFileSync(`${__dirname}/index.html`,'utf8');
+const html = require('./test_src.js')();
 const src=[/const CHUNK_BYTES = [^\n]*\n/, /async function fetchRange\([\s\S]*?\n  \}\n/,
            /async function downloadInChunks\([\s\S]*?\n  \}\n/, /async function streamWhole\([\s\S]*?\n  \}\n/]
   .map(re=>html.match(re)[0]).join('\n');

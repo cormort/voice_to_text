@@ -16,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const HTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const HTML = require('./test_src.js')();
 const WORKER = fs.readFileSync(path.join(__dirname, 'underdog-worker.js'), 'utf8');
 const FRONTEND = fs.readFileSync(path.join(__dirname, 'underdog', 'frontend.js'), 'utf8');
 const TDT = fs.readFileSync(path.join(__dirname, 'underdog', 'tdt.js'), 'utf8');

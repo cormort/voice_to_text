@@ -152,6 +152,12 @@ Playwright 假麥克風 e2e（現在只有本機手動腳本）。
 
 **判準**：Phase 1 之後如果出國開會就夠用，Phase 3 可以永遠不做。
 
+**已先做的一半（2026-10）**：不再堅持單檔 HTML —— 主程式搬到 `src/app.js`，
+`i18n`／`util`／`vad` 抽成獨立模組，`index.html` 只剩版面（204 KB → 30 KB）。
+沒有引入建置步驟（瀏覽器直接載 ES module），因為 GitHub Pages 是靜態託管，
+多一層 bundle 只換到 TypeScript，代價是每次改動都要 build + 驗證產物。
+`test_modules.js` 會擋住「邏輯又長回 index.html」。
+
 ## 六、明確不做
 
 - **Web Speech 不當主力**：延遲與隱私都不確定，只留作 fallback。

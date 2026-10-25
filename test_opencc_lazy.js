@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const HTML = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const HTML = require('./test_src.js')();
 
 let failed = 0;
 const check = (name, pass, detail = '') => {
@@ -45,7 +45,7 @@ check('OPENCC_SRI 是 sha384 的 base64 摘要',
 
 // ── 2) 真的把邏輯跑起來（不是只比對字串）────────────────────────────────────
 const start = HTML.indexOf('  const OPENCC_URL');
-const end = HTML.indexOf('  function stamp(');
+const end = HTML.indexOf('  function commit(');
 check('找得到 OpenCC 區塊', start > 0 && end > start, `${start}..${end}`);
 if (start < 0 || end <= start) { console.log('\n1 項失敗'); process.exitCode = 1; return; }
 const block = HTML.slice(start, end);

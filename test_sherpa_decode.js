@@ -4,7 +4,7 @@
 const fs = require('fs');
 const assert = require('assert');
 
-const html = fs.readFileSync(`${__dirname}/index.html`, 'utf8');
+const html = require('./test_src.js')();
 const src = html.match(/function sherpaDecode\(sessionId\) \{[\s\S]*?\n  \}/)[0];
 
 function run({ ready, text, endpoint, sessionId = 1 }) {
