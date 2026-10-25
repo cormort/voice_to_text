@@ -208,8 +208,13 @@ function makeFetch({ failAfter = Infinity, etag = '"v1"' } = {}) {
       await writer.write(Uint8Array.from([4, 5]));
       assert.strictEqual(disk.flushes, 1, '每一段寫完都要 flush');
       await writer.write(Uint8Array.from([6]));
+      assert.deepStrictEqual(Array.from(disk.bytes), [1, 2, 3, 4, 5, 6], '沒給 position：接在既有內容後面');
+      // 給了 position 就寫在那裡；之後沒給 position 的寫入接在「這次寫完的地方」
+      await writer.write(Uint8Array.from([7, 8]), 1);
+      assert.deepStrictEqual(Array.from(disk.bytes), [1, 7, 8, 4, 5, 6], 'position 要被採用，不能被當成追加');
+      await writer.write(Uint8Array.from([9]));
+      assert.deepStrictEqual(Array.from(disk.bytes), [1, 7, 8, 9, 5, 6], '之後的追加從上一次寫完的位置接');
       await writer.close();
-      assert.deepStrictEqual(Array.from(disk.bytes), [1, 2, 3, 4, 5, 6], '接在既有內容後面');
       assert.ok(disk.closed, 'close 要釋放 sync handle（否則之後讀不到檔案）');
     } finally {
       if (saved) Object.defineProperty(globalThis, 'navigator', saved);

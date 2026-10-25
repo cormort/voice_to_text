@@ -99,11 +99,14 @@ export const opfsStore = {
       if (access) {
         let at = access.getSize();
         return {
-          write: async data => {
+          // position 有給就寫在那個位置（呼叫端最清楚這段屬於檔案的哪裡）；
+          // 沒給就接在上一次寫完的地方（一開始是檔案現有大小）。
+          write: async (data, position) => {
             const view = data instanceof Uint8Array ? data : new Uint8Array(data);
+            const start = Number.isFinite(position) ? position : at;
             let done = 0;
-            while (done < view.length) done += access.write(view.subarray(done), { at: at + done });
-            at += view.length;
+            while (done < view.length) done += access.write(view.subarray(done), { at: start + done });
+            at = start + view.length;
             access.flush();             // 這一段落地：之後就算分頁被關，下次也從這裡接
           },
           close: async () => { try { access.flush(); } finally { access.close(); } },
@@ -113,8 +116,8 @@ export const opfsStore = {
     }
     const writable = await handle.createWritable({ keepExistingData: true });
     return {
-      // 只追加、不指定位置：續傳的情境一定是「已經有前段、往後接」，
-      // 用 append 比 position 少一個出錯的地方（position 忘了帶就默默覆蓋開頭）。
+      // 退路只追加、忽略 position：續傳時呼叫端給的 position 一定等於現有大小，
+      // 追加的結果相同，又少一個出錯的地方（position 算錯就默默覆蓋開頭）。
       write: data => writable.write({ type: 'write', data }),
       close: () => writable.close(),
       abort: async () => { try { await writable.abort(); } catch { /* 已經關了 */ } },
@@ -240,7 +243,9 @@ export async function downloadResumable(url, key, {
     while (offset < total) {
       const end = Math.min(offset + chunkBytes, total) - 1;
       const part = await range(url, offset, end);
-      await writer.write(part, offset);            // 指定位置寫入（續傳時前段已在檔案裡）
+      // 寫在 offset：sync handle 照位置寫；createWritable 退路是追加，
+      // 而 offset 從檔案現有大小起算、每段連續，所以兩者結果相同
+      await writer.write(part, offset);
       offset += part.length;
       onProgress(offset, total);
     }
