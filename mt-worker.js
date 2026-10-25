@@ -42,7 +42,12 @@ async function load(model) {
 
 async function translate(id, text) {
   if (!state.pipe) throw new Error('翻譯模型尚未載入');
-  const out = await state.pipe(text, { max_new_tokens: 160 });
+  // 有些引擎輸出全大寫；Marian 對全大寫很不穩，實測
+  // 「MICROPHONE TWO THREE ONE TWO THREE」→「麦克风2 2 2 2 3 3 3…」（162 字、1.3 s），
+  // 轉小寫後是「麦克风二 二 三一二三」。no_repeat_ngram_size 再擋住其他的重複迴圈。
+  // 一般句子兩者都不影響（實測三句正常英文譯文逐字相同）。
+  const input = text === text.toUpperCase() ? text.toLowerCase() : text;
+  const out = await state.pipe(input, { max_new_tokens: 160, no_repeat_ngram_size: 3 });
   const zh = Array.isArray(out)
     ? out.map(x => x.translation_text || '').join(' ')
     : (out.translation_text || '');
