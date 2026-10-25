@@ -198,7 +198,11 @@ async function loadUnderdog() {
       underdog.loaded = true;
       underdog.base = base;
       underdog.variant = variant;
-      el.underdogStatus.textContent = `${t().loaded}（WASM / CPU，${((ready.ms || 0) / 1000).toFixed(1)} s）`;
+      // 執行緒數一定要看得見：隔離失效時會掉回 1 執行緒、慢 2–3 倍，而畫面不會報錯。
+      // worker 在 ready 訊息裡帶回 threads，這裡直接寫進狀態列（×1 / ×4）。
+      const activeThreads = Number(ready.threads) || 1;
+      try { window.__underdogThreads = activeThreads; } catch { /* 非瀏覽器環境 */ }
+      el.underdogStatus.textContent = `${t().loaded}（WASM / CPU ×${activeThreads}，${((ready.ms || 0) / 1000).toFixed(1)} s）`;
       el.underdogStatus.className = 'model-status success';
     } catch (error) {
       console.error('Underdog load failed:', error);

@@ -2684,6 +2684,8 @@ import { opfsStore, opfsAvailable } from './opfs.js';
         models: t().storageModels,
         caches: t().storageCaches,
         warnings: t().storageWarnings,
+        isolation: t().storageIsolation,
+        threads: t().storageThreads,
         none: t().storageNone,
       });
     })();

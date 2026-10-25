@@ -85,6 +85,11 @@ export async function collectStorageReport({
   warnings = typeof window !== 'undefined' && window.__engineWarnings
     ? () => window.__engineWarnings.history()
     : () => [],
+  // 隔離與執行緒數：Underdog 只有在 crossOriginIsolated 時才會開多執行緒，
+  // 而「沒開」的時候畫面完全正常、只是慢 2–3 倍 —— 所以要能在這裡一眼看出來。
+  isolation = typeof window !== 'undefined'
+    ? () => ({ crossOriginIsolated: !!window.crossOriginIsolated, threads: Number(window.__underdogThreads) || null, cores: navigator.hardwareConcurrency || null })
+    : () => ({ crossOriginIsolated: false, threads: null, cores: null }),
 } = {}) {
   const report = { at: new Date().toISOString(), ua: typeof navigator !== 'undefined' ? navigator.userAgent : 'node', quota: null, usage: null, persisted: null, opfs: null, models: [], caches: [] };
 
@@ -127,6 +132,13 @@ export async function collectStorageReport({
   // 這些是「不致命、但發生過」的事：cache 寫入失敗、OPFS 續傳中止、WebGPU 退回 WASM…
   // 出國前看一次就知道這台機器載模型時踩過什麼。
   try {
+    report.isolation = typeof isolation === 'function' ? await isolation() : (isolation || null);
+  } catch (error) {
+    report.isolation = null;
+    report.isolationError = String((error && error.message) || error);
+  }
+
+  try {
     const entries = typeof warnings === 'function' ? await warnings() : (warnings || []);
     report.warnings = Array.isArray(entries) ? entries.slice(-10) : [];
   } catch (error) {
@@ -143,6 +155,7 @@ export function renderStorageReport(report, t = {}) {
     title: '儲存空間診斷', close: '關閉', copy: '複製 JSON',
     quota: '配額', usage: '已用', available: '剩餘', persisted: '已申請持久化',
     opfs: 'OPFS 寫入測試', models: 'OPFS 模型', caches: 'Cache Storage', warnings: '警告紀錄', none: '（無）',
+    isolation: '跨來源隔離', threads: '執行緒',
     ...t,
   };
   const el = document.createElement('div');
@@ -177,6 +190,9 @@ export function renderStorageReport(report, t = {}) {
     ${row(strings.usage, `${formatBytes(report.usage)}${report.usageRatio != null ? `（${(report.usageRatio * 100).toFixed(1)}%）` : ''}`)}
     ${row(strings.available, formatBytes(report.available))}
     ${row(strings.persisted, yesNo(report.persisted))}
+    ${row(strings.isolation, report.isolation
+      ? `${report.isolation.crossOriginIsolated ? '✅ 已隔離' : '❌ 未隔離（Underdog 只能單執行緒）'}｜${strings.threads} ${report.isolation.threads ?? '—'}／核心 ${report.isolation.cores ?? '—'}`
+      : '?')}
     ${report.quotaError ? `<div style="color:#ffb4b4">${report.quotaError}</div>` : ''}
     <hr style="border-color:#ffffff22;margin:10px 0">
     ${row(strings.opfs, report.opfs && report.opfs.ok
