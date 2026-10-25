@@ -76,6 +76,9 @@ check('字幕條元素存在（中文大字＋原文小字）',
   /id="subtitleBar"/.test(HTML) && /class="subtitle-zh"/.test(HTML) && /class="subtitle-en"/.test(HTML));
 check('只留最近兩句', /function recentSubtitleSegments\(n = 2\)/.test(HTML));
 check('字幕條會跳過標記句', /\/\^--- \.\* ---\$\/\.test\(segment\.text\)\) continue;/.test(HTML));
+// 關窗的 pagehide 先把 pipWindow 設成 null，任何「在 if (pipWindow) 裡才復原」的 inline
+// display 都會漏掉 —— 關過一次浮動窗，主視窗字幕條就永遠看不到。主字幕條只准用 hidden 控制。
+check('主視窗字幕條不用 inline display 控制（關浮動窗後才會回來）', !/subtitleBar\.style\.display/.test(HTML));
 check('Document PiP 有支援檢查與退路',
   /'documentPictureInPicture' in window/.test(HTML) && /t\(\)\.pipUnsupported/.test(HTML) && /t\(\)\.pipFailed/.test(HTML));
 check('浮動視窗會複製樣式並共用同一個渲染函式',

@@ -1678,11 +1678,11 @@ import { opfsStore, opfsAvailable } from './opfs.js';
       // 視窗被關掉、或拿不到裡面的字幕條（headless／視窗還沒掛上 DOM）都算關閉：
       // 不這樣收尾的話，主視窗的字幕條會一直維持隱藏，看起來像「字幕不見了」
       pipBar = pipWindow.closed ? null : pipWindow.document.getElementById('subtitleBarPip');
-      if (!pipBar) {
-        pipWindow = null;
-        el.subtitleBar.style.display = '';
-      }
+      if (!pipBar) pipWindow = null;
     }
+    // 主視窗字幕條只用 hidden 控制。以前開浮動窗時另外寫了 style.display = 'none'，
+    // 而關窗的 pagehide 會先把 pipWindow 設成 null，上面那段收尾就跑不到 ——
+    // 結果 hidden 已經是 false、inline display 還是 none，關過一次浮動窗字幕就消失。
     const show = mt.enabled || !!pipBar;
     el.subtitleBar.hidden = !show || !!pipBar;
     if (!el.subtitleBar.hidden) targets.push(el.subtitleBar);
@@ -1739,7 +1739,6 @@ import { opfsStore, opfsAvailable } from './opfs.js';
         pipWindow = null;
         renderSubtitles();
       });
-      el.subtitleBar.style.display = 'none';
       renderSubtitles();
     } catch (error) {
       console.warn('Document PiP failed:', error);

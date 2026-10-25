@@ -19,7 +19,7 @@
 | 為什麼測不到 | `documentPictureInPicture.requestWindow()` 需要**真實使用者手勢**（transient activation）。程式呼叫 `element.click()` 沒有這個授權，會直接丟 `NotAllowedError`。headless Chrome 沒有視窗管理員，in-app browser 完全打不開 PiP 視窗。 |
 | 怎麼做 | 用**實機 Chrome**（非 headless、非 in-app）開 <https://cormort.github.io/voice_to_text/>，選一個引擎並載入模型，勾「翻譯」，按「**浮動字幕窗**」。 |
 | 通過標準 | ① 彈出一個獨立的小視窗；② 視窗裡有字幕條（譯文大字、原文小字），而且與主視窗同步更新；③ 主視窗的頁內字幕條會收起來；④ 關掉浮動視窗後，主視窗的字幕條**自己回來**（`subtitleTargets()` 的收尾邏輯）。 |
-| 目前狀態 | 程式路徑已實作、失敗時的退路（toast + 頁內字幕條）已驗；**視窗本身沒人看過**。 |
+| 目前狀態 | 程式路徑已實作、失敗時的退路（toast + 頁內字幕條）已驗。2026-10-25 實機使用時踩到 ④ 失敗（關過一次浮動窗，主視窗字幕就不見），已修（主字幕條改成只用 `hidden` 控制），並以 popup 代替 PiP 的 headless 腳本驗過開關兩輪；**修正後尚待實機再按一次**。 |
 | 已知風險 | 若拿不到 `documentPictureInPicture.window`，`subtitleTargets()` 會把它當成「已關閉」並恢復頁內字幕條（這條有寫在程式裡，但沒有實機走過）。 |
 
 ---
