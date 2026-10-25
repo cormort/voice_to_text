@@ -7,9 +7,10 @@
 // 執行環境的取捨（都實測過）：
 //   * WebGPU：這份 q4f16 圖在 ORT 1.30 的 WebGPU EP 會建出無效的 compute pipeline
 //     （Add/Cast/Sigmoid 全部失敗、encoder_lengths 回 0），只有 WASM EP 可用。
-//   * 多執行緒 WASM 需要 crossOriginIsolated（COOP/COEP 標頭），GitHub Pages 給不了，
-//     所以固定 numThreads = 1。實測 encoder 對 2.67 秒音訊約 3.2 秒（RTF 1.19）；
-//     同機 4 執行緒是 1.6 秒（RTF 0.60），值得但不合本站的部署條件。
+//   * 多執行緒 WASM 需要 crossOriginIsolated（COOP/COEP 標頭）。GitHub Pages 不能設標頭，
+//     改由 sw.js 在同源回應上補（COEP: credentialless）；隔離成功就開多執行緒（見 pickThreads），
+//     否則（Safari、SW 還沒接手的第一次造訪）維持 1 執行緒。
+//     早期實測 encoder 對 2.67 秒音訊：1 執行緒 3.2 秒（RTF 1.19）、4 執行緒 1.6 秒（RTF 0.60）。
 //
 // 下載量：q4f16 = encoder graph 1.2 MB + encoder 權重 432 MB + decoder_joint 66 MB
 //         （＋ tokenizer.json 1.1 MB），全部存進 Cache Storage（UNDERDOG_CACHE）。
@@ -21,7 +22,7 @@ import { greedyTdt, detokenize, piecesFromTokenizer, checkShapes } from './under
 import { downloadResumable, opfsAvailable, opfsStore, opfsKey } from './src/opfs.js';
 
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/';
-ort.env.wasm.numThreads = 1;
+ort.env.wasm.numThreads = 1;           // 真正的值在第一次 load() 決定（見 pickThreads）
 ort.env.wasm.proxy = false;
 ort.env.logLevel = 'error';
 
@@ -137,7 +138,19 @@ async function fetchBytes(url, cache, onProgress, label) {
   return bytes;
 }
 
+// 有跨來源隔離（sw.js 補的 COOP/COEP）才開多執行緒，否則 SharedArrayBuffer 不存在，
+// ORT 會自己退回單執行緒但先印一堆警告 —— 這裡直接講清楚。上限 4：實測 4 執行緒已經
+// 接近 encoder 的平行上限，再多只是跟主執行緒、翻譯 worker 搶核心。
+// 頁面網址的 `?threads=N` 可以覆蓋（量測 A/B 用）。ORT 只在第一次建 session 時讀這個值。
+function pickThreads(requested) {
+  if (!self.crossOriginIsolated) return 1;
+  const cores = Math.max(1, Number(self.navigator && self.navigator.hardwareConcurrency) || 1);
+  const n = Number(requested) > 0 ? Number(requested) : Math.min(4, cores);
+  return Math.max(1, Math.floor(n));
+}
+
 async function load(base, variant, id, options = {}) {
+  if (!state.encSession) ort.env.wasm.numThreads = pickThreads(options.threads);
   const dir = new URL(base.endsWith('/') ? base : base + '/', self.location.href).href;
   CONFIG.useOpfs = !!options.useOpfs;
   const cache = await openCache();
@@ -181,7 +194,7 @@ async function load(base, variant, id, options = {}) {
     extract: makeFrontend(pp), pieces,
   });
 
-  send({ type: 'ready', id, ms: performance.now() - t0 });
+  send({ type: 'ready', id, ms: performance.now() - t0, threads: ort.env.wasm.numThreads });
 }
 
 async function transcribe(audio, id) {
@@ -208,7 +221,7 @@ self.onmessage = event => {
   const msg = event.data || {};
   if (msg.type === 'load') {
     // 載入是一次性的，序列化避免與轉寫交錯
-    chain = chain.then(() => load(msg.baseUrl, msg.variant || 'q4f16', msg.id || 'load', { useOpfs: msg.useOpfs }))
+    chain = chain.then(() => load(msg.baseUrl, msg.variant || 'q4f16', msg.id || 'load', { useOpfs: msg.useOpfs, threads: msg.threads }))
       .catch(error => fail(msg.id || 'load', 'load', error));
     return;
   }

@@ -18,7 +18,7 @@
 // 而瀏覽器只會比對 sw.js 本身的位元來決定要不要更新 SW —— 只改 worker 不改 sw.js 的話，
 // install 不會重跑、cache.addAll 不會重抓，既有使用者會永遠拿到舊 worker。
 // 升版名同時讓 activate 的清快取邏輯把舊 shell 砍掉。
-const CACHE = 'stt-shell-v26';
+const CACHE = 'stt-shell-v27';
 // 只清「自己的」外殼快取版本。transformers-cache（Whisper 模型）與
 // sherpa-onnx-model-v1（sherpa 的 .data）是模型快取，砍掉會讓使用者重新下載數百 MB，
 // 所以用前綴比對而不是「除了 CACHE 以外全刪」。
@@ -108,6 +108,25 @@ function putInCache(request, response) {
     .catch((error) => console.warn('SW cache put failed:', request, error));
 }
 
+// 跨來源隔離（crossOriginIsolated）：多執行緒 WASM 需要 SharedArrayBuffer，而它只在
+// 頁面帶 COOP/COEP 標頭時才開放。GitHub Pages 不能設標頭，所以由這個 SW 在同源回應上補。
+//   * COEP 用 credentialless 而不是 require-corp：HF／jsDelivr／GA 的資源沒有 CORP 標頭，
+//     require-corp 會把它們全擋掉；credentialless 只是「跨來源 no-cors 請求不帶 cookie」。
+//   * 要補在「所有」同源回應上，不只頁面：dedicated worker 的隔離狀態看它自己的腳本回應。
+//   * Safari 不認得 credentialless，會當成沒有 COEP —— 頁面照常運作，只是維持單執行緒。
+// Underdog 實測（同機、11 秒英文）：見 ARCHITECTURE「跨來源隔離」。
+const ISOLATION_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+};
+
+function withIsolation(response) {
+  if (!response || response.type === 'opaque' || response.status === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(ISOLATION_HEADERS)) headers.set(name, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -125,18 +144,18 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request).then((response) => {
         if (isCacheable(request, response)) event.waitUntil(putInCache('./index.html', response));
-        return response;
-      }).catch(() => caches.match('./index.html'))
+        return withIsolation(response);
+      }).catch(() => caches.match('./index.html').then(withIsolation))
     );
     return;
   }
 
   event.respondWith(
     caches.match(request).then((hit) => {
-      if (hit) return hit;
+      if (hit) return withIsolation(hit);
       return fetch(request).then((response) => {
         if (isCacheable(request, response)) event.waitUntil(putInCache(request, response));
-        return response;
+        return withIsolation(response);
       });
     })
   );

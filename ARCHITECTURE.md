@@ -285,3 +285,31 @@ OPFS-FILES ["undefined:66.7MB"]
   實測（真 HF 檔案、128 KB 分段）：寫到 512 KB 時直接 `terminate()` worker，OPFS 裡留下 524,288 bytes；
   新 worker 從 524,288 續傳，結果與直接下載逐位元組相同；手動改壞 `.meta` 的 ETag 後會從 0 重抓。
   432 MB 首次載入的時間還沒重測 —— 少了 `close()` 時的整份搬移，預期會比 102 s 快，但上面兩個待辦仍然要做。
+
+## 八、跨來源隔離：Underdog 多執行緒（2026-10）
+
+多執行緒 WASM 需要 `SharedArrayBuffer`，而它只在頁面 `crossOriginIsolated` 時存在，也就是要帶
+COOP／COEP 標頭。GitHub Pages 不能設標頭，所以改由 **sw.js 在所有同源回應上補**：
+
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: credentialless` —— 不用 `require-corp`：HF、jsDelivr、GA 都沒有
+  CORP 標頭，`require-corp` 會把它們全擋掉；`credentialless` 只是讓跨來源 no-cors 請求不帶 cookie。
+- 第一次造訪時頁面還沒被 SW 控制，拿不到標頭 → SW 接手後重整一次。只限「載入時沒有 controller」，
+  SW 更新時不重整（錄音中不能被打斷）。
+- Safari 不認得 `credentialless`，等於沒有 COEP：頁面照常，Underdog 維持 1 執行緒。
+
+`underdog-worker.js` 的 `pickThreads`：隔離時 `min(4, hardwareConcurrency)`，否則 1；`?threads=N` 可覆蓋（量測用）。
+
+實測（桌機 Chrome、6 核、JFK 11 秒英文、q4f16、暖機一次後取三次）：
+
+| | 轉寫 11 秒音訊 | RTF |
+| --- | --- | --- |
+| 1 執行緒（改前） | 9.3–10.2 s | 0.85–0.93 |
+| 4 執行緒（隔離後自動選） | 3.1–4.3 s | **0.28–0.39** |
+
+兩者逐字稿完全相同。Underdog 從「比即時慢」變成「追得上即時」，§一的判準（RTF ≥ 1 不准進 Live）
+在桌機上不再擋它；手機核心少、會降頻，要另外量。
+
+隔離後確認過：Vosk（jsDelivr classic script＋SRI）、transformers.js（jsDelivr ESM）、GA 都照常載入，
+console 沒有錯誤。**浮動字幕窗（Document PiP）沒驗到**：測試用的內建瀏覽器本來就開不了 PiP 視窗
+（未隔離的線上版同樣失敗），要在真的 Chrome 裡確認一次。

@@ -140,7 +140,7 @@ Conway Research 的 [Underdog Bark 3.0](https://huggingface.co/ConwayResearch/Un
 | --- | --- | --- |
 | mel 前處理 | **44–61 ms** | 與 `fixture/input_features.npy` 的最大差 **9.6e-5**（tdt.py 自己對 torch 的差也是 ~1e-4） |
 | encoder（WASM，1 執行緒） | **3.19 s** | RTF **1.19** |
-| encoder（WASM，4 執行緒） | **1.61 s** | RTF **0.60** —— 需要 COOP/COEP，GitHub Pages 給不了，所以不採用 |
+| encoder（WASM，4 執行緒） | **1.61 s** | RTF **0.60** —— 需要 COOP/COEP；2026-10 起由 sw.js 補標頭後**已採用**（見 ARCHITECTURE「跨來源隔離」） |
 | decoder_joint | **65 ms / 19 步**（約 3.8 ms/步） | 每步一次 session.run，權重 66.7 MB |
 | 端到端 RTF | **約 1.2** | 比即時慢，定位是高準確度批次／段落，不是即時字幕 |
 | 首次載入 | **31.6 s**（432 MB 約 22 s @ ~20 MB/s） | 之後由 `UNDERDOG_CACHE` 命中，約 2 s |

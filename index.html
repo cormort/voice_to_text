@@ -565,6 +565,13 @@
   <script type="module" src="src/app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
+      // 跨來源隔離的標頭由 sw.js 補：第一次造訪時頁面還沒被 SW 控制，拿不到。
+      // SW 接手後重新整理一次 —— 只限「載入時沒有 controller」的第一次，
+      // 之後 SW 更新（也會觸發 controllerchange）不重整，錄音中的頁面不會被打斷。
+      const firstVisit = !navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (firstVisit && !self.crossOriginIsolated) location.reload();
+      });
       addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js').catch((err) => console.warn('SW registration failed:', err));
       });
