@@ -17,6 +17,8 @@ import { decodeSherpa } from './engines/sherpa-decode.js';
 import { createWhistleEngine } from './engines/whistle.js';
 import { createUnderdogEngine } from './engines/underdog.js';
 import { downloadInChunks, formatProgress } from './download.js';
+import { collectStorageReport, renderStorageReport } from './storage-debug.js';
+import { opfsStore, opfsAvailable } from './opfs.js';
   const CDN = {
     vosk: 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js',
     // 版本已鎖定，順便用 SRI 確認拿到的就是這一份（CDN 或套件被換掉時會直接載入失敗）
@@ -2646,3 +2648,31 @@ import { downloadInChunks, formatProgress } from './download.js';
   }
   render();
   if (restoredCount) showToast(`${t().transcriptRestored}（${restoredCount}）`);
+
+// ?debug=storage：儲存空間診斷（配額、OPFS 可寫性、各 cache 佔用）。
+// 這頁存在的理由：OPFS 那次事故「配額不足 → 靜靜退回 → 每次重抓 431.9 MB」，
+// 畫面上完全看不出來。與其用載入時間猜，不如出國前打開這頁看一眼。
+{
+  const debug = new URLSearchParams(location.search).get('debug') || '';
+  if (debug.split(',').includes('storage')) {
+    void (async () => {
+      const report = await collectStorageReport({
+        opfs: (await opfsAvailable()) ? opfsStore : null,
+      });
+      window.__storageReport = report;
+      renderStorageReport(report, {
+        title: t().storageDebugTitle,
+        close: t().storageDebugClose,
+        copy: t().storageDebugCopy,
+        quota: t().storageQuota,
+        usage: t().storageUsage,
+        available: t().storageAvailable,
+        persisted: t().storagePersisted,
+        opfs: t().storageOpfs,
+        models: t().storageModels,
+        caches: t().storageCaches,
+        none: t().storageNone,
+      });
+    })();
+  }
+}
