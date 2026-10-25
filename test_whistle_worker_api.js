@@ -266,7 +266,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 0));
     ['設定面板', /id="whistleConfig"/],
     ['載入按鈕', /id="loadWhistleBtn"/],
     ['清除快取按鈕', /id="clearWhistleCacheBtn"/],
-    ['ENGINES 分派', /whistle:\s*\{\s*start:\s*startWhistle,\s*stop:\s*stopWhistle\s*\}/],
+    ['ENGINES 分派', /whistle: whistleEngine,/],
     ['KNOWN_ENGINES 白名單', /KNOWN_ENGINES = \[[^\]]*'whistle'/],
     ['Service Worker 外殼清單', /'\.\/whistle-worker\.js'/, SW_SRC]
   ];

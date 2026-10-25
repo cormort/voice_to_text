@@ -176,7 +176,7 @@ const PP = {
   check('設定面板存在（面板 id、進度條、狀態）',
     /id="underdogConfig"/.test(HTML) && /id="underdogProgressBar"/.test(HTML) && /id="underdogStatus"/.test(HTML));
   check('el 對應表有元素', /underdogStatus: \$\('underdogStatus'\)/.test(HTML));
-  check('ENGINES 有 underdog 的 start/stop', /underdog: \{ start: startUnderdog, stop: stopUnderdog \}/.test(HTML));
+  check('ENGINES 註冊表有 underdog（Phase 2 之後是引擎物件）', /underdog: underdogEngine,/.test(HTML) && /const underdogEngine = createBatchPipeline\(/.test(HTML));
   check('updateEngine 會切換面板', /el\.underdogConfig\.classList\.toggle\('visible', state\.engine === 'underdog'\)/.test(HTML));
   check('狀態卡有引擎名稱與執行環境',
     /underdog: 'Underdog Bark 3\.0'/.test(HTML) && HTML.includes("underdog: 'WASM / CPU'"));

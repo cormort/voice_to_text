@@ -84,9 +84,12 @@ check('字幕大小可調且作用到浮動視窗', /function applySubScale\(val
 
 // ── 4. 量測（Phase 0）───────────────────────────────────────────────────
 check('量測有 submit／commit 兩個端點', /function metricsSubmit\(engine, samples\)/.test(HTML) && /function metricsCommit\(job, text\)/.test(HTML));
-check('每個批次引擎都有掛量測',
-  ['metricsSubmit\\(\'whisper\'', 'metricsSubmit\\(\'whistle\'', 'metricsSubmit\\(\'underdog\''].every(p => new RegExp(p).test(HTML)) &&
-  (HTML.match(/metricsCommit\(job\.job, text\)/g) || []).length === 3);
+// Phase 2：量測改由共用的批次 pipeline 打點一次，三個引擎只要宣告自己的 id
+check('每個批次引擎都經過同一條 pipeline（量測不會漏掉任何一個）',
+  /id: 'whisper'/.test(HTML) && /id: 'whistle'/.test(HTML) && /id: 'underdog'/.test(HTML) &&
+  /metricsSubmit\(engineName, audio\.length\)/.test(HTML) &&
+  (HTML.match(/metricsCommit\(job\.job, text\)/g) || []).length === 1 &&
+  /metricsSubmit, metricsCommit/.test(HTML));
 check('RTF＝處理時間／音訊長度', /rtf: job\.audioSec > 0 \? Number\(\(latency \/ job\.audioSec\)\.toFixed\(2\)\)/.test(HTML));
 check('有 longtask 觀測', /entryTypes: \['longtask'\]/.test(HTML));
 check('HUD 預設關閉', /id="metricsHud" hidden/.test(HTML));

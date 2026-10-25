@@ -87,7 +87,8 @@ assert.ok(r.samples <= SAMPLE_RATE * 11, `上限 10 秒時緩衝不應無限成�
 
 // Whistle 真的用了 10 秒（而不是只是「可以調」）
 assert.ok(/const WHISTLE_SEGMENT_SECONDS = 10;/.test(html), 'index.html 應定義 WHISTLE_SEGMENT_SECONDS = 10');
-assert.ok(/const vad = createVad\(WHISTLE_SEGMENT_SECONDS\)/.test(html), 'Whistle 的 VAD 應使用 WHISTLE_SEGMENT_SECONDS');
+// Phase 2 之後 VAD 由 src/engines/batch.js 統一建立，長度改成由引擎 spec 傳進去
+assert.ok(/segmentSeconds: WHISTLE_SEGMENT_SECONDS/.test(html), 'Whistle 引擎的 VAD 應使用 WHISTLE_SEGMENT_SECONDS');
 assert.ok(/function createVad\(maxSeconds = 15\)/.test(html), 'createVad 的預設值應為 15 秒（Whisper 沿用）');
 
 console.log('vadPush/vadFlush: 7 checks passed');

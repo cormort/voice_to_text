@@ -145,6 +145,23 @@ interface AsrStream extends AsyncIterable<Hypothesis> {  // partial | final | er
 而 `whisper`／`whistle`／`underdog` 三條批次管線應該共用同一個
 `makeBatchPipeline({ transcribe, maxQueued, onText })`。
 
+**狀態：批次引擎已完成（2026-10）** —— `src/engines/batch.js` 提供 `createBatchPipeline(ctx, spec)`，
+Whisper／Whistle／Underdog 三個引擎只填「可不可以開始、要帶什麼參數、怎麼推論、失敗怎麼講」，
+排隊、回壓、session 隔離、啟停、收尾、量測都只有一份。介面固定為
+
+```js
+{ id, role, engineName, runtime, start(), stop(), enqueue(audio),
+  drain(), drainAll(), isBusy(), reset() }
+```
+
+`ENGINES` 變成註冊表：批次引擎直接放 pipeline 物件，其餘（vosk／sherpa／webspeech／moss）
+先包成 `{ role, start, stop }`。`test_engines.js` 守住三件事：註冊表每一項都有 role、
+`drainPromise` 只准出現在 pipeline 裡、回壓與 session 隔離的行為（用假引擎實際跑一次）。
+
+**還沒做**：把模型載入碼也搬進 `src/engines/*.js`（目前仍在 `app.js`，因為它大量讀寫
+`el.*` 進度條與狀態文字）；sherpa／vosk 要收斂成同一介面，得先讓它們的串流結果走
+`AsyncIterable<Hypothesis>`，那是下一階段。
+
 ### Phase 3：外殼重寫
 
 Vite + TypeScript + Svelte、OPFS 模型管理、IndexedDB session 儲存、

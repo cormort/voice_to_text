@@ -10,6 +10,7 @@
 import { T } from './i18n.js';
 import { stamp, concat, resample, makeAudioBuffer, isLatinDominated } from './util.js';
 import { vadPush, vadFlush } from './vad.js';
+import { createBatchPipeline } from './engines/batch.js';
   const CDN = {
     vosk: 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js',
     // 版本已鎖定，順便用 SRI 確認拿到的就是這一份（CDN 或套件被換掉時會直接載入失敗）
@@ -116,19 +117,17 @@ import { vadPush, vadFlush } from './vad.js';
     module: null, recognizer: null, stream: null, session: null,
     loaded: false, loadPromise: null, sessionId: 0, base: null
   };
+  // 每個引擎只宣告「自己專屬」的狀態。**佇列、目前 session、VAD、dropWarned 由
+  // src/engines/batch.js 的 pipeline 初始化並管理**（Phase 2 收斂），不要在下面加回來。
   const whisper = {
-    module: null, pipe: null, model: null, device: null, session: null,
-    queue: [], drainPromise: null, sessionId: 0, loadPromise: null, vad: null,
-    dropWarned: false
+    module: null, pipe: null, model: null, device: null, loadPromise: null
   };
   const whistle = {
-    module: null, loaded: false, loadPromise: null, url: null, session: null,
-    queue: [], drainPromise: null, sessionId: 0, vad: null, workerMode: false, dropWarned: false
+    module: null, loaded: false, loadPromise: null, url: null, workerMode: false
   };
   // Underdog Bark 3.0：0.6B 的 parakeet-TDT，模型留在 Worker 裡（主執行緒只收進度與文字）
   const underdog = {
-    loaded: false, loadPromise: null, base: null, variant: null, session: null,
-    queue: [], drainPromise: null, sessionId: 0, vad: null, dropWarned: false
+    loaded: false, loadPromise: null, base: null, variant: null
   };
   let toastTimer;
   const openccConverters = new Map();
@@ -235,9 +234,6 @@ import { vadPush, vadFlush } from './vad.js';
   // 降取樣（例如 48k → 16k）先做整數倍的移動平均當低通濾波，否則 8 kHz 以上的
   // 頻率會折疊回語音頻帶；非整數倍（44.1k → 16k）仍走線性內插。
 
-
-
-
   function showToast(message) {
     const toast = $('toast');
     toast.textContent = message;
@@ -320,8 +316,6 @@ import { vadPush, vadFlush } from './vad.js';
       return value;
     }
   }
-
-
 
   let announceTimer = null;
   let pendingAnnouncement = '';
@@ -1353,12 +1347,6 @@ import { vadPush, vadFlush } from './vad.js';
     };
   }
 
-
-
-
-
-
-
   async function loadWhisper() {
     if (whisper.loadPromise) return whisper.loadPromise;
 
@@ -1380,7 +1368,7 @@ import { vadPush, vadFlush } from './vad.js';
           return;
         }
 
-        if (whisper.drainPromise || whisper.queue.length > 0) await waitForWhisperDrain();
+        if (whisperEngine.isBusy()) await whisperEngine.drainAll();
 
         const previousPipeline = whisper.pipe;
         whisper.pipe = null;
@@ -1472,145 +1460,6 @@ import { vadPush, vadFlush } from './vad.js';
   }
 
   const WHISPER_MAX_QUEUED = 3;
-
-  function enqueueWhisperAudio(audio) {
-    whisper.queue.push({ audio, language: el.lang.value, sessionId: whisper.sessionId, job: metricsSubmit('whisper', audio.length) });
-    // 沒有回壓的話，WASM 退路（RTF 可能大於 1）會讓佇列無限成長，停止時永遠等不完；
-    // 超過上限就丟最舊的一段並提示一次
-    while (whisper.queue.length > WHISPER_MAX_QUEUED) {
-      whisper.queue.shift();
-      if (!whisper.dropWarned) {
-        whisper.dropWarned = true;
-        showToast(t().whisperQueueFull);
-      }
-    }
-    void processWhisperQueue();
-  }
-
-  function processWhisperQueue() {
-    if (whisper.drainPromise) return whisper.drainPromise;
-    const processingSessionId = whisper.sessionId;
-
-    whisper.drainPromise = (async () => {
-      try {
-        while (whisper.queue.length > 0) {
-          const job = whisper.queue.shift();
-          if (!job || job.sessionId !== processingSessionId) continue;
-
-          const pending = whisper.queue.length;
-          el.statusState.textContent = pending > 0 ? `${t().processing}（+${pending}）` : t().processing;
-          try {
-            // Worker 路徑：推論不在主執行緒，UI 不會被 12 秒的 chunk 卡住
-            const output = whisper.pipe === whisperWorkerPipeline
-              ? await whisperWorkerTranscribe(job.audio, job.language)
-              : await whisper.pipe(job.audio, {
-                  language: LANG[job.language],
-                  task: 'transcribe',
-                  chunk_length_s: 15,
-                  stride_length_s: 2
-                });
-            const text = String(output?.text || '').trim();
-            metricsCommit(job.job, text);
-            if (job.sessionId === whisper.sessionId && text) commit(text);
-          } catch (error) {
-            console.error('Whisper inference failed:', error);
-            showToast(t().whisperFailed + (error.message || error));
-            // Worker 路徑會直接帶 deviceLost 旗標；主執行緒路徑只能看訊息內容
-            const msg = String(error?.message || '').toLowerCase();
-            if (error?.deviceLost || msg.includes('device lost') || msg.includes('webgpu') || msg.includes('oom')) {
-              whisper.pipe = null;
-              whisper.model = null;
-              whisper.device = null;
-              el.whisperStatus.textContent = t().whisperDeviceLost;
-              el.whisperStatus.className = 'model-status error';
-            }
-          }
-        }
-      } finally {
-        whisper.drainPromise = null;
-        if (state.running) el.statusState.textContent = t().listening;
-        if (whisper.queue.length > 0) void processWhisperQueue();
-      }
-    })();
-
-    return whisper.drainPromise;
-  }
-
-  async function waitForWhisperDrain() {
-    while (whisper.drainPromise || whisper.queue.length > 0) {
-      await (whisper.drainPromise || processWhisperQueue());
-    }
-  }
-
-  async function startWhisper() {
-    const selectedModel = WHISPER_MODELS[el.whisperModel.value];
-    if (!whisper.pipe || whisper.model !== selectedModel) return showToast(t().loadFirst);
-
-    if (whisper.drainPromise || whisper.queue.length > 0) {
-      state.stopping = true;
-      updateButtons();
-      el.statusState.textContent = t().processing;
-
-      try {
-        await waitForWhisperDrain();
-      } catch (error) {
-        console.error('Failed to drain previous Whisper session:', error);
-        showToast(t().whisperBusy);
-        state.stopping = false;
-        updateButtons();
-        return;
-      }
-      state.stopping = false;
-    }
-
-    begin();
-    state.running = true;
-    state.stopping = false;
-    whisper.sessionId += 1;
-    whisper.queue = [];
-    whisper.dropWarned = false;
-    updateButtons();
-    el.engine.disabled = el.lang.disabled = true;
-
-    const vad = createVad();
-    whisper.vad = vad;
-
-    try {
-      whisper.session = new AudioCapture((chunk, rms) => {
-        if (!state.running || state.stopping) return;
-        const utterance = vadPush(vad, chunk, rms);
-        state.interim = vad.speaking ? t().capturing : '';
-        render();
-        if (utterance) enqueueWhisperAudio(utterance);
-      }, setLevel);
-      await whisper.session.start();
-    } catch (error) {
-      console.error(error);
-      showToast(t().mic);
-      await stopWhisper();
-    }
-  }
-
-  async function stopWhisper() {
-    if (state.stopping) return;
-    state.stopping = true;
-    state.running = false;
-    updateButtons();
-
-    const finalAudio = whisper.vad ? vadFlush(whisper.vad) : null;
-    if (finalAudio) enqueueWhisperAudio(finalAudio);
-
-    try {
-      await whisper.session?.stop();
-    } catch (error) {
-      console.warn('Whisper audio session cleanup failed:', error);
-    } finally {
-      whisper.session = null;
-    }
-
-    await waitForWhisperDrain();
-    finish();
-  }
 
   // ==================== Whistle（Cactus Compute，16.9 MB 本機模型）====================
   // 定位：首次下載量只有 sherpa 的 1/12（16.9 MB vs 199 MB）、Whisper small 的 1/14，
@@ -1738,7 +1587,7 @@ import { vadPush, vadFlush } from './vad.js';
   }
 
   async function clearWhistleCache() {
-    if (whistle.drainPromise || whistle.queue.length > 0) {
+    if (whistleEngine.isBusy()) {
       showToast(t().busyClear);
       return;
     }
@@ -1858,19 +1707,6 @@ import { vadPush, vadFlush } from './vad.js';
     return WHISTLE_LANGS[el.lang.value] || null;
   }
 
-  function enqueueWhistleAudio(audio) {
-    whistle.queue.push({ audio, language: whistleLanguage(), sessionId: whistle.sessionId, job: metricsSubmit('whistle', audio.length) });
-    // 回壓：WASM 的 RTF 約 0.3，但仍比真串流慢；佇列無限成長會讓「停止」等不完
-    while (whistle.queue.length > WHISTLE_MAX_QUEUED) {
-      whistle.queue.shift();
-      if (!whistle.dropWarned) {
-        whistle.dropWarned = true;
-        showToast(t().whistleQueueFull);
-      }
-    }
-    void processWhistleQueue();
-  }
-
   async function whistleTranscribe(audio, language) {
     if (whistle.workerMode) {
       const id = ++whistleWorkerSeq;
@@ -1880,114 +1716,6 @@ import { vadPush, vadFlush } from './vad.js';
       return result;
     }
     return window.WhistleEngine.transcribe(whistle.module, audio, language);
-  }
-
-  function processWhistleQueue() {
-    if (whistle.drainPromise) return whistle.drainPromise;
-    const processingSessionId = whistle.sessionId;
-
-    whistle.drainPromise = (async () => {
-      try {
-        while (whistle.queue.length > 0) {
-          const job = whistle.queue.shift();
-          if (!job || job.sessionId !== processingSessionId) continue;
-
-          const pending = whistle.queue.length;
-          el.statusState.textContent = pending > 0 ? `${t().processing}（+${pending}）` : t().processing;
-          try {
-            const output = await whistleTranscribe(job.audio, job.language);
-            const text = String(output?.text || '').trim();
-            metricsCommit(job.job, text);
-            // Whistle 沒有中文輸出，所以不做簡轉繁（歐洲語言的文字本來就不該進 OpenCC）
-            if (job.sessionId === whistle.sessionId && text) commit(text);
-          } catch (error) {
-            console.error('Whistle inference failed:', error);
-            showToast(t().whistleFailed + (error.message || error));
-          }
-        }
-      } finally {
-        whistle.drainPromise = null;
-        if (state.running) el.statusState.textContent = t().listening;
-        if (whistle.queue.length > 0) void processWhistleQueue();
-      }
-    })();
-
-    return whistle.drainPromise;
-  }
-
-  async function waitForWhistleDrain() {
-    while (whistle.drainPromise || whistle.queue.length > 0) {
-      await (whistle.drainPromise || processWhistleQueue());
-    }
-  }
-
-  async function startWhistle() {
-    if (!whistle.loaded || (!whistle.workerMode && !whistle.module)) return showToast(t().loadFirst);
-
-    if (whistle.drainPromise || whistle.queue.length > 0) {
-      state.stopping = true;
-      updateButtons();
-      el.statusState.textContent = t().processing;
-      try {
-        await waitForWhistleDrain();
-      } catch (error) {
-        console.error('Failed to drain the previous Whistle session:', error);
-        state.stopping = false;
-        updateButtons();
-        return;
-      }
-      state.stopping = false;
-    }
-
-    begin();
-    state.running = true;
-    state.stopping = false;
-    whistle.sessionId += 1;
-    whistle.queue = [];
-    whistle.dropWarned = false;
-    updateButtons();
-    el.engine.disabled = el.lang.disabled = true;
-
-    // 與 Whisper 同一套 VAD，但上限用 10 秒（見 createVad 的實測數字）：
-    // 首字延遲 4.3 s → 2.7 s，總 CPU +13%，仍在引擎的 30 秒上限內
-    const vad = createVad(WHISTLE_SEGMENT_SECONDS);
-    whistle.vad = vad;
-
-    try {
-      whistle.session = new AudioCapture((chunk, rms) => {
-        if (!state.running || state.stopping) return;
-        const utterance = vadPush(vad, chunk, rms);
-        state.interim = vad.speaking ? t().capturing : '';
-        render();
-        if (utterance) enqueueWhistleAudio(utterance);
-      }, setLevel);
-      await whistle.session.start();
-    } catch (error) {
-      console.error(error);
-      showToast(t().mic);
-      await stopWhistle();
-    }
-  }
-
-  async function stopWhistle() {
-    if (state.stopping) return;
-    state.stopping = true;
-    state.running = false;
-    updateButtons();
-
-    const finalAudio = whistle.vad ? vadFlush(whistle.vad) : null;
-    if (finalAudio) enqueueWhistleAudio(finalAudio);
-
-    try {
-      await whistle.session?.stop();
-    } catch (error) {
-      console.warn('Whistle audio session cleanup failed:', error);
-    } finally {
-      whistle.session = null;
-    }
-
-    await waitForWhistleDrain();
-    finish();
   }
 
   // ==================== Underdog Bark 3.0 engine ====================
@@ -2082,7 +1810,7 @@ import { vadPush, vadFlush } from './vad.js';
   }
 
   async function clearUnderdogCache() {
-    if (underdog.drainPromise || underdog.queue.length > 0) {
+    if (underdogEngine.isBusy()) {
       showToast(t().busyClear);
       return;
     }
@@ -2160,129 +1888,10 @@ import { vadPush, vadFlush } from './vad.js';
 
   const UNDERDOG_MAX_QUEUED = 2;
 
-  function enqueueUnderdogAudio(audio) {
-    underdog.queue.push({ audio, sessionId: underdog.sessionId, job: metricsSubmit('underdog', audio.length) });
-    // 回壓：單執行緒 WASM 的 RTF 約 1.2（比即時慢），佇列不設上限的話「停止」會等不完
-    while (underdog.queue.length > UNDERDOG_MAX_QUEUED) {
-      underdog.queue.shift();
-      if (!underdog.dropWarned) {
-        underdog.dropWarned = true;
-        showToast(t().underdogQueueFull);
-      }
-    }
-    void processUnderdogQueue();
-  }
-
   async function underdogTranscribe(audio) {
     const id = ++underdogSeq;
     const copy = audio.slice();
     return underdogRequest({ type: 'transcribe', id, audio: copy }, [copy.buffer]);
-  }
-
-  function processUnderdogQueue() {
-    if (underdog.drainPromise) return underdog.drainPromise;
-    const processingSessionId = underdog.sessionId;
-
-    underdog.drainPromise = (async () => {
-      try {
-        while (underdog.queue.length > 0) {
-          const job = underdog.queue.shift();
-          if (!job || job.sessionId !== processingSessionId) continue;
-
-          const pending = underdog.queue.length;
-          el.statusState.textContent = pending > 0 ? `${t().processing}（+${pending}）` : t().processing;
-          try {
-            const output = await underdogTranscribe(job.audio);
-            const text = String(output?.text || '').trim();
-            metricsCommit(job.job, text);
-            // 英文模型，不做簡轉繁；沒有內容就靜默跳過（VAD 切出來的靜音段很常見）
-            if (job.sessionId === underdog.sessionId && text) commit(text);
-          } catch (error) {
-            console.error('Underdog inference failed:', error);
-            showToast(t().underdogFailed + (error.message || error));
-          }
-        }
-      } finally {
-        underdog.drainPromise = null;
-        if (state.running) el.statusState.textContent = t().listening;
-        if (underdog.queue.length > 0) void processUnderdogQueue();
-      }
-    })();
-
-    return underdog.drainPromise;
-  }
-
-  async function waitForUnderdogDrain() {
-    while (underdog.drainPromise || underdog.queue.length > 0) {
-      await (underdog.drainPromise || processUnderdogQueue());
-    }
-  }
-
-  async function startUnderdog() {
-    if (!underdog.loaded) return showToast(t().loadFirst);
-
-    if (underdog.drainPromise || underdog.queue.length > 0) {
-      state.stopping = true;
-      updateButtons();
-      el.statusState.textContent = t().processing;
-      try {
-        await waitForUnderdogDrain();
-      } catch (error) {
-        console.error('Failed to drain the previous Underdog session:', error);
-        state.stopping = false;
-        updateButtons();
-        return;
-      }
-      state.stopping = false;
-    }
-
-    begin();
-    state.running = true;
-    state.stopping = false;
-    underdog.sessionId += 1;
-    underdog.queue = [];
-    underdog.dropWarned = false;
-    updateButtons();
-    el.engine.disabled = el.lang.disabled = true;
-
-    const vad = createVad(UNDERDOG_SEGMENT_SECONDS);
-    underdog.vad = vad;
-
-    try {
-      underdog.session = new AudioCapture((chunk, rms) => {
-        if (!state.running || state.stopping) return;
-        const utterance = vadPush(vad, chunk, rms);
-        state.interim = vad.speaking ? t().capturing : '';
-        render();
-        if (utterance) enqueueUnderdogAudio(utterance);
-      }, setLevel);
-      await underdog.session.start();
-    } catch (error) {
-      console.error(error);
-      showToast(t().mic);
-      await stopUnderdog();
-    }
-  }
-
-  async function stopUnderdog() {
-    if (state.stopping) return;
-    state.stopping = true;
-    state.running = false;
-    updateButtons();
-
-    const finalAudio = underdog.vad ? vadFlush(underdog.vad) : null;
-    if (finalAudio) enqueueUnderdogAudio(finalAudio);
-
-    try {
-      await underdog.session?.stop();
-    } catch (error) {
-      console.warn('Underdog audio session cleanup failed:', error);
-    } finally {
-      underdog.session = null;
-    }
-
-    await waitForUnderdogDrain();
-    finish();
   }
 
   // ==================== 量測（Phase 0）====================
@@ -2439,7 +2048,6 @@ import { vadPush, vadFlush } from './vad.js';
   }
 
   // 拉丁字母為主才翻：中文引擎的輸出丟進 en→zh 只會被翻壞
-
 
   async function toTraditional(text) {
     if (mt.script !== 'zh-Hant') return text;
@@ -2768,14 +2376,87 @@ import { vadPush, vadFlush } from './vad.js';
     }
   }
 
+  // ==================== 引擎介面收斂（Phase 2）====================
+  // Whisper / Whistle / Underdog 三個批次引擎的「排隊 → 推論 → commit → 等收尾」現在只有
+  // 一份實作（src/engines/batch.js），這裡只填三份差異：可不可以開始、要帶什麼參數、
+  // 怎麼推論、失敗怎麼講。runtime 直接傳引擎自己的狀態物件，所以 `whistle.queue`
+  // 這類既有讀取方式仍然成立。
+  const engineCtx = {
+    el, t, state, commit, showToast, AudioCapture, createVad, vadPush, vadFlush,
+    setLevel, render, begin, finish, updateButtons, metricsSubmit, metricsCommit,
+  };
+
+  const whisperEngine = createBatchPipeline(engineCtx, {
+    id: 'whisper',
+    role: 'refine',
+    runtime: whisper,
+    segmentSeconds: 15,
+    maxQueued: WHISPER_MAX_QUEUED,
+    queueFullMessage: () => t().whisperQueueFull,
+    canStart: () => !!whisper.pipe && whisper.model === WHISPER_MODELS[el.whisperModel.value],
+    describe: () => ({ language: el.lang.value }),
+    transcribe: async job => {
+      // Worker 路徑：推論不在主執行緒，UI 不會被長時間的 chunk 卡住
+      const output = whisper.pipe === whisperWorkerPipeline
+        ? await whisperWorkerTranscribe(job.audio, job.language)
+        : await whisper.pipe(job.audio, {
+            language: LANG[job.language],
+            task: 'transcribe',
+            chunk_length_s: 15,
+            stride_length_s: 2,
+          });
+      return output?.text || '';
+    },
+    onInferenceError: error => {
+      showToast(t().whisperFailed + (error.message || error));
+      // Worker 路徑會直接帶 deviceLost 旗標；主執行緒路徑只能看訊息內容
+      const msg = String(error?.message || '').toLowerCase();
+      if (error?.deviceLost || msg.includes('device lost') || msg.includes('webgpu') || msg.includes('oom')) {
+        whisper.pipe = null;
+        whisper.model = null;
+        whisper.device = null;
+        el.whisperStatus.textContent = t().whisperDeviceLost;
+        el.whisperStatus.className = 'model-status error';
+      }
+    },
+  });
+
+  const whistleEngine = createBatchPipeline(engineCtx, {
+    id: 'whistle',
+    role: 'refine',
+    runtime: whistle,
+    segmentSeconds: WHISTLE_SEGMENT_SECONDS,
+    maxQueued: WHISTLE_MAX_QUEUED,
+    queueFullMessage: () => t().whistleQueueFull,
+    canStart: () => whistle.loaded && (whistle.workerMode || !!whistle.module),
+    describe: () => ({ language: whistleLanguage() }),
+    transcribe: async job => (await whistleTranscribe(job.audio, job.language))?.text || '',
+    onInferenceError: error => showToast(t().whistleFailed + (error.message || error)),
+  });
+
+  const underdogEngine = createBatchPipeline(engineCtx, {
+    id: 'underdog',
+    role: 'refine',
+    runtime: underdog,
+    segmentSeconds: UNDERDOG_SEGMENT_SECONDS,
+    maxQueued: UNDERDOG_MAX_QUEUED,
+    queueFullMessage: () => t().underdogQueueFull,
+    canStart: () => underdog.loaded,
+    transcribe: async job => (await underdogTranscribe(job.audio))?.text || '',
+    onInferenceError: error => showToast(t().underdogFailed + (error.message || error)),
+  });
+
+  // 引擎註冊表：`toggle()` 與 UI 只認這個介面。
+  // 還沒收斂的四個引擎形狀本來就不同（sherpa 是真串流、vosk 有自己的 recognizer、
+  // moss 是雲端批次、webspeech 是瀏覽器 API），所以先包成 { start, stop, role }。
   const ENGINES = {
-    vosk: { start: startVosk, stop: stopVosk },
-    sherpa: { start: startSherpa, stop: stopSherpa },
-    whisper: { start: startWhisper, stop: stopWhisper },
-    whistle: { start: startWhistle, stop: stopWhistle },
-    underdog: { start: startUnderdog, stop: stopUnderdog },
-    webspeech: { start: startWeb, stop: stopWeb },
-    moss: { start: () => showToast(t().mossBatchMode), stop: () => {} }
+    vosk: { role: 'live', start: startVosk, stop: stopVosk },
+    sherpa: { role: 'live', start: startSherpa, stop: stopSherpa },
+    whisper: whisperEngine,
+    whistle: whistleEngine,
+    underdog: underdogEngine,
+    webspeech: { role: 'fallback', start: startWeb, stop: stopWeb },
+    moss: { role: 'cloud', start: () => showToast(t().mossBatchMode), stop: () => {} },
   };
 
   async function toggle() {
@@ -3314,7 +2995,7 @@ import { vadPush, vadFlush } from './vad.js';
   el.toggle.onclick = () => setUi(state.ui === 'zh' ? 'en' : 'zh');
 
   el.clear.onclick = () => {
-    if (state.running || state.stopping || whisper.drainPromise || moss.running) return showToast(t().busyClear);
+    if (state.running || state.stopping || whisperEngine.isBusy() || moss.running) return showToast(t().busyClear);
 
     clearWebRestartTimer();
     clearWebErrorTimer();
@@ -3324,11 +3005,8 @@ import { vadPush, vadFlush } from './vad.js';
     state.start = null;
     state.manualStop = false;
     state.webRecognitionActive = false;
-    whisper.queue = [];
-    whisper.vad = null;
-    underdog.queue = [];
-    underdog.vad = null;
-    underdog.dropWarned = false;
+    whisperEngine.reset();
+    underdogEngine.reset();
     moss.segments = [];
     el.mossSrt.disabled = true;
 
